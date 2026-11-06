@@ -682,7 +682,7 @@ func TestARecachedKeyOutlivesItsOldPlace(t *testing.T) {
 func TestAnExtensionJudgesEveryAnswer(t *testing.T) {
 	c, clk := newCache(10)
 	var calls atomic.Int32
-	c.Extend(&Extension{TTL: testTTL * 10, Since: clk.Now()})
+	c.Extend(&Extension{TTL: testTTL * 10, Since: clk.Now(), Until: clk.Now().Add(testTTL * 100)})
 	clk.advance(time.Nanosecond)
 	if _, _, err := c.Get(t.Context(), "a", counted(false, &calls)); err != nil {
 		t.Fatal(err)
@@ -703,6 +703,26 @@ func TestAnExtensionJudgesEveryAnswer(t *testing.T) {
 	}
 }
 
+// Past its Until an Extension serves nothing longer: every answer is on
+// the cache's TTL, as with none.
+func TestAnExtensionEndsAtItsUntil(t *testing.T) {
+	c, clk := newCache(10)
+	var calls atomic.Int32
+	c.Extend(&Extension{TTL: testTTL * 10, Since: clk.Now(), Until: clk.Now().Add(testTTL * 2)})
+	clk.advance(time.Nanosecond)
+	if _, _, err := c.Get(t.Context(), "a", counted(false, &calls)); err != nil {
+		t.Fatal(err)
+	}
+	clk.advance(testTTL)
+	if _, _, _ = c.Get(t.Context(), "a", counted(false, &calls)); calls.Load() != 1 {
+		t.Fatalf("before Until: %d lookups, want the answer served", calls.Load())
+	}
+	clk.advance(testTTL)
+	if _, _, _ = c.Get(t.Context(), "a", counted(false, &calls)); calls.Load() != 2 {
+		t.Errorf("past Until: %d lookups, want the answer read again", calls.Load())
+	}
+}
+
 // An Extension serves longer only the answers read since it began: one
 // read before keeps the cache's own TTL, whenever the Extension came into
 // force, and is swept by it while a later answer is kept.
@@ -713,7 +733,7 @@ func TestAnExtensionCoversOnlyTheAnswersReadSince(t *testing.T) {
 		t.Fatal(err)
 	}
 	clk.advance(testTTL / 2)
-	c.Extend(&Extension{TTL: testTTL * 10, Since: clk.Now()})
+	c.Extend(&Extension{TTL: testTTL * 10, Since: clk.Now(), Until: clk.Now().Add(testTTL * 100)})
 	clk.advance(time.Nanosecond)
 	if _, _, err := c.Get(t.Context(), "since", counted(false, &calls)); err != nil {
 		t.Fatal(err)
@@ -743,7 +763,7 @@ const forgetRounds = 100
 func TestTheOrderStaysBoundedUnderForget(t *testing.T) {
 	const bound = 4
 	c, _ := newCache(bound)
-	c.Extend(&Extension{TTL: testTTL * 10})
+	c.Extend(&Extension{TTL: testTTL * 10, Until: time.Unix(0, 0).Add(testTTL * 100)})
 	var calls atomic.Int32
 	for round := range forgetRounds {
 		keys := []string{keyName(round % fuzzKeys), keyName((round + 1) % fuzzKeys), keyName((round + 2) % fuzzKeys)}

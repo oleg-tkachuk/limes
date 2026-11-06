@@ -223,12 +223,14 @@ func (c *Cache[K]) Now() time.Time { return c.cfg.Now() }
 // cache's own: a revocation signal that listens vouches for them, as it
 // cannot for one read before it began to, which may have missed a
 // revocation made while nothing listened. One read at Since itself cannot
-// be told from one read before, and is not covered. TTL is no shorter than the
+// be told from one read before, and is not covered. It holds while the
+// clock is before Until, the lease the signals vouch for: past it, every
+// answer is judged by the cache's TTL, as with none. TTL is no shorter than the
 // cache's, so an answer read later never expires sooner, and the expiry
 // order stays the order the answers were read in.
 type Extension struct {
-	TTL   time.Duration
-	Since time.Time
+	TTL          time.Duration
+	Since, Until time.Time
 }
 
 // Extend puts ext in force, every answer cached already judged by it; nil
@@ -250,7 +252,7 @@ func (c *Cache[K]) judge(now time.Time) judge {
 
 // ttlOf is how long an answer read at at is served.
 func (j judge) ttlOf(at time.Time) time.Duration {
-	if j.ext != nil && at.After(j.ext.Since) {
+	if j.ext != nil && j.now.Before(j.ext.Until) && at.After(j.ext.Since) {
 		return j.ext.TTL
 	}
 	return j.ttl

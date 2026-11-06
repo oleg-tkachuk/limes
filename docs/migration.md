@@ -81,6 +81,32 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
   requires; one that still reports it as seen is read as a replay. A
   client mapping by category retries `exhausted` later; one branching on
   `proof_replayed` no longer sees this case there.
+- `RevocationSignal.Listening()` is `Listening(lease time.Duration)`, and
+  a signal renews its lease with `RevocationSignal.Renew()` each time it
+  knows itself still listening: a notification heard, a connection
+  checked. A lease that lapses unrenewed puts the cache back on its TTL,
+  counted in `RevocationCacheStats.SyncsLost`, where a signal that died
+  without `NotListening` once kept `SyncedTTL` for as long as it was set.
+  A signal of your own passes a lease longer than the longest gap between
+  two of its checks, and calls `Renew` on each:
+
+  ```go
+  // before
+  signal.Listening()
+  // after
+  signal.Listening(3 * heartbeat)
+  // ... and on every notification or successful ping:
+  signal.Renew()
+  ```
+
+  `pgstore.RevocationWatcher` does both from the pgstore release that
+  requires this one; an older pgstore does not build against it.
+- `Listening`, and the `Close` that leaves every open signal listening, no
+  longer clear the cache, and `RevocationCacheStats.Syncs` is no longer a
+  part of `Clears`: an answer read before the signal last began to listen
+  is served for `TTL` from when it was read, and only one read since for
+  `SyncedTTL`. Clears less `SignalsWhole` and `ClearsWithoutLineage` is
+  the Clears the consumer asked for itself.
 
 ## exchange/v0.19.0
 

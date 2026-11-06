@@ -17,6 +17,10 @@ const (
 	syncedTTL   = time.Hour
 )
 
+// testSignalLease is the lease the tests' signals listen with: longer than
+// any of them moves the clock, but for those that let it lapse.
+const testSignalLease = 2 * limes.MaxRevocationCacheSyncedTTL
+
 // testClock is a time that moves only when told to.
 type testClock struct {
 	mu  sync.Mutex
@@ -70,7 +74,7 @@ func TestSyncedTTLHoldsOnlyWhileASignalVouches(t *testing.T) {
 		t.Error("Synced before Listening")
 	}
 
-	signal.Listening()
+	signal.Listening(testSignalLease)
 	if st := cache.Stats(); !st.Synced || st.Syncs != 1 || st.Clears != 0 {
 		t.Errorf("after Listening: Stats = %+v; want synced, one sync, no clear", st)
 	}
@@ -116,7 +120,7 @@ func TestSyncedTTLBounds(t *testing.T) {
 	ctx := context.Background()
 	clk := &testClock{now: time.Now()}
 	cache := newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: s.records, TTL: unsyncedTTL, Now: clk.Now})
-	cache.NewSignal().Listening()
+	cache.NewSignal().Listening(testSignalLease)
 	c, _ := s.issue()
 	if _, err := cache.IsRevoked(ctx, c.ID); err != nil {
 		t.Fatal(err)
@@ -142,7 +146,7 @@ func TestStatsTellTheCausesOfAClear(t *testing.T) {
 	cache := newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: s.records, Now: clk.Now})
 	c, _ := s.issue()
 	signal := cache.NewSignal()
-	signal.Listening()
+	signal.Listening(testSignalLease)
 	if _, err := cache.IsRevoked(ctx, c.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +183,7 @@ func TestStatsPartsNeverExceedClears(t *testing.T) {
 	signal := cache.NewSignal()
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
-	for _, clear := range []func(){signal.Listening, signal.RevokedAll, func() { cache.ClearRevoked(uuid.New()) }} {
+	for _, clear := range []func(){func() { signal.Listening(testSignalLease) }, signal.RevokedAll, func() { cache.ClearRevoked(uuid.New()) }} {
 		wg.Go(func() {
 			for {
 				select {
@@ -213,7 +217,7 @@ func TestLastSyncLossAtTheEpoch(t *testing.T) {
 	epoch := time.Unix(0, 0).UTC()
 	cache := newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: s.records, Now: func() time.Time { return epoch }})
 	signal := cache.NewSignal()
-	signal.Listening()
+	signal.Listening(testSignalLease)
 	signal.NotListening()
 	if st := cache.Stats(); st.SyncsLost != 1 || st.LastSyncLoss.IsZero() || !st.LastSyncLoss.Equal(epoch) {
 		t.Errorf("Stats after a loss at the epoch = %+v; want LastSyncLoss %s", st, epoch)
@@ -234,11 +238,11 @@ func TestSyncedOnlyWhileEverySignalListens(t *testing.T) {
 		t.Error("synced with no signal open")
 	}
 	a, b := cache.NewSignal(), cache.NewSignal()
-	a.Listening()
+	a.Listening(testSignalLease)
 	if synced() {
 		t.Error("synced with one of two signals listening")
 	}
-	b.Listening()
+	b.Listening(testSignalLease)
 	if !synced() {
 		t.Error("not synced with both signals listening")
 	}
@@ -247,7 +251,7 @@ func TestSyncedOnlyWhileEverySignalListens(t *testing.T) {
 		t.Error("synced after one of two signals was lost")
 	}
 	a.NotListening()
-	a.Listening()
+	a.Listening(testSignalLease)
 	if synced() {
 		t.Error("synced after the other signal reconnected while the lost one is still down")
 	}
@@ -256,8 +260,8 @@ func TestSyncedOnlyWhileEverySignalListens(t *testing.T) {
 	if st := cache.Stats(); st.SyncsLost != lost {
 		t.Errorf("a loss of a signal not listening counted: SyncsLost %d, want %d", st.SyncsLost, lost)
 	}
-	a.Listening() // a reconnect, counted once
-	b.Listening()
+	a.Listening(testSignalLease) // a reconnect, counted once
+	b.Listening(testSignalLease)
 	if !synced() {
 		t.Error("not synced once both signals listen again")
 	}
@@ -270,7 +274,7 @@ func TestSyncedOnlyWhileEverySignalListens(t *testing.T) {
 		t.Error("synced with no signal open")
 	}
 	syncs := cache.Stats().Syncs
-	a.Listening()
+	a.Listening(testSignalLease)
 	if st := cache.Stats(); st.Synced || st.Syncs != syncs {
 		t.Errorf("a closed signal's Listening: Stats = %+v; want nothing changed", st)
 	}
@@ -313,8 +317,8 @@ func TestClosingALostSignalKeepsTheOlderAnswersOnTTL(t *testing.T) {
 	clk := &testClock{now: time.Now()}
 	cache := newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: s.records, TTL: unsyncedTTL, SyncedTTL: syncedTTL, Now: clk.Now})
 	kept, lost := cache.NewSignal(), cache.NewSignal()
-	kept.Listening()
-	lost.Listening()
+	kept.Listening(testSignalLease)
+	lost.Listening(testSignalLease)
 	lost.NotListening()
 	c, _ := s.issue()
 	if revoked, err := cache.IsRevoked(ctx, c.ID); err != nil || revoked {
@@ -350,7 +354,7 @@ func TestAReconnectDropsNothingAndKeepsTheGapOnTTL(t *testing.T) {
 	clk := &testClock{now: time.Now()}
 	cache := newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: s.records, TTL: unsyncedTTL, SyncedTTL: syncedTTL, Now: clk.Now})
 	signal := cache.NewSignal()
-	signal.Listening()
+	signal.Listening(testSignalLease)
 	ask := func(c limes.Capability) bool {
 		t.Helper()
 		revoked, err := cache.IsRevoked(ctx, c.ID)
@@ -370,7 +374,7 @@ func TestAReconnectDropsNothingAndKeepsTheGapOnTTL(t *testing.T) {
 	if _, err := s.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: held[0].ID}); err != nil {
 		t.Fatal(err)
 	}
-	signal.Listening()
+	signal.Listening(testSignalLease)
 	clk.advance(time.Millisecond)
 	lookups := cache.Stats().Capabilities.Lookups
 	for _, c := range held[1:] {
@@ -391,5 +395,99 @@ func TestAReconnectDropsNothingAndKeepsTheGapOnTTL(t *testing.T) {
 	clk.advance(unsyncedTTL)
 	if ask(after) {
 		t.Error("an answer read after the reconnect not served for SyncedTTL")
+	}
+}
+
+// shortLease is the lease the lapse checks listen with: past TTL, short of
+// SyncedTTL.
+const shortLease = 10 * unsyncedTTL
+
+// A signal that stops renewing without a word lets its lease lapse: the
+// cache falls back to TTL then, the lapse is counted once, as lost when it
+// lapsed, and a NotListening after counts no second loss.
+func TestALapsedLeaseFallsBackToTTL(t *testing.T) {
+	ctx := context.Background()
+	s := newExampleStack()
+	clk := &testClock{now: time.Now()}
+	cache := newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: s.records, TTL: unsyncedTTL, SyncedTTL: syncedTTL, Now: clk.Now})
+	signal := cache.NewSignal()
+	signal.Listening(shortLease)
+	lapse := clk.Now().Add(shortLease)
+	clk.advance(time.Millisecond)
+	c, _ := s.issue()
+	if revoked, err := cache.IsRevoked(ctx, c.ID); err != nil || revoked {
+		t.Fatalf("before the revocation: %v, %v", revoked, err)
+	}
+	if _, err := s.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: c.ID}); err != nil {
+		t.Fatal(err)
+	}
+	clk.advance(shortLease)
+	if revoked, err := cache.IsRevoked(ctx, c.ID); err != nil || !revoked {
+		t.Errorf("past the lease: %v, %v; want the revocation seen, TTL in force", revoked, err)
+	}
+	st := cache.Stats()
+	if st.Synced || st.SyncsLost != 1 || !st.LastSyncLoss.Equal(lapse) {
+		t.Errorf("past the lease: Stats = %+v; want not synced, one loss at %s", st, lapse)
+	}
+	signal.NotListening()
+	if st := cache.Stats(); st.SyncsLost != 1 {
+		t.Errorf("a NotListening after the lapse: SyncsLost %d, want the one lapse", st.SyncsLost)
+	}
+}
+
+// Renewed within its lease, a signal keeps the cache synced with no new
+// sync, its answers served on; renewed after it lapsed, it counts as a
+// Listening: synced again, one sync more, and the answers read before on
+// TTL.
+func TestRenewHoldsTheLeaseOrListensAgain(t *testing.T) {
+	ctx := context.Background()
+	s := newExampleStack()
+	clk := &testClock{now: time.Now()}
+	cache := newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: s.records, TTL: unsyncedTTL, SyncedTTL: syncedTTL, Now: clk.Now})
+	signal := cache.NewSignal()
+	signal.Listening(shortLease)
+	clk.advance(time.Millisecond)
+	c, _ := s.issue()
+	if _, err := cache.IsRevoked(ctx, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		clk.advance(shortLease / 2)
+		signal.Renew()
+	}
+	lookups := cache.Stats().Capabilities.Lookups
+	if _, err := cache.IsRevoked(ctx, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	if st := cache.Stats(); !st.Synced || st.Syncs != 1 || st.SyncsLost != 0 || st.Capabilities.Lookups != lookups {
+		t.Errorf("renewed in time: Stats = %+v; want synced, one sync, the answer served", st)
+	}
+	clk.advance(shortLease)
+	signal.Renew()
+	if st := cache.Stats(); !st.Synced || st.Syncs != 2 || st.SyncsLost != 1 {
+		t.Errorf("renewed after a lapse: Stats = %+v; want synced, two syncs, one loss", st)
+	}
+	if _, err := cache.IsRevoked(ctx, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	if st := cache.Stats(); st.Capabilities.Lookups != lookups+1 {
+		t.Errorf("renewed after a lapse: %d lookups; want the answer read before asked again", st.Capabilities.Lookups-lookups)
+	}
+}
+
+// A lease that is not positive vouches for nothing, and a signal not
+// listening renews nothing.
+func TestNoLeaseNoSync(t *testing.T) {
+	s := newExampleStack()
+	cache := newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: s.records, TTL: unsyncedTTL, SyncedTTL: syncedTTL})
+	signal := cache.NewSignal()
+	signal.Renew()
+	if cache.Stats().Synced {
+		t.Error("synced by a Renew before Listening")
+	}
+	signal.Listening(0)
+	signal.Renew()
+	if st := cache.Stats(); st.Synced || st.Syncs != 1 {
+		t.Errorf("a lease of zero, renewed: Stats = %+v; want not synced, the one sync", st)
 	}
 }
