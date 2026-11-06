@@ -96,7 +96,7 @@ func InstrumentRevocationCache(cache *limes.RevocationCache, opts ...Option) (me
 	entries, errs[4] = meter.Int64ObservableGauge(metricCacheEntries,
 		metric.WithDescription("Answers the cache holds, by kind."))
 	clears, errs[5] = meter.Int64ObservableCounter(metricCacheClears,
-		metric.WithDescription("Whole clears of the cache: the consumer's own Clear, and those of a signal's Listening and RevokedAll and of a ClearRevoked without lineage."))
+		metric.WithDescription("Whole clears of the cache: the consumer's own Clear, and those of a signal's RevokedAll and of a ClearRevoked without lineage."))
 	narrowClears, errs[6] = meter.Int64ObservableCounter(metricCacheNarrowClears,
 		metric.WithDescription("Calls to RevocationCache.ClearRevoked that dropped only what a revocation outdates."))
 	clearsWithoutLineage, errs[7] = meter.Int64ObservableCounter(metricCacheClearsWithoutLineage,
@@ -104,11 +104,11 @@ func InstrumentRevocationCache(cache *limes.RevocationCache, opts ...Option) (me
 	lineage, errs[8] = meter.Int64ObservableGauge(metricCacheLineage,
 		metric.WithDescription("1 when the cache's upstream names each answer's ancestors, so ClearRevoked is narrow; 0 otherwise."))
 	synced, errs[9] = meter.Int64ObservableGauge(metricCacheSynced,
-		metric.WithDescription("1 while a revocation signal vouches for the cache and SyncedTTL bounds its answers; 0 while TTL does."))
+		metric.WithDescription("1 while revocation signals vouch for the cache, every lease held, and SyncedTTL bounds the answers read since they listen; 0 while TTL bounds every one."))
 	syncs, errs[10] = meter.Int64ObservableCounter(metricCacheSyncs,
-		metric.WithDescription("Times revocation signals made the cache synced afresh — each Listening, and a Close that left every open signal listening — each a clear."))
+		metric.WithDescription("Times revocation signals made the cache synced afresh: each Listening, each Renew after a lapsed lease, and a Close that left every open signal listening."))
 	syncsLost, errs[11] = meter.Int64ObservableCounter(metricCacheSyncsLost,
-		metric.WithDescription("Calls to RevocationSignal.NotListening: the watchers' lost connections."))
+		metric.WithDescription("Revocation signals lost: each RevocationSignal.NotListening, a watcher's lost connection, and each lease that lapsed unrenewed."))
 	lastSyncLoss, errs[12] = meter.Int64ObservableGauge(metricCacheLastSyncLoss, metric.WithUnit(unitSeconds),
 		metric.WithDescription("When the revocation signal was last lost, in seconds since the Unix epoch; not reported before the first loss."))
 	signals, errs[13] = meter.Int64ObservableCounter(metricCacheSignals,
