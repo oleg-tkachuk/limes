@@ -2,6 +2,14 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.170.0](https://github.com/oleg-tkachuk/limes/compare/v0.169.0...v0.170.0) (2026-11-06)
+
+### Features
+
+* add a Revoker that logs and reports every revocation ([88f6934](https://github.com/oleg-tkachuk/limes/commit/88f6934b19b64932ab0bfc4516dc94e455fdae0f))
+* **events:** report a revocation's duration as the issuer's and verifier's ([7d92cab](https://github.com/oleg-tkachuk/limes/commit/7d92cab1ef3631404c137be3116f7f400ff4f3c2))
+* **events:** report each call's duration to the log and the events ([4404a35](https://github.com/oleg-tkachuk/limes/commit/4404a35f2f4a06220941f7a3a66af56c5887c3ef))
+
 ## [0.169.0](https://github.com/oleg-tkachuk/limes/compare/v0.168.0...v0.169.0) (2026-11-06)
 
 ### ⚠ BREAKING CHANGES

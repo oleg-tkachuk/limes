@@ -2,6 +2,20 @@
 
 Every release of the exchange module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.21.0](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.20.0...exchange%2Fv0.21.0) (2026-11-06)
+
+### ⚠ BREAKING CHANGES
+
+* **exchange:** grant no scope when a policy names none
+
+### Bug Fixes
+
+* **exchange:** grant no scope when a policy names none ([3c2da18](https://github.com/oleg-tkachuk/limes/commit/3c2da18b185c8eef753f3d956c88183a5e4c7169))
+
+### Dependencies
+
+* require limes v0.170.0
+
 ## [0.20.0](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.19.0...exchange%2Fv0.20.0) (2026-11-06)
 
 ### ⚠ BREAKING CHANGES
