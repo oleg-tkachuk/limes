@@ -166,8 +166,9 @@ type Grant struct {
 // understand (RFC 9396 §5). Its IssueRequest's
 // Audience must be drawn from the grant's resources and audiences, or be
 // empty to take them all; its ConfirmationJKT must be empty, the Exchanger
-// setting it from the proof; its TTL is capped at the subject token's
-// remaining lifetime. Nothing is granted that the policy did not choose:
+// setting it from the proof; its TTL, the Issuer's default when zero
+// (limes.Issuer.DefaultTTL), is capped at the subject token's remaining
+// lifetime. Nothing is granted that the policy did not choose:
 // there is no default policy. A subject token may be exchanged again and
 // again until it expires, each exchange issuing a capability of its own,
 // with ceilings of its own, unless Config.Exchanges issues one capability
@@ -198,10 +199,6 @@ const (
 	// capability (RFC 8693 §3): a URI of this module's own.
 	IssuedTokenTypeCapability = "https://github.com/oleg-tkachuk/limes/exchange#capability" //nolint:gosec // G101: a token type URI, not a credential
 )
-
-// DefaultTTL is a capability's lifetime when the policy names none, still
-// capped at the subject token's.
-const DefaultTTL = 15 * time.Minute
 
 // minTTL is the shortest lifetime an issued capability may have: Issue
 // counts lifetimes in whole seconds.
@@ -240,8 +237,8 @@ type Config struct {
 	// a proof by another key than the capability is bound to, or none for a
 	// bound one, or one for a bearer one, is refused; one asking for other
 	// targets than the capability's audience is refused; and a policy that
-	// names no TTL gets the subject token's remaining lifetime, not
-	// DefaultTTL. The policy still runs on every exchange: it names the
+	// names no TTL gets the subject token's remaining lifetime, not the
+	// Issuer's default. The policy still runs on every exchange: it names the
 	// tenant. Nil: every exchange issues a capability of its own. The
 	// Issuer's store must read records back (limes.RecordReader), as every
 	// limes.Store does.
@@ -507,7 +504,9 @@ func (e *Exchanger) grant(ctx context.Context, req Request, subject Subject, rem
 		return limes.IssueRequest{}, fmt.Errorf("%w: it acts on behalf of %q, not the subject token's %q", errPolicy, issue.OnBehalfOf.Subject, subject.Subject)
 	}
 	if issue.TTL == 0 {
-		issue.TTL = DefaultTTL
+		// The issuer's default, named here so it is capped below as a
+		// policy's own lifetime is.
+		issue.TTL = e.cfg.Issuer.DefaultTTL()
 		if e.cfg.Exchanges != nil {
 			// One capability per subject token: one shorter than the token
 			// would leave the rest of its life refused.

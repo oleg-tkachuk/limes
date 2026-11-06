@@ -16,8 +16,8 @@ import (
 // concurrency check.
 const racingExchanges = 8
 
-// longSubjectTTL is a subject token's lifetime past DefaultTTL, so a
-// capability that takes the token's own lifetime is told apart.
+// longSubjectTTL is a subject token's lifetime past the issuer's default
+// one, so a capability that takes the token's own lifetime is told apart.
 const longSubjectTTL = time.Hour
 
 // Exchanged again, a subject token yields the capability its first
@@ -206,7 +206,8 @@ func TestAnotherAudienceIsRefused(t *testing.T) {
 }
 
 // A policy that names no lifetime gives the capability the subject token's
-// own, not DefaultTTL: one capability per token must last as long as it.
+// own, not the issuer's default: one capability per token must last as long
+// as it.
 func TestTheCapabilityLivesAsLongAsTheToken(t *testing.T) {
 	claims := with(accessClaims(), map[string]any{claimExpiry: testNow.Add(longSubjectTTL).Unix()})
 	for name, tc := range map[string]struct {
@@ -214,10 +215,33 @@ func TestTheCapabilityLivesAsLongAsTheToken(t *testing.T) {
 		want        time.Duration
 	}{
 		"one per token": {onePerToken: true, want: longSubjectTTL},
-		"one each time": {onePerToken: false, want: DefaultTTL},
+		"one each time": {onePerToken: false, want: limes.DefaultIssueTTL},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture(t, fixtureConfig{onePerToken: tc.onePerToken, noDPoP: true})
+			res, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, typeAccessToken, claims)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := res.Capability.ExpiresAt.Sub(testNow); got != tc.want {
+				t.Errorf("the capability lives %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+// A policy that names no lifetime gives the capability the issuer's default
+// one (IssuerConfig.DefaultTTL), capped at the subject token's remaining.
+func TestTheIssuersDefaultLifetimeIsTheCapabilitys(t *testing.T) {
+	claims := with(accessClaims(), map[string]any{claimExpiry: testNow.Add(longSubjectTTL).Unix()})
+	for name, tc := range map[string]struct {
+		issuerTTL, want time.Duration
+	}{
+		"shorter than the token": {issuerTTL: longSubjectTTL / 2, want: longSubjectTTL / 2},
+		"longer than the token":  {issuerTTL: 2 * longSubjectTTL, want: longSubjectTTL},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t, fixtureConfig{noDPoP: true, issuerTTL: tc.issuerTTL})
 			res, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, typeAccessToken, claims)))
 			if err != nil {
 				t.Fatal(err)

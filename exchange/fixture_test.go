@@ -162,6 +162,9 @@ type fixtureConfig struct {
 	capabilityNonces bool
 	// onePerToken issues one capability per subject token (Config.Exchanges).
 	onePerToken bool
+	// issuerTTL is the issuer's IssuerConfig.DefaultTTL; zero takes its
+	// default.
+	issuerTTL time.Duration
 }
 
 func newFixture(t testing.TB, fc fixtureConfig) *fixture {
@@ -183,7 +186,7 @@ func newFixture(t testing.TB, fc fixtureConfig) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	issuer, err := limes.NewIssuer(limes.IssuerConfig{Signer: signer, Store: f.store, IssuerName: limesIssuer, Now: clock, Biscuit: copyForm{}})
+	issuer, err := limes.NewIssuer(limes.IssuerConfig{Signer: signer, Store: f.store, IssuerName: limesIssuer, Now: clock, Biscuit: copyForm{}, DefaultTTL: fc.issuerTTL})
 	if err != nil {
 		t.Fatal(err)
 	}
