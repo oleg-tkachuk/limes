@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"time"
 	"uuid"
@@ -776,7 +777,7 @@ func (s *UsageStore) reserve(ctx context.Context, tx pgx.Tx, req meter.ReserveRe
 		return meter.Reservation{}, err
 	}
 	now := s.clock()
-	expires, err := holdExpiry(ctx, tx, subject.CapabilityID(), s.asOf(dbNow), cmp.Or(req.TTL, meter.DefaultReservationTTL))
+	expires, err := s.holdExpiry(ctx, tx, retriedReserve, subject.CapabilityID(), s.asOf(dbNow), cmp.Or(req.TTL, meter.DefaultReservationTTL))
 	if err != nil {
 		return meter.Reservation{}, err
 	}
@@ -795,11 +796,23 @@ func (s *UsageStore) reserve(ctx context.Context, tx pgx.Tx, req meter.ReserveRe
 	return h.reservation(), nil
 }
 
-// holdExpiry is when a hold of capID made at now for ttl ends: with its
-// capability at the latest, since past it no one can settle the hold, and
-// it would keep the ancestors' budget held. A capability already expired
-// could hold nothing anyone may settle.
-func holdExpiry(ctx context.Context, tx pgx.Tx, capID uuid.UUID, now time.Time, ttl time.Duration) (time.Time, error) {
+// capabilityExpiryGrace is how long past its record's expiry a capability
+// still holds budget. The record's expiry is the issuer's clock and a hold's
+// the store's — the database's, with Config.Now nil — and whether a token
+// has expired is its verifier's to decide, by its own clock and leeway: a
+// verifier accepts one up to limes.MaxLeeway past its expiry, by a clock up
+// to limes.PurgeClockSkew behind the store's. Past both no verifier accepts
+// it, and limes.MinPurgeRetention, their sum, is when its record may go.
+const capabilityExpiryGrace = limes.MaxLeeway + limes.PurgeClockSkew
+
+// holdExpiry is when a hold or a lease of capID, made at now on the store's
+// clock for ttl, ends: by its capability's record's expiry and the grace at
+// the latest, since past that no verifier accepts the token, no one can
+// settle the hold, and it would keep the ancestors' budget held. A
+// capability already past it holds nothing, refused with limes.ErrExpired;
+// one past its record's expiry within the grace is the verifier's call,
+// which let the call through. op names the call, for its log line.
+func (s *UsageStore) holdExpiry(ctx context.Context, tx pgx.Tx, op string, capID uuid.UUID, now time.Time, ttl time.Duration) (time.Time, error) {
 	expires := now.Add(ttl)
 	var capExpires *time.Time
 	if err := tx.QueryRow(ctx, sqlCapabilityExpiry, capID).Scan(&capExpires); err != nil {
@@ -808,13 +821,31 @@ func holdExpiry(ctx context.Context, tx pgx.Tx, capID uuid.UUID, now time.Time, 
 	if capExpires == nil {
 		return expires, nil
 	}
-	if !capExpires.After(now) {
+	last := capExpires.Add(capabilityExpiryGrace)
+	switch {
+	case !last.After(now):
+		s.log.WarnContext(ctx, "pgstore: refused a capability past its expiry and every verifier's leeway", expiredAttrs(op, capID, now.Sub(*capExpires))...)
 		return time.Time{}, limes.ErrExpired
+	case !capExpires.After(now):
+		s.log.InfoContext(ctx, "pgstore: holding for a capability past its expiry, within a verifier's leeway", expiredAttrs(op, capID, now.Sub(*capExpires))...)
 	}
-	if capExpires.Before(expires) {
-		return *capExpires, nil
+	if last.Before(expires) {
+		return last, nil
 	}
 	return expires, nil
+}
+
+// logKeyCapability is the capability a log line is about; logKeyExpiredFor
+// how long past its record's expiry the store's clock stands.
+const (
+	logKeyCapability = "capability"
+	logKeyExpiredFor = "expired_for"
+)
+
+// expiredAttrs are the attributes of holdExpiry's log lines: the call, the
+// capability, and how long past its record's expiry the store's clock stands.
+func expiredAttrs(op string, capID uuid.UUID, past time.Duration) []any {
+	return []any{slog.String(logKeyOp, op), slog.String(logKeyCapability, capID.String()), slog.Duration(logKeyExpiredFor, past)}
 }
 
 // applyHold adds (sign +1) or removes (sign -1) h on every counter c holds
