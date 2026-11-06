@@ -246,13 +246,13 @@ func newFixture(t testing.TB, fc fixtureConfig) *fixture {
 }
 
 // readPolicy grants the token's user a capability to read, for the
-// resources asked for.
-func (f *fixture) readPolicy(_ context.Context, g Grant) (limes.IssueRequest, error) {
-	return limes.IssueRequest{
+// resources and scopes asked for.
+func (f *fixture) readPolicy(_ context.Context, g Grant) (Decision, error) {
+	return Decision{Issue: limes.IssueRequest{
 		IssuedBy: limes.Principal{Type: limes.PrincipalTypeService, Subject: mcpServer},
 		Subject:  limes.Principal{Type: limes.PrincipalTypeUser, TenantID: f.tenant, Subject: g.Subject.Subject},
 		Caveats:  limes.Caveats{Requests: limes.RequestCeiling{Unlimited: true}, Ops: []limes.Op{limes.OpGet}},
-	}, nil
+	}}, nil
 }
 
 // client is the MCP server as a client of the exchange.
@@ -291,6 +291,6 @@ const (
 )
 
 // narrowPolicy delegates the parent's caveats to a sub-agent.
-func (f *fixture) narrowPolicy(context.Context, Narrowing) (limes.DelegateRequest, error) {
-	return limes.DelegateRequest{Subject: limes.Principal{Type: limes.PrincipalTypeAgent, Subject: subAgent}, InheritCaveats: true}, nil
+func (f *fixture) narrowPolicy(context.Context, Narrowing) (NarrowDecision, error) {
+	return NarrowDecision{Delegate: limes.DelegateRequest{Subject: limes.Principal{Type: limes.PrincipalTypeAgent, Subject: subAgent}, InheritCaveats: true}}, nil
 }

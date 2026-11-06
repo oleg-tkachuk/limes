@@ -34,10 +34,10 @@ func parentFor(t *testing.T, f *fixture, key crypto.Signer) Result {
 
 // sharePolicy is readPolicy with the right to delegate, which a capability
 // narrowed needs.
-func (f *fixture) sharePolicy(ctx context.Context, g Grant) (limes.IssueRequest, error) {
-	issue, err := f.readPolicy(ctx, g)
-	issue.Caveats.Ops = append(issue.Caveats.Ops, limes.OpShare)
-	return issue, err
+func (f *fixture) sharePolicy(ctx context.Context, g Grant) (Decision, error) {
+	decision, err := f.readPolicy(ctx, g)
+	decision.Issue.Caveats.Ops = append(decision.Issue.Caveats.Ops, limes.OpShare)
+	return decision, err
 }
 
 // narrowing is a narrowing of token to the tool alone.
@@ -176,10 +176,10 @@ func TestNarrowHoldsThePolicyToTheRequest(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture(t, fixtureConfig{narrow: true})
 			parent := parentFor(t, f, nil)
-			f.ex.cfg.NarrowPolicy = func(ctx context.Context, n Narrowing) (limes.DelegateRequest, error) {
-				child, err := f.narrowPolicy(ctx, n)
-				change(&child)
-				return child, err
+			f.ex.cfg.NarrowPolicy = func(ctx context.Context, n Narrowing) (NarrowDecision, error) {
+				decision, err := f.narrowPolicy(ctx, n)
+				change(&decision.Delegate)
+				return decision, err
 			}
 			before := f.store.inserts.Load()
 			if _, err := f.ex.Narrow(t.Context(), narrowing(parent.Token)); !errors.Is(err, errPolicy) || isRefusal(err) {

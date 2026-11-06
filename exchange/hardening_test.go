@@ -112,10 +112,11 @@ func TestHandlerAnswersAFailingNonceStoreAsTheServers(t *testing.T) {
 // client a capability every meter refuses.
 func TestExchangeAnswersAPolicyGrantingNoRequestAsTheServers(t *testing.T) {
 	var f *fixture
-	f = newFixture(t, fixtureConfig{policy: func(ctx context.Context, g Grant) (limes.IssueRequest, error) {
-		req, err := f.readPolicy(ctx, g)
+	f = newFixture(t, fixtureConfig{policy: func(ctx context.Context, g Grant) (Decision, error) {
+		decision, err := f.readPolicy(ctx, g)
+		req := &decision.Issue
 		req.Caveats.Requests = limes.RequestCeiling{}
-		return req, err
+		return decision, err
 	}})
 	logs := &records{}
 	f.ex.cfg.Logger = slog.New(logs)

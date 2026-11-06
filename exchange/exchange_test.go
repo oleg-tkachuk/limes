@@ -35,10 +35,11 @@ func TestExchangeIssuesACapability(t *testing.T) {
 func TestExchangeCapsTheLifetimeAtTheSubjectToken(t *testing.T) {
 	const longer = time.Hour
 	f := newFixture(t, fixtureConfig{})
-	f.ex.cfg.Policy = func(ctx context.Context, g Grant) (limes.IssueRequest, error) {
-		issue, err := f.readPolicy(ctx, g)
+	f.ex.cfg.Policy = func(ctx context.Context, g Grant) (Decision, error) {
+		decision, err := f.readPolicy(ctx, g)
+		issue := &decision.Issue
 		issue.TTL = longer
-		return issue, err
+		return decision, err
 	}
 	res, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, typeAccessToken, accessClaims())))
 	if err != nil {
@@ -63,10 +64,11 @@ func TestExchangeHoldsThePolicyToTheRequest(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture(t, fixtureConfig{})
-			f.ex.cfg.Policy = func(ctx context.Context, g Grant) (limes.IssueRequest, error) {
-				issue, err := f.readPolicy(ctx, g)
-				change(&issue)
-				return issue, err
+			f.ex.cfg.Policy = func(ctx context.Context, g Grant) (Decision, error) {
+				decision, err := f.readPolicy(ctx, g)
+				issue := &decision.Issue
+				change(issue)
+				return decision, err
 			}
 			_, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, typeAccessToken, accessClaims())))
 			if !errors.Is(err, errPolicy) || isRefusal(err) {
@@ -113,7 +115,7 @@ func TestExchangeRefusals(t *testing.T) {
 // A policy's refusal is the exchange's.
 func TestExchangeReturnsThePolicysRefusal(t *testing.T) {
 	f := newFixture(t, fixtureConfig{})
-	f.ex.cfg.Policy = func(context.Context, Grant) (limes.IssueRequest, error) { return limes.IssueRequest{}, ErrInvalidScope }
+	f.ex.cfg.Policy = func(context.Context, Grant) (Decision, error) { return Decision{}, ErrInvalidScope }
 	if _, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, typeAccessToken, accessClaims()))); !errors.Is(err, ErrInvalidScope) {
 		t.Errorf("err = %v, want ErrInvalidScope", err)
 	}
