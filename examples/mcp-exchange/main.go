@@ -182,18 +182,18 @@ func (s *server) policy(_ context.Context, g exchange.Grant) (exchange.Decision,
 			Ops: []limes.Op{limes.OpGet, limes.OpShare}, ResourcePrefixes: []string{"tools/"},
 			Requests: limes.RequestCeiling{Max: userRequests},
 		},
-	}}, nil
+	}, Scopes: g.Scopes}, nil
 }
 
-// narrowPolicy gives the sub-agent the search alone.
-func (s *server) narrowPolicy(context.Context, exchange.Narrowing) (exchange.NarrowDecision, error) {
+// narrowPolicy gives the sub-agent the search alone, and every scope asked.
+func (s *server) narrowPolicy(_ context.Context, n exchange.Narrowing) (exchange.NarrowDecision, error) {
 	return exchange.NarrowDecision{Delegate: limes.DelegateRequest{
 		Subject: limes.Principal{Type: limes.PrincipalTypeAgent, Subject: subAgent},
 		Caveats: limes.Caveats{
 			Ops: []limes.Op{limes.OpGet}, ResourcePrefixes: []string{toolResource},
 			Requests: limes.RequestCeiling{Max: subAgentRequests},
 		},
-	}}, nil
+	}, Scopes: n.Scopes}, nil
 }
 
 func main() {
