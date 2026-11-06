@@ -1788,6 +1788,20 @@ revoked capability is refused whatever key verifies it. A document with no
 `"keys"` array is a failed fetch, not a withdrawal; `{"keys":[]}` withdraws
 every key.
 
+Not to wait for the cache, act on each verifier: `Remote.Block(kid)` refuses
+the kid at once, as `jwks.ErrUnknownKID` (`ErrInvalidToken` to the
+verifier), whether the held set has it or the endpoint is down, until
+`Remote.Unblock`; `Remote.Refresh(ctx)` fetches the document now, past
+`MinRefreshInterval`, and returns the fetch's error. Each is logged
+(`RemoteConfig.Logger`), as is every token refused for a blocked kid:
+
+```go
+keys.Block(compromisedKID)          // refused from now on, outage or not
+if err := keys.Refresh(ctx); err != nil {
+    log.Error("JWKS refresh", "error", err) // the block holds meanwhile
+}
+```
+
 Load a signing key with `LoadKey(path)` (an Ed25519 key, PKCS#8 PEM only); an
 unreadable path, or none, is an error, never a fresh key. `GenerateKey` makes
 an ephemeral one, which vanishes with the process — a deployment that may run

@@ -84,6 +84,7 @@ or be marked breaking by hand.
 | `jwks.RemoteConfig` | `MaxStale` | `DefaultMaxStale` |  |
 | `jwks.RemoteConfig` | `MaxDocumentBytes` | `DefaultMaxDocumentBytes` |  |
 | `jwks.RemoteConfig` | `Now` | `time.Now` |  |
+| `jwks.RemoteConfig` | `Logger` | `slog.Default()` |  |
 | `jwks.StaticConfig` | `Keys` | none | An empty set: every kid is unknown. |
 | `memstore.StoreConfig` | `Now` | `time.Now` |  |
 | `memstore.UsageStoreConfig` | `Records` | required |  |
