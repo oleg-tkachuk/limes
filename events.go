@@ -243,6 +243,9 @@ type RevokedEvent struct {
 	Revoked int64
 	Tenants []uuid.UUID
 	More    bool
+	// Duration is the call's elapsed time, from its entry to the outcome,
+	// on the monotonic clock.
+	Duration time.Duration
 }
 
 // RevokerErrorEvent is one call a Revoker's store refused, or that failed.
@@ -259,6 +262,9 @@ type RevokerErrorEvent struct {
 	Code Code
 	// Err is the error the call returned.
 	Err error
+	// Duration is the call's elapsed time, from its entry to the outcome,
+	// on the monotonic clock.
+	Duration time.Duration
 }
 
 // isFailure reports whether err is the server's failure rather than a
