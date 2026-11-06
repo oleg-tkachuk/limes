@@ -603,7 +603,8 @@ func (s *UsageStore) settleEach(ctx context.Context, inTx func(func(pgx.Tx) erro
 // leaseholder, the leaseholder's hold and the lease's balance. It reports
 // false when e was taken under no lease or one since settled, whose refund
 // goes to the chain the settlement charged; c holds the chain's counters.
-func (s *UsageStore) refundLeased(ctx context.Context, tx pgx.Tx, c *counters, e ledgerEntry, amount limes.Nanos) (bool, error) {
+// then goes after its writes, in the call's last batch (writeLast).
+func (s *UsageStore) refundLeased(ctx context.Context, tx pgx.Tx, c *counters, e ledgerEntry, amount limes.Nanos, then []heldStmt) (bool, error) {
 	if e.leaseID == nil || e.leaseHolder == nil {
 		return false, nil
 	}
@@ -626,7 +627,7 @@ func (s *UsageStore) refundLeased(ctx context.Context, tx pgx.Tx, c *counters, e
 	only.usage[h.id] = h
 	refunded := heldStmt{sql: sqlRefunded, args: []any{e.ID, int64(amount)}}
 	back := heldStmt{sql: sqlLeaseSpent, args: []any{h.id, -int64(amount), h.lease.id}}
-	return true, only.write(ctx, tx, s.clock(), false, refunded, back)
+	return true, only.writeLast(ctx, tx, s.clock(), false, append([]heldStmt{refunded, back}, then...)...)
 }
 
 // forgetLeaseAncestors drops ids, whose counters went, from every lease's

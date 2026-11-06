@@ -29,30 +29,33 @@ func (s *UsageStore) Refund(ctx context.Context, req meter.RefundRequest) (meter
 	var receipt meter.RefundReceipt
 	err := s.retryDeadlock(ctx, retriedRefund, func() error {
 		return s.inTx(ctx, func(tx pgx.Tx) error {
-			e, c, err := s.lockRefunded(ctx, tx, req.ChargeID)
+			e, c, prior, err := s.lockRefunded(ctx, tx, req)
 			if err != nil {
 				return err
 			}
 			receipt = meter.RefundReceipt{ChargeID: e.ID, TenantID: e.TenantID, UnitCode: e.UnitCode}
-			if req.RefundID != uuid.Nil() {
-				r, keyed, err := refunded(ctx, tx, req, receipt)
-				if keyed || err != nil {
-					receipt = r
-					return err
-				}
+			if r, keyed, err := prior.answer(req, receipt); keyed || err != nil {
+				receipt = r
+				return err
 			}
 			amount, err := refundAmount(e, req)
 			if err != nil {
 				return err
 			}
-			if err := s.recordRefund(ctx, tx, e, req, amount); err != nil {
-				return err
+			var then []heldStmt
+			if req.RefundID != uuid.Nil() {
+				then = append(then, heldStmt{sql: sqlInsertRefund, args: []any{
+					req.RefundID, e.ID, e.TenantID, int64(req.Amount), req.Remaining, int64(amount), s.clock(),
+				}})
 			}
-			if amount == 0 {
-				return nil
+			switch {
+			case amount != 0:
+				err = s.refund(ctx, tx, c, e, amount, then...)
+			case len(then) > 0:
+				err = (&counters{}).writeLast(ctx, tx, s.clock(), false, then...)
 			}
-			if err := s.refund(ctx, tx, c, e, amount); err != nil {
-				return err
+			if err != nil {
+				return refundKeyConflict(err, req.RefundID)
 			}
 			receipt.Amount = amount
 			return nil
@@ -64,18 +67,21 @@ func (s *UsageStore) Refund(ctx context.Context, req meter.RefundRequest) (meter
 	return receipt, nil
 }
 
-// lockRefunded reads the charge id and locks the counters it debited, then
-// the charge itself. It is read once to learn which counters those are,
-// which are locked first, and locked last, as every call locks the ledger:
-// an erase that holds the aggregate and deletes the charges does not meet a
-// refund holding the charge and waiting for the aggregate.
-func (s *UsageStore) lockRefunded(ctx context.Context, tx pgx.Tx, id uuid.UUID) (ledgerEntry, *counters, error) {
-	e, ok, err := readEntry(ctx, tx, sqlChargeByID, id)
+// lockRefunded reads the charge req names and locks the counters it
+// debited, then the charge itself, with the refund on record under
+// req.RefundID read beside it. It is read once to learn which counters
+// those are, which are locked first, and locked last, as every call locks
+// the ledger: an erase that holds the aggregate and deletes the charges does
+// not meet a refund holding the charge and waiting for the aggregate. The
+// charge is locked, so a refund of it under the id that committed meanwhile
+// is read.
+func (s *UsageStore) lockRefunded(ctx context.Context, tx pgx.Tx, req meter.RefundRequest) (ledgerEntry, *counters, priorRefund, error) {
+	e, ok, err := readEntry(ctx, tx, sqlChargeByID, req.ChargeID)
 	if err != nil {
-		return ledgerEntry{}, nil, err
+		return ledgerEntry{}, nil, priorRefund{}, err
 	}
 	if !ok {
-		return ledgerEntry{}, nil, meter.ErrChargeNotFound
+		return ledgerEntry{}, nil, priorRefund{}, meter.ErrChargeNotFound
 	}
 	c, err := lock(ctx, tx, lockRequest{
 		now:      s.clock(),
@@ -84,16 +90,31 @@ func (s *UsageStore) lockRefunded(ctx context.Context, tx pgx.Tx, id uuid.UUID) 
 		copies:   e.copies, copiesCapID: e.CapabilityID,
 	})
 	if err != nil {
-		return ledgerEntry{}, nil, err
+		return ledgerEntry{}, nil, priorRefund{}, err
 	}
-	e, ok, err = readEntry(ctx, tx, sqlChargeByID+` FOR UPDATE`, id)
-	if err != nil {
-		return ledgerEntry{}, nil, err
+	b := &pgx.Batch{}
+	b.Queue(sqlChargeByID+` FOR UPDATE`, req.ChargeID)
+	if req.RefundID != uuid.Nil() {
+		b.Queue(sqlKeyedRefund, req.RefundID)
 	}
-	if !ok {
-		return ledgerEntry{}, nil, meter.ErrChargeNotFound
+	br := tx.SendBatch(ctx, b)
+	prior, err := func() (priorRefund, error) {
+		var err error
+		if e, ok, err = scanEntry(br.QueryRow()); err != nil {
+			return priorRefund{}, err
+		}
+		if !ok {
+			return priorRefund{}, meter.ErrChargeNotFound
+		}
+		if req.RefundID == uuid.Nil() {
+			return priorRefund{}, nil
+		}
+		return scanPriorRefund(br.QueryRow())
+	}()
+	if err = errors.Join(err, br.Close()); err != nil {
+		return ledgerEntry{}, nil, priorRefund{}, err
 	}
-	return e, c, nil
+	return e, c, prior, nil
 }
 
 const (
@@ -109,39 +130,52 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)`
 	constraintRefundKey = "refunds_pkey"
 )
 
-// refunded answers a Refund whose RefundID is on record already: keyed
+// priorRefund is the refund on record under a Refund's RefundID, when
+// found.
+type priorRefund struct {
+	found     bool
+	chargeID  uuid.UUID
+	amount    limes.Nanos
+	remaining bool
+	returned  limes.Nanos
+}
+
+// scanPriorRefund reads the one row of sqlKeyedRefund, if there is one.
+func scanPriorRefund(row pgx.Row) (priorRefund, error) {
+	var p priorRefund
+	var amount, returned int64
+	err := row.Scan(&p.chargeID, &amount, &p.remaining, &returned)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return priorRefund{}, nil
+	}
+	if err != nil {
+		return priorRefund{}, err
+	}
+	p.found, p.amount, p.returned = true, limes.Nanos(amount), limes.Nanos(returned)
+	return p, nil
+}
+
+// answer answers a Refund whose RefundID is on record already as p: keyed
 // reports that it is, with the first refund's receipt again when it was of
 // the same charge for the same request, and ErrRefundConflict when not.
-// receipt is the charge's, as this refund would return it. The charge is
-// locked, so a refund of it under the id that committed meanwhile is read.
-func refunded(ctx context.Context, tx pgx.Tx, req meter.RefundRequest, receipt meter.RefundReceipt) (meter.RefundReceipt, bool, error) {
-	var chargeID uuid.UUID
-	var amount, returned int64
-	var remaining bool
-	err := tx.QueryRow(ctx, sqlKeyedRefund, req.RefundID).Scan(&chargeID, &amount, &remaining, &returned)
+// receipt is the charge's, as this refund would return it.
+func (p priorRefund) answer(req meter.RefundRequest, receipt meter.RefundReceipt) (meter.RefundReceipt, bool, error) {
 	switch {
-	case errors.Is(err, pgx.ErrNoRows):
+	case !p.found:
 		return meter.RefundReceipt{}, false, nil
-	case err != nil:
-		return meter.RefundReceipt{}, false, err
-	case chargeID != req.ChargeID || limes.Nanos(amount) != req.Amount || remaining != req.Remaining:
+	case p.chargeID != req.ChargeID || p.amount != req.Amount || p.remaining != req.Remaining:
 		return meter.RefundReceipt{}, true, fmt.Errorf("%w: %s", meter.ErrRefundConflict, req.RefundID)
 	}
-	receipt.Amount, receipt.Replayed = limes.Nanos(returned), true
+	receipt.Amount, receipt.Replayed = p.returned, true
 	return receipt, true, nil
 }
 
-// recordRefund records a keyed refund of the charge e that returns amount,
-// so the request sent again replays it; a refund under no id records
-// nothing. An id another tenant's refund holds is ErrRefundConflict.
-func (s *UsageStore) recordRefund(ctx context.Context, tx pgx.Tx, e ledgerEntry, req meter.RefundRequest, amount limes.Nanos) error {
-	if req.RefundID == uuid.Nil() {
-		return nil
-	}
-	_, err := tx.Exec(ctx, sqlInsertRefund, req.RefundID, e.ID, e.TenantID, int64(req.Amount), req.Remaining, int64(amount), s.clock())
+// refundKeyConflict is err, the error of a write that recorded a keyed
+// refund, as ErrRefundConflict when the refund's id is another tenant's.
+func refundKeyConflict(err error, id uuid.UUID) error {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == constraintRefundKey {
-		return fmt.Errorf("%w: %s", meter.ErrRefundConflict, req.RefundID)
+		return fmt.Errorf("%w: %s", meter.ErrRefundConflict, id)
 	}
 	return err
 }
@@ -160,11 +194,11 @@ func refundAmount(e ledgerEntry, req meter.RefundRequest) (limes.Nanos, error) {
 }
 
 // refund gives amount of the charge e back to every counter in c that spent
-// it, and records it on the charge. A charge of a period since closed is
-// history: the current period's spend never counted it, so it has nothing
-// to give back.
-func (s *UsageStore) refund(ctx context.Context, tx pgx.Tx, c *counters, e ledgerEntry, amount limes.Nanos) error {
-	if leased, err := s.refundLeased(ctx, tx, c, e, amount); leased || err != nil {
+// it, and records it on the charge, then sends then, in the call's last
+// batch (writeLast). A charge of a period since closed is history: the
+// current period's spend never counted it, so it has nothing to give back.
+func (s *UsageStore) refund(ctx context.Context, tx pgx.Tx, c *counters, e ledgerEntry, amount limes.Nanos, then ...heldStmt) error {
+	if leased, err := s.refundLeased(ctx, tx, c, e, amount, then); leased || err != nil {
 		return err
 	}
 	for _, u := range c.usage {
@@ -181,7 +215,8 @@ func (s *UsageStore) refund(ctx context.Context, tx pgx.Tx, c *counters, e ledge
 			r.spent = max0(r.spent - amount)
 		}
 	}
-	return c.write(ctx, tx, s.clock(), refundTenant, heldStmt{sql: sqlRefunded, args: []any{e.ID, int64(amount)}})
+	refunded := heldStmt{sql: sqlRefunded, args: []any{e.ID, int64(amount)}}
+	return c.writeLast(ctx, tx, s.clock(), refundTenant, append([]heldStmt{refunded}, then...)...)
 }
 
 const sqlRefunded = `UPDATE limes.charges SET refunded = refunded + $2 WHERE id = $1`
@@ -954,7 +989,7 @@ func (s *UsageStore) releaseHolds(ctx context.Context, tx pgx.Tx, holds []hold) 
 		return err
 	}
 	for _, h := range holds {
-		if err := s.releaseHold(ctx, tx, h); err != nil {
+		if err := s.releaseHold(ctx, tx, h, false); err != nil {
 			return err
 		}
 	}
