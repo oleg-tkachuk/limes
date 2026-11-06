@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"slices"
 	"time"
 	"uuid"
@@ -20,31 +21,37 @@ import (
 // invalid_target, RFC 9396's invalid_authorization_details) the token
 // endpoint answers with. A Policy refuses with ErrInvalidGrant,
 // ErrInvalidTarget, ErrInvalidScope or ErrInvalidAuthorizationDetails; any
-// other error it returns is the server's, answered as such. Each names its
-// limes.Code, so limes.CodeOf, CategoryOf and ProblemOf answer it as the
-// endpoint does, ahead of any limes error it wraps.
+// other error it returns is the server's, answered as such. Each carries
+// its limes.Code, the status of its problem, a title and its
+// limes.Category, and is registered with limes as the package initialises,
+// so limes.CodeOf, CategoryOf and ProblemOf answer it as the endpoint
+// does, ahead of any limes error it wraps, and limes.Codes lists it: a code
+// added here needs no release of limes.
 var (
 	// ErrInvalidRequest is a request missing a parameter or malformed.
-	ErrInvalidRequest error = &codedError{"exchange: invalid request", limes.CodeInvalidRequest}
+	ErrInvalidRequest error = &codedError{"exchange: invalid request", limes.CodeInvalidRequest, http.StatusBadRequest, "The request is invalid", limes.CategoryInvalid}
 	// ErrInvalidClient is a client the endpoint could not authenticate.
-	ErrInvalidClient error = &codedError{"exchange: client not authenticated", limes.CodeInvalidClient}
+	ErrInvalidClient error = &codedError{"exchange: client not authenticated", limes.CodeInvalidClient, http.StatusUnauthorized, "The client is not authenticated", limes.CategoryUnauthenticated}
 	// ErrUnauthorizedClient is a client the endpoint authenticated that may
 	// not use it. HandlerConfig.Authenticate and
 	// IntrospectionConfig.Authenticate return it, wrapped or not, to refuse
 	// such a client.
-	ErrUnauthorizedClient error = &codedError{"exchange: client not authorized to exchange", limes.CodeUnauthorizedClient}
-	// ErrServerError is the server failing to decide on a client: its
-	// client store unreachable, say. HandlerConfig.Authenticate and
+	ErrUnauthorizedClient error = &codedError{"exchange: client not authorized to exchange", limes.CodeUnauthorizedClient, http.StatusBadRequest, "The client may not exchange tokens", limes.CategoryDenied}
+	// ErrServerError is the server failing to decide on a request: its
+	// client store unreachable, the issuer or a store failing, the policy
+	// erring. HandlerConfig.Authenticate and
 	// IntrospectionConfig.Authenticate return it, wrapped or not, so that
 	// the endpoint answers 500 server_error, logged at ERROR, rather than
-	// tell the client its credentials are wrong (RFC 6749 §5.2).
-	ErrServerError error = &codedError{"exchange: server error", limes.CodeServerError}
+	// tell the client its credentials are wrong (RFC 6749 §5.2). Every
+	// error Exchange and Narrow return that is no refusal wraps it, the
+	// cause kept in its chain.
+	ErrServerError error = &codedError{"exchange: server error", limes.CodeServerError, http.StatusInternalServerError, "The server could not decide on the request", limes.CategoryInternal}
 	// ErrInvalidGrant is a subject token refused: not genuine, expired, or
 	// not one the client may present.
-	ErrInvalidGrant error = &codedError{"exchange: subject token refused", limes.CodeInvalidGrant}
+	ErrInvalidGrant error = &codedError{"exchange: subject token refused", limes.CodeInvalidGrant, http.StatusBadRequest, "The subject token was refused", limes.CategoryUnauthenticated}
 	// ErrInvalidTarget is a resource or audience the exchange will not
 	// issue for.
-	ErrInvalidTarget error = &codedError{"exchange: target refused", limes.CodeInvalidTarget}
+	ErrInvalidTarget error = &codedError{"exchange: target refused", limes.CodeInvalidTarget, http.StatusBadRequest, "The resource or audience was refused", limes.CategoryDenied}
 	// ErrTargetExchanged is an ErrInvalidTarget of its own: under
 	// Config.Exchanges' one capability per subject token, a token
 	// exchanged already for other resources or audiences, whose capability
@@ -53,20 +60,39 @@ var (
 	// targets, or another token.
 	ErrTargetExchanged = fmt.Errorf("%w: the subject token was exchanged already for other targets", ErrInvalidTarget)
 	// ErrInvalidScope is a scope the exchange will not grant.
-	ErrInvalidScope error = &codedError{"exchange: scope refused", limes.CodeInvalidScope}
+	ErrInvalidScope error = &codedError{"exchange: scope refused", limes.CodeInvalidScope, http.StatusBadRequest, "The scope was refused", limes.CategoryDenied}
 	// ErrInvalidAuthorizationDetails is authorization_details the exchange
 	// will not grant: malformed, or of a type or content it does not
 	// understand (RFC 9396 §5).
-	ErrInvalidAuthorizationDetails error = &codedError{"exchange: authorization details refused", limes.CodeInvalidAuthorizationDetails}
+	ErrInvalidAuthorizationDetails error = &codedError{"exchange: authorization details refused", limes.CodeInvalidAuthorizationDetails, http.StatusBadRequest, "The authorization details were refused", limes.CategoryDenied}
 	// ErrUnsupportedGrantType is a token request for another grant.
-	ErrUnsupportedGrantType error = &codedError{"exchange: grant type unsupported", limes.CodeUnsupportedGrantType}
+	ErrUnsupportedGrantType error = &codedError{"exchange: grant type unsupported", limes.CodeUnsupportedGrantType, http.StatusBadRequest, "The grant type is not supported", limes.CategoryInvalid}
 )
 
-// codedError is a sentinel that names its limes.Code, by which limes
-// answers it (errcode.Coded).
+// codedSentinels are the sentinels that carry their answer, registered with
+// limes: ErrTargetExchanged is an ErrInvalidTarget, answered as it is.
+var codedSentinels = []error{
+	ErrInvalidRequest, ErrInvalidClient, ErrUnauthorizedClient, ErrServerError, ErrInvalidGrant,
+	ErrInvalidTarget, ErrInvalidScope, ErrInvalidAuthorizationDetails, ErrUnsupportedGrantType,
+}
+
+// The sentinels' codes, registered so limes answers them by code alone.
+func init() {
+	for _, err := range codedSentinels {
+		if answered := errcode.Answered(nil); errors.As(err, &answered) {
+			errcode.Register(errcode.ComponentExchange, answered)
+		}
+	}
+}
+
+// codedError is a sentinel that carries its limes answer (errcode.Answered):
+// its code, the HTTP status and title of its problem, and its category.
 type codedError struct {
-	msg  string
-	code limes.Code
+	msg      string
+	code     limes.Code
+	status   int
+	title    string
+	category limes.Category
 }
 
 func (e *codedError) Error() string { return e.msg }
@@ -74,7 +100,17 @@ func (e *codedError) Error() string { return e.msg }
 // LimesErrorCode is the sentinel's code, which limes answers it by.
 func (e *codedError) LimesErrorCode() string { return string(e.code) }
 
-var _ errcode.Coded = (*codedError)(nil)
+// LimesErrorStatus is the HTTP status of the sentinel's problem: the one
+// the token endpoint answers it with.
+func (e *codedError) LimesErrorStatus() int { return e.status }
+
+// LimesErrorTitle is the title of the sentinel's problem.
+func (e *codedError) LimesErrorTitle() string { return e.title }
+
+// LimesErrorCategory is the sentinel's limes.Category.
+func (e *codedError) LimesErrorCategory() string { return string(e.category) }
+
+var _ errcode.Answered = (*codedError)(nil)
 
 // errPolicy is a policy that asked for more than the request allows: the
 // server's fault, never the client's.
@@ -250,6 +286,7 @@ func NewExchanger(cfg Config) (*Exchanger, error) {
 // for the proof; every exchange and refusal is logged.
 func (e *Exchanger) Exchange(ctx context.Context, req Request) (Result, error) {
 	res, subject, err := e.exchange(ctx, req)
+	err = serverError(err)
 	log := e.cfg.Logger.With(slog.String("client", req.Client.ID))
 	if subject.Subject != "" {
 		log = log.With(slog.String("subject_issuer", subject.Issuer), slog.String("subject", subject.Subject))
@@ -535,6 +572,19 @@ func (e *Exchanger) checkProof(ctx context.Context, req Request, subject Subject
 		return dpop.CheckedProof{}, false, fmt.Errorf("%w: the proof is not by the key the subject token is bound to", dpop.ErrInvalid)
 	}
 	return checked, true, nil
+}
+
+// serverError is err as Exchange and Narrow return it: a refusal, or a
+// failure already the server's, as it is; any other wrapped in
+// ErrServerError, its cause kept, so limes.ProblemOf answers it
+// server_error, 500, as the endpoint does, whatever limes error it wraps —
+// an issue refused for invalid caveats is the policy's fault, not the
+// client's.
+func serverError(err error) error {
+	if err == nil || isRefusal(err) || errors.Is(err, ErrServerError) {
+		return err
+	}
+	return errs.Errorf("%w: %w", ErrServerError, err)
 }
 
 // isRefusal reports whether err is the client's: a refusal rather than the
