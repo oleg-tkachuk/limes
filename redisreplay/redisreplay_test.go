@@ -1,8 +1,11 @@
 package redisreplay
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"testing"
 	"time"
@@ -153,10 +156,39 @@ func TestNew(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if c.prefix != tt.wantPrefix || c.share != tt.wantShare || c.now == nil {
-				t.Errorf("New = prefix %q, share %d, clock set %t; want %q, %d, true", c.prefix, c.share, c.now != nil, tt.wantPrefix, tt.wantShare)
+			if c.prefix != tt.wantPrefix || c.share != tt.wantShare || c.now == nil || c.log == nil {
+				t.Errorf("New = prefix %q, share %d, clock set %t, logger set %t; want %q, %d, true, true",
+					c.prefix, c.share, c.now != nil, c.log != nil, tt.wantPrefix, tt.wantShare)
 			}
 		})
+	}
+}
+
+// A holder past its share is refused with dpop.ErrReplayQuota, never as a
+// replay, logged at WARN with the holder, while a replay of an id it holds is
+// still a replay.
+func TestSeenRefusesAHolderPastItsShareApartFromAReplay(t *testing.T) {
+	f := newFixture(t)
+	var logged bytes.Buffer
+	f.cache.log = slog.New(slog.NewJSONHandler(&logged, nil))
+	first := f.entry()
+	f.seen(t, first)
+	for range entriesPerHolder - 1 {
+		f.seen(t, f.entry())
+	}
+	if !f.seen(t, first) {
+		t.Error("an id the full share holds was not a replay")
+	}
+	replay, err := f.cache.Seen(f.ctx, f.entry())
+	if replay || !errors.Is(err, dpop.ErrReplayQuota) {
+		t.Fatalf("a fresh id past the share: Seen = %t, %v; want false, dpop.ErrReplayQuota", replay, err)
+	}
+	var line map[string]any
+	if err := json.Unmarshal(logged.Bytes(), &line); err != nil {
+		t.Fatalf("log %q: %v", logged.String(), err)
+	}
+	if line["level"] != slog.LevelWarn.String() || line[logKeyHolder] != testHolder {
+		t.Errorf("logged %v, want a WARN naming holder %q", line, testHolder)
 	}
 }
 

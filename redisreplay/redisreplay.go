@@ -33,7 +33,11 @@
 //
 // # Memory
 //
-// EntriesPerHolder bounds each holder; nothing bounds the holders. Bound the
+// EntriesPerHolder bounds each holder, and so its rate: an id is kept for the
+// verifier's window plus dpop.ReplayClockSkew, so one holder passes at most
+// EntriesPerHolder proofs over that span — with the defaults 1,000 per 65 s,
+// about 15 a second. Past it Seen returns dpop.ErrReplayQuota and logs the
+// holder at WARN. Nothing bounds the holders. Bound the
 // whole cache with Redis's maxmemory and the noeviction policy: past it a
 // write fails, Seen returns the error and the proof is refused. An eviction
 // policy would forget live ids, and a forgotten id can be replayed.
@@ -51,6 +55,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -77,6 +82,9 @@ type Config struct {
 	EntriesPerHolder int
 	// Now is the clock. Nil: time.Now.
 	Now func() time.Time
+	// Logger logs each id refused because its holder's share is full, at
+	// WARN. Nil: slog.Default().
+	Logger *slog.Logger
 }
 
 // Cache is a dpop.ReplayCache over Redis. It is safe for concurrent use.
@@ -85,6 +93,7 @@ type Cache struct {
 	prefix string
 	share  int
 	now    func() time.Time
+	log    *slog.Logger
 }
 
 var _ dpop.ReplayCache = (*Cache)(nil)
@@ -109,7 +118,10 @@ func New(cfg Config) (*Cache, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	return &Cache{client: cfg.Client, prefix: cfg.KeyPrefix, share: cfg.EntriesPerHolder, now: cfg.Now}, nil
+	if cfg.Logger == nil {
+		cfg.Logger = slog.Default()
+	}
+	return &Cache{client: cfg.Client, prefix: cfg.KeyPrefix, share: cfg.EntriesPerHolder, now: cfg.Now, log: cfg.Logger}, nil
 }
 
 //go:embed seen.lua
@@ -118,14 +130,27 @@ var seenSource string
 // seenScript is seen.lua, run by its digest and loaded on the first miss.
 var seenScript = redis.NewScript(seenSource)
 
-// seenReplay is what seen.lua returns for an id already recorded, or one
-// refused because its holder's share is full.
-const seenReplay = 1
+// What seen.lua returns.
+const (
+	// seenNew is an id it recorded.
+	seenNew = 0
+	// seenReplay is an id already recorded.
+	seenReplay = 1
+	// seenQuota is an id refused because its holder's share is full.
+	seenQuota = 2
+)
 
-// Seen implements dpop.ReplayCache. A holder past its share is refused as a
-// replay rather than accepted unrecorded; a Redis that cannot answer returns
-// the error, and dpop.Verifier.Verify fails with it: an outage, not a refused
-// proof.
+// The attributes of the cache's log lines.
+const (
+	logKeyHolder = "holder"
+	logKeyShare  = "share"
+	logKeyAnswer = "answer"
+)
+
+// Seen implements dpop.ReplayCache. A holder past its share is refused with
+// dpop.ErrReplayQuota, and logged at WARN, rather than accepted unrecorded; a
+// Redis that cannot answer returns the error, and dpop.Verifier.Verify fails
+// with it: an outage, not a refused proof.
 func (c *Cache) Seen(ctx context.Context, e dpop.ReplayEntry) (bool, error) {
 	now := c.now()
 	got, err := seenScript.Run(ctx, c.client,
@@ -135,7 +160,20 @@ func (c *Cache) Seen(ctx context.Context, e dpop.ReplayEntry) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("redisreplay: record proof id: %w", err)
 	}
-	return got == seenReplay, nil
+	switch got {
+	case seenNew:
+		return false, nil
+	case seenReplay:
+		return true, nil
+	case seenQuota:
+		c.log.WarnContext(ctx, "redisreplay: replay cache refused a proof: its holder is past its share",
+			slog.String(logKeyHolder, e.Holder), slog.Int(logKeyShare, c.share))
+		return false, fmt.Errorf("%w: redisreplay: holder %q has %d live proof ids", dpop.ErrReplayQuota, e.Holder, c.share)
+	default:
+		c.log.ErrorContext(ctx, "redisreplay: the script answered a value it never returns",
+			slog.String(logKeyHolder, e.Holder), slog.Int64(logKeyAnswer, got))
+		return false, errs.Broken("redisreplay: the script answered %d", got)
+	}
 }
 
 // key is the sorted set holding holder's proof ids.
