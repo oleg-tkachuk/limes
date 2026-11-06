@@ -182,7 +182,9 @@ func main() {
 	_, err = usage.GetUsage(elsewhere, c.ID)
 	demo.Refused(log, err, meter.ErrUsageNotFound, "read its usage scoped to another tenant")
 
-	_, err = records.Revoke(inTenant, limes.RevokeRequest{CapabilityID: c.ID, Note: "agent finished", Actor: "operator"})
+	revoker, err := limes.NewRevoker(limes.RevokerConfig{Store: records, Logger: log})
+	demo.Must(log, err, "revoker")
+	_, err = revoker.Revoke(inTenant, limes.RevokeRequest{CapabilityID: c.ID, Note: "agent finished", Actor: "operator"})
 	demo.Must(log, err, "revoke")
 	log.Info("revoked the capability", "capability", c.ID)
 	_, err = verifier.Verify(ctx, limes.VerifyRequest{Token: issued.Token, Audience: audience})
