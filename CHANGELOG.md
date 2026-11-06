@@ -2,6 +2,31 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.167.0](https://github.com/oleg-tkachuk/limes/compare/v0.166.0...v0.167.0) (2026-11-06)
+
+### ⚠ BREAKING CHANGES
+
+* **errors:** answer revocation outages 503 and fix the category model
+
+### Features
+
+* refuse a capability the revocation lookup has no record of ([830d245](https://github.com/oleg-tkachuk/limes/commit/830d2451e22574487bdd7c2fab33d1814452ac24))
+
+### Bug Fixes
+
+* **errors:** answer revocation outages 503 and fix the category model ([634ad3b](https://github.com/oleg-tkachuk/limes/commit/634ad3bf00ad8a0e539dbab9a9571364b7373c06))
+
+### Codes
+
+* added: `revocation_unavailable`, `unrecorded`
+* changed: `feature_disabled` — category precondition → internal
+* changed: `leasing_disabled` — category precondition → internal
+* changed: `proof_unsupported` — category precondition → internal
+
+### Contract
+
+* answer revocation outages 503 and fix the category model
+
 ## [0.166.0](https://github.com/oleg-tkachuk/limes/compare/v0.165.0...v0.166.0) (2026-11-05)
 
 ### ⚠ BREAKING CHANGES

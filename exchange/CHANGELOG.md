@@ -2,6 +2,24 @@
 
 Every release of the exchange module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.18.0](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.17.0...exchange%2Fv0.18.0) (2026-11-06)
+
+### ⚠ BREAKING CHANGES
+
+* **exchange:** carry each code's answer and wrap server failures
+
+### Features
+
+* **exchange:** record the subject token's issuer beside the capability ([25d2bcc](https://github.com/oleg-tkachuk/limes/commit/25d2bcc6b2cbc2c877f0fe23fd749fb3217f3794))
+
+### Bug Fixes
+
+* **exchange:** carry each code's answer and wrap server failures ([cebfc9b](https://github.com/oleg-tkachuk/limes/commit/cebfc9b3c4bd7aa37bfc6fe674c8885aa9293930))
+
+### Dependencies
+
+* require limes v0.167.0
+
 ## [0.17.0](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.16.2...exchange%2Fv0.17.0) (2026-11-05)
 
 ### ⚠ BREAKING CHANGES
