@@ -593,7 +593,7 @@ func isRefusal(err error) bool {
 	for _, refusal := range []error{
 		ErrInvalidRequest, ErrInvalidClient, ErrInvalidGrant, ErrInvalidTarget, ErrInvalidScope, ErrInvalidAuthorizationDetails,
 		ErrUnsupportedGrantType, ErrUnauthorizedClient,
-		dpop.ErrRequired, dpop.ErrInvalid, dpop.ErrReplayed, dpop.ErrNonceRequired,
+		dpop.ErrRequired, dpop.ErrInvalid, dpop.ErrReplayed, dpop.ErrReplayQuota, dpop.ErrNonceRequired,
 	} {
 		if errors.Is(err, refusal) {
 			return true

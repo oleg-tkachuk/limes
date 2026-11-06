@@ -3,6 +3,7 @@ package exchange
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"slices"
 	"testing"
@@ -141,6 +142,35 @@ func TestExchangeBindsToTheProofKey(t *testing.T) {
 	}
 	if n := f.store.inserts.Load(); n != 1 {
 		t.Errorf("%d capabilities issued, want 1", n)
+	}
+}
+
+// A client past its share of the replay cache is refused 429
+// temporarily_unavailable, not as a replayed proof nor as the server's
+// failure: its next proof passes once older ids lapse.
+func TestExchangeRefusesAClientPastItsReplayShare(t *testing.T) {
+	f := newFixture(t, fixtureConfig{})
+	replay, err := dpop.NewMemoryReplayCache(dpop.MemoryReplayCacheConfig{EntriesPerHolder: 1, Logger: slog.New(slog.DiscardHandler)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.ex.cfg.DPoP, err = dpop.NewVerifier(dpop.VerifierConfig{Replay: replay, Now: clock}); err != nil {
+		t.Fatal(err)
+	}
+	key := clientKey(t)
+	req := request(f.idp.sign(t, typeAccessToken, accessClaims()))
+	req.DPoP = proof(t, key, "")
+	if _, err := f.ex.Exchange(t.Context(), req); err != nil {
+		t.Fatal(err)
+	}
+	req = request(f.idp.sign(t, typeAccessToken, accessClaims()))
+	req.DPoP = proof(t, key, "")
+	_, err = f.ex.Exchange(t.Context(), req)
+	if !errors.Is(err, dpop.ErrReplayQuota) || errors.Is(err, dpop.ErrReplayed) || errors.Is(err, ErrServerError) {
+		t.Fatalf("a proof past the client's share: %v, want dpop.ErrReplayQuota alone", err)
+	}
+	if got, ok := ErrorOf(err); !ok || got.Status != http.StatusTooManyRequests || got.Code != codeTemporarilyUnavailable {
+		t.Errorf("ErrorOf = %+v, %v; want 429 %s", got, ok, codeTemporarilyUnavailable)
 	}
 }
 

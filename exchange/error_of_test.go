@@ -78,6 +78,7 @@ func TestEverySentinelHasAnError(t *testing.T) {
 	all := merged(exchangeSentinels, map[string]error{
 		"dpop.ErrNonceRequired": dpop.ErrNonceRequired, "dpop.ErrRequired": dpop.ErrRequired,
 		"dpop.ErrInvalid": dpop.ErrInvalid, "dpop.ErrReplayed": dpop.ErrReplayed,
+		"dpop.ErrReplayQuota": dpop.ErrReplayQuota,
 	})
 	for name, err := range all {
 		got, ok := ErrorOf(fmt.Errorf("context: %w", err))
@@ -113,6 +114,7 @@ func TestErrorOf(t *testing.T) {
 		"a token exchanged already": {fmt.Errorf("x: %w", ErrTargetExchanged), http.StatusBadRequest, codeInvalidTarget},
 		"a client unknown":          {ErrInvalidClient, http.StatusUnauthorized, codeInvalidClient},
 		"a nonce required":          {dpop.ErrNonceRequired, http.StatusBadRequest, codeUseDPoPNonce},
+		"a client past its share":   {fmt.Errorf("x: %w", dpop.ErrReplayQuota), http.StatusTooManyRequests, codeTemporarilyUnavailable},
 		"the server failing":        {ErrServerError, http.StatusInternalServerError, codeServerError},
 	} {
 		if got, ok := ErrorOf(tc.err); !ok || got.Status != tc.status || got.Code != tc.code {
