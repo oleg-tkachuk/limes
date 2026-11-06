@@ -71,9 +71,11 @@ func TestSyncedTTLHoldsOnlyWhileASignalVouches(t *testing.T) {
 	}
 
 	signal.Listening()
-	if st := cache.Stats(); !st.Synced || st.Syncs != 1 || st.Clears != 1 {
-		t.Errorf("after Listening: Stats = %+v; want synced, one sync, one clear", st)
+	if st := cache.Stats(); !st.Synced || st.Syncs != 1 || st.Clears != 0 {
+		t.Errorf("after Listening: Stats = %+v; want synced, one sync, no clear", st)
 	}
+	// Read after Listening: SyncedTTL covers no answer read at its instant.
+	clk.advance(time.Millisecond)
 	// Synced: the answer is served past TTL, a signal being what ends it.
 	second, _ := s.issue()
 	if revokedAfter(second, unsyncedTTL) {
@@ -128,10 +130,11 @@ func TestSyncedTTLBounds(t *testing.T) {
 	}
 }
 
-// Stats tells each cause of a whole clear apart: the signal's connections
-// (Syncs), its notifications naming no id (SignalsWhole), ClearRevoked
-// without lineage (ClearsWithoutLineage) and the consumer's own, the rest
-// of Clears; and when the signal was last lost.
+// Stats tells each cause of a whole clear apart: the signal's
+// notifications naming no id (SignalsWhole), ClearRevoked without lineage
+// (ClearsWithoutLineage) and the consumer's own, the rest of Clears; and
+// counts the signal's connections (Syncs), none a clear, and when it was
+// last lost.
 func TestStatsTellTheCausesOfAClear(t *testing.T) {
 	ctx := context.Background()
 	s := newExampleStack()
@@ -156,7 +159,7 @@ func TestStatsTellTheCausesOfAClear(t *testing.T) {
 	if st.Signals != 2 || st.SignalsWhole != 1 || st.Syncs != 1 || st.SyncsLost != 1 || !st.LastSyncLoss.Equal(clk.Now()) {
 		t.Errorf("Stats = %+v; want 2 signals, 1 whole, 1 sync, 1 lost at %s", st, clk.Now())
 	}
-	if own := st.Clears - st.Syncs - st.SignalsWhole - st.ClearsWithoutLineage; own != 1 {
+	if own := st.Clears - st.SignalsWhole - st.ClearsWithoutLineage; own != 1 {
 		t.Errorf("Clears %d less the causes counted = %d, want the 1 asked for", st.Clears, own)
 	}
 	if fresh := newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: s.records}); !fresh.Stats().LastSyncLoss.IsZero() {
@@ -194,7 +197,7 @@ func TestStatsPartsNeverExceedClears(t *testing.T) {
 	}()
 	for range statsReads {
 		st := cache.Stats()
-		if parts := st.Syncs + st.SignalsWhole + st.ClearsWithoutLineage; parts > st.Clears {
+		if parts := st.SignalsWhole + st.ClearsWithoutLineage; parts > st.Clears {
 			t.Fatalf("Stats = %+v: its parts add up to %d, past Clears", st, parts)
 		}
 		if st.SignalsWhole > st.Signals {
@@ -300,10 +303,11 @@ func TestEmptyRevocationsDropNothing(t *testing.T) {
 }
 
 // Closing the signal that kept the cache on TTL — lost while another
-// listens — clears the cache before SyncedTTL holds again: an answer cached
-// while it was down may predate a revocation it would have carried, which
-// the long bound would otherwise serve past.
-func TestClosingALostSignalClears(t *testing.T) {
+// listens — makes the cache synced again for the answers read from then
+// on only: an answer cached while it was down may predate a revocation it
+// would have carried, so it stays on TTL, and the revocation shows within
+// it.
+func TestClosingALostSignalKeepsTheOlderAnswersOnTTL(t *testing.T) {
 	ctx := context.Background()
 	s := newExampleStack()
 	clk := &testClock{now: time.Now()}
@@ -326,7 +330,66 @@ func TestClosingALostSignalClears(t *testing.T) {
 	if !st.Synced || st.Syncs != syncs+1 {
 		t.Errorf("after the lost signal closed: Stats = %+v; want synced, one sync more", st)
 	}
+	clk.advance(unsyncedTTL)
 	if revoked, err := cache.IsRevoked(ctx, c.ID); err != nil || !revoked {
-		t.Errorf("after the lost signal closed: %v, %v; want the revocation seen", revoked, err)
+		t.Errorf("a TTL after the lost signal closed: %v, %v; want the revocation seen", revoked, err)
+	}
+}
+
+// cachedBeforeReconnect is how many answers the reconnect check caches.
+const cachedBeforeReconnect = 50
+
+// A signal that is lost and listens again drops nothing: every answer read
+// within TTL is still served, so a connection that flaps sends no verifier
+// to the store at once. An answer read before the gap is served for TTL
+// from when it was read, not SyncedTTL, so a revocation made in the gap
+// shows within it; one read after the reconnect is served for SyncedTTL.
+func TestAReconnectDropsNothingAndKeepsTheGapOnTTL(t *testing.T) {
+	ctx := context.Background()
+	s := newExampleStack()
+	clk := &testClock{now: time.Now()}
+	cache := newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: s.records, TTL: unsyncedTTL, SyncedTTL: syncedTTL, Now: clk.Now})
+	signal := cache.NewSignal()
+	signal.Listening()
+	ask := func(c limes.Capability) bool {
+		t.Helper()
+		revoked, err := cache.IsRevoked(ctx, c.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return revoked
+	}
+	held := make([]limes.Capability, cachedBeforeReconnect)
+	for i := range held {
+		held[i], _ = s.issue()
+		ask(held[i])
+	}
+	clk.advance(unsyncedTTL / 2)
+	signal.NotListening()
+	// Revoked while nothing listens: no signal will say so.
+	if _, err := s.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: held[0].ID}); err != nil {
+		t.Fatal(err)
+	}
+	signal.Listening()
+	clk.advance(time.Millisecond)
+	lookups := cache.Stats().Capabilities.Lookups
+	for _, c := range held[1:] {
+		ask(c)
+	}
+	if st := cache.Stats(); st.Capabilities.Lookups != lookups || st.Clears != 0 {
+		t.Errorf("after the reconnect: %d lookups, %d clears; want every answer within TTL served", st.Capabilities.Lookups-lookups, st.Clears)
+	}
+	after, _ := s.issue()
+	ask(after)
+	clk.advance(unsyncedTTL / 2)
+	if !ask(held[0]) {
+		t.Error("an answer read before the gap served past TTL over a revocation made in it")
+	}
+	if _, err := s.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: after.ID}); err != nil {
+		t.Fatal(err)
+	}
+	clk.advance(unsyncedTTL)
+	if ask(after) {
+		t.Error("an answer read after the reconnect not served for SyncedTTL")
 	}
 }

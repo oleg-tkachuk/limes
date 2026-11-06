@@ -129,15 +129,17 @@ type RevocationCache struct {
 	// served stale: not found is an answer, not a failure.
 	unrecorded *ttlcache.Cache[uuid.UUID]
 	clears     atomic.Uint64
-	// ttl and syncedTTL are how long an answer is served without a
-	// revocation signal and while one vouches for the cache (synced).
-	ttl, syncedTTL time.Duration
-	synced         atomic.Bool
+	// syncedTTL is how long an answer is served while a revocation signal
+	// vouches for the cache (synced); caps and copies hold the TTL.
+	syncedTTL time.Duration
+	synced    atomic.Bool
 	// open is how many RevocationSignals are open, and listening how many
 	// of them listen, under syncMu, which orders the changes of synced and
-	// of the TTL in force.
+	// of the TTL in force. since is when the latest of them began to
+	// listen: only an answer read since may be served for syncedTTL.
 	syncMu          sync.Mutex
 	open, listening int
+	since           time.Time
 	// syncs counts the signals' Listening, syncsLost their NotListening,
 	// and lastSyncLoss is the time of the last: nil, none yet.
 	syncs, syncsLost atomic.Uint64
@@ -183,9 +185,11 @@ type RevocationCacheConfig struct {
 	// vouch for the cache: while at least one RevocationSignal is open and
 	// every open one listens, as pgstore.RevocationWatcher's does while
 	// its connection listens. A revocation then reaches the cache at once,
-	// so the TTL can be long. Otherwise TTL bounds every answer, those
-	// cached under SyncedTTL among them. Zero: TTL; shorter than TTL, or
-	// longer than MaxRevocationCacheSyncedTTL, is refused.
+	// so the TTL can be long. It covers only the answers read since the
+	// last signal began to listen; TTL bounds every other, and every
+	// answer while the signals do not vouch, those cached under SyncedTTL
+	// among them. Zero: TTL; shorter than TTL, or longer than
+	// MaxRevocationCacheSyncedTTL, is refused.
 	SyncedTTL time.Duration
 	// MaxEntries bounds each kind of answer on its own — about a
 	// capability, about one not on record, about a Biscuit — so a flood of
@@ -258,7 +262,6 @@ func NewRevocationCache(cfg RevocationCacheConfig) (*RevocationCache, error) {
 		caps:         ttlcache.New[uuid.UUID](withStaleLog(c, logger, staleKindCapability)),
 		copies:       ttlcache.New[string](withStaleLog(c, logger, staleKindBiscuit)),
 		unrecorded:   ttlcache.New[uuid.UUID](ttlcache.Config{TTL: c.TTL, MaxEntries: c.MaxEntries, Now: c.Now}),
-		ttl:          c.TTL,
 		syncedTTL:    synced,
 	}, nil
 }
@@ -455,9 +458,19 @@ func (c *RevocationCache) NewSignal() *RevocationSignal {
 }
 
 // Listening says the signal reaches the cache from now on, at each
-// connection a watcher opens: it clears the cache — a revocation made while
-// nothing listened sent a signal nobody heard — and counts toward synced.
-// Again while listening, it is a reconnect: it clears, and counts once.
+// connection a watcher opens, and counts toward synced. Again while
+// listening, it is a reconnect, and counts once.
+//
+// A revocation made while nothing listened sent a signal nobody heard, so
+// an answer read before now may have missed one: SyncedTTL covers only the
+// answers read from now on, and every older one stays on TTL, from when it
+// was read, as while no signal vouched. That is as long as such an answer
+// may be served wherever no signal reaches the cache at all, so no answer
+// outlives the bound the cache keeps without one; nothing is dropped, and
+// a connection that flaps leaves every verifier's answers in place rather
+// than send them all to the store at once as it recovers. A revocation
+// made in the gap shows within TTL of the answer it outdates, not at the
+// reconnect.
 func (s *RevocationSignal) Listening() {
 	c := s.c
 	c.syncMu.Lock()
@@ -465,7 +478,7 @@ func (s *RevocationSignal) Listening() {
 	if s.closed {
 		return
 	}
-	c.Clear()
+	c.since = c.caps.Now()
 	c.syncs.Add(1)
 	if !s.listening {
 		s.listening = true
@@ -521,10 +534,10 @@ func (s *RevocationSignal) RevokedAll() {
 
 // Close ends the signal: it no longer counts toward synced, and the cache
 // is synced again only while another open signal listens. Closing the one
-// signal that kept the cache on TTL — lost, or never listening — clears
-// it before SyncedTTL holds again, as Listening does: what was cached while
-// it was down may miss a revocation it would have carried. Once is enough;
-// again, it does nothing.
+// signal that kept the cache on TTL — lost, or never listening — counts as
+// a Listening of the others: what was cached while it was down may miss a
+// revocation it would have carried, so SyncedTTL covers only the answers
+// read from then on. Once is enough; again, it does nothing.
 func (s *RevocationSignal) Close() {
 	c := s.c
 	c.syncMu.Lock()
@@ -539,7 +552,7 @@ func (s *RevocationSignal) Close() {
 	}
 	c.open--
 	if !c.synced.Load() && c.open > 0 && c.listening == c.open {
-		c.Clear()
+		c.since = c.caps.Now()
 		c.syncs.Add(1)
 	}
 	c.setSyncedLocked()
@@ -552,23 +565,19 @@ func (s *RevocationSignal) isClosed() bool {
 	return s.closed
 }
 
-// setSyncedLocked makes the cache synced, and SyncedTTL the bound, while
-// a signal is open and every open one listens, and TTL otherwise; syncMu
-// is held.
+// setSyncedLocked makes the cache synced, and SyncedTTL the bound of the
+// answers read since the last signal began to listen, while a signal is
+// open and every open one listens, and TTL the bound of every answer
+// otherwise; syncMu is held.
 func (c *RevocationCache) setSyncedLocked() {
 	synced := c.open > 0 && c.listening == c.open
 	c.synced.Store(synced)
+	var ext *ttlcache.Extension
 	if synced {
-		c.setTTL(c.syncedTTL)
-		return
+		ext = &ttlcache.Extension{TTL: c.syncedTTL, Since: c.since}
 	}
-	c.setTTL(c.ttl)
-}
-
-// setTTL is the TTL each kind of answer is served for.
-func (c *RevocationCache) setTTL(ttl time.Duration) {
-	c.caps.SetTTL(ttl)
-	c.copies.SetTTL(ttl)
+	c.caps.Extend(ext)
+	c.copies.Extend(ext)
 }
 
 // Sweep drops every expired entry, of either kind, and returns how many it
@@ -605,10 +614,10 @@ type RevocationCacheStats struct {
 	// a Clear asked for. Growing, narrow invalidation is off (Lineage).
 	ClearsWithoutLineage uint64
 	// Synced reports that revocation signals vouch for the cache now, and
-	// SyncedTTL bounds its answers; false, TTL does. Syncs counts the
-	// signals' Listening, and the Close that left every open signal
-	// listening, each a Clear, among Clears: the watchers' connections,
-	// their first and every reconnect.
+	// SyncedTTL bounds the answers read since they began to listen; false,
+	// TTL bounds every one. Syncs counts the signals' Listening, and the
+	// Close that left every open signal listening: the watchers'
+	// connections, their first and every reconnect. None clears.
 	Synced bool
 	Syncs  uint64
 	// SyncsLost counts the signals' NotListening, and LastSyncLoss is the
@@ -618,8 +627,9 @@ type RevocationCacheStats struct {
 	LastSyncLoss time.Time
 	// Signals counts the notifications revocation signals passed on
 	// (Revoked, RevokedAll), and SignalsWhole those that named no id and
-	// cleared whole (RevokedAll), a part of Clears. Clears less Syncs, SignalsWhole and
-	// ClearsWithoutLineage is the Clears the consumer asked for itself.
+	// cleared whole (RevokedAll), a part of Clears. Clears less
+	// SignalsWhole and ClearsWithoutLineage is the Clears the consumer
+	// asked for itself.
 	Signals, SignalsWhole uint64
 	// Lineage reports that the cache's upstream names each answer's
 	// ancestors, so ClearRevoked drops only what a revocation outdates;
@@ -664,7 +674,6 @@ func (c *RevocationCache) Stats() RevocationCacheStats {
 	// reason.
 	st := RevocationCacheStats{
 		ClearsWithoutLineage: c.clearsWithoutLineage.Load(),
-		Syncs:                c.syncs.Load(),
 		SignalsWhole:         c.signalsWhole.Load(),
 	}
 	st.Clears = c.clears.Load()
@@ -674,6 +683,7 @@ func (c *RevocationCache) Stats() RevocationCacheStats {
 	st.Unrecorded = RevocationCacheCounts{Hits: unrecorded.Hits, Evictions: unrecorded.Evictions, Entries: unrecorded.Entries}
 	st.NarrowClears = c.narrowClears.Load()
 	st.Synced = c.synced.Load()
+	st.Syncs = c.syncs.Load()
 	st.SyncsLost = c.syncsLost.Load()
 	if at := c.lastSyncLoss.Load(); at != nil {
 		st.LastSyncLoss = *at

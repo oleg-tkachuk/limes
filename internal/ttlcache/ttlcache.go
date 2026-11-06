@@ -52,7 +52,8 @@ type stripe struct {
 // Config is what a Cache runs on. Every field is required: the caller
 // resolves its defaults.
 type Config struct {
-	// TTL is how long an answer is served, until SetTTL changes it.
+	// TTL is how long an answer is served, but for one an Extension
+	// covers.
 	TTL time.Duration
 	// MaxEntries bounds the cache: past it, an entry makes room — the
 	// oldest of its shard's, which in a cache big enough to have several
@@ -82,9 +83,9 @@ type Cache[K comparable] struct {
 	cfg    Config
 	seed   maphash.Seed
 	shards []*shard[K]
-	// ttl is how long an answer is served, in nanoseconds: Config.TTL until
-	// SetTTL. Each answer is judged by the one in force when it is read.
-	ttl atomic.Int64
+	// ext is the Extension in force, nil for none. Each answer is judged
+	// by the one in force when it is read.
+	ext atomic.Pointer[Extension]
 	// seq counts Clears and Forgets, each of which takes the next number;
 	// a lookup, or a seed, starts in the one current when it began. Written
 	// under forgetMu.
@@ -141,8 +142,9 @@ type shard[K comparable] struct {
 	entries    map[K]cacheEntry[K]
 	inflight   map[K]*lookupCall[K]
 	// order holds the entries' places sorted by when each answer was read,
-	// oldest first, which every entry being judged by one TTL makes the
-	// order they expire in: sweeping stops at the first place not yet
+	// oldest first, which is the order they expire in: every entry is
+	// judged by one TTL, or a later one by an Extension's, never shorter
+	// (Extension). Sweeping stops at the first place not yet
 	// expired, and making room takes the head, so neither walks the
 	// entries. An answer is read when its lookup began, so one that ran
 	// long, or an id seeded from a set's answer, is placed behind the later
@@ -204,7 +206,6 @@ var errLookupAbandoned = errs.Broken("revocation lookup ended without an answer"
 func New[K comparable](cfg Config) *Cache[K] {
 	n := min(maxShards, max(cfg.MaxEntries/minShardEntries, 1))
 	c := &Cache[K]{cfg: cfg, seed: maphash.MakeSeed(), shards: make([]*shard[K], n), recent: make(map[K]uint64)}
-	c.ttl.Store(int64(cfg.TTL))
 	for i := range c.shards {
 		share := cfg.MaxEntries / n
 		if i < cfg.MaxEntries%n {
@@ -218,20 +219,54 @@ func New[K comparable](cfg Config) *Cache[K] {
 // Now is the time by the cache's clock.
 func (c *Cache[K]) Now() time.Time { return c.cfg.Now() }
 
-// TTL is how long an answer is served now.
-func (c *Cache[K]) TTL() time.Duration { return time.Duration(c.ttl.Load()) }
+// Extension serves the answers read after Since for TTL in place of the
+// cache's own: a revocation signal that listens vouches for them, as it
+// cannot for one read before it began to, which may have missed a
+// revocation made while nothing listened. One read at Since itself cannot
+// be told from one read before, and is not covered. TTL is no shorter than the
+// cache's, so an answer read later never expires sooner, and the expiry
+// order stays the order the answers were read in.
+type Extension struct {
+	TTL   time.Duration
+	Since time.Time
+}
 
-// SetTTL changes how long an answer is served, every answer cached already
-// among them: a shorter TTL makes an answer read longer ago than it stale
-// at once.
-func (c *Cache[K]) SetTTL(ttl time.Duration) { c.ttl.Store(int64(ttl)) }
+// Extend puts ext in force, every answer cached already judged by it; nil
+// ends the one in force, which makes every answer older than the cache's
+// own TTL stale at once.
+func (c *Cache[K]) Extend(ext *Extension) { c.ext.Store(ext) }
+
+// judge is how the cache judges an answer's age at one moment.
+type judge struct {
+	now           time.Time
+	ttl, maxStale time.Duration
+	ext           *Extension
+}
+
+// judge is the cache's judge at now.
+func (c *Cache[K]) judge(now time.Time) judge {
+	return judge{now: now, ttl: c.cfg.TTL, maxStale: c.cfg.MaxStale, ext: c.ext.Load()}
+}
+
+// ttlOf is how long an answer read at at is served.
+func (j judge) ttlOf(at time.Time) time.Duration {
+	if j.ext != nil && at.After(j.ext.Since) {
+		return j.ext.TTL
+	}
+	return j.ttl
+}
+
+// fresh reports whether an answer read at at may be served.
+func (j judge) fresh(at time.Time) bool { return j.now.Before(at.Add(j.ttlOf(at))) }
+
+// kept reports whether an answer read at at is kept: for its TTL, and
+// MaxStale past it to stand in for a failed lookup.
+func (j judge) kept(at time.Time) bool {
+	return j.now.Before(at.Add(j.ttlOf(at) + j.maxStale))
+}
 
 // fresh reports whether an answer read at at may be served at now.
-func (c *Cache[K]) fresh(at, now time.Time) bool { return now.Before(at.Add(c.TTL())) }
-
-// keep is how long an answer is kept: the TTL in force, and MaxStale past
-// it to stand in for a failed lookup.
-func (c *Cache[K]) keep() time.Duration { return c.TTL() + c.cfg.MaxStale }
+func (c *Cache[K]) fresh(at, now time.Time) bool { return c.judge(now).fresh(at) }
 
 // shardOf is the shard key belongs to.
 func (c *Cache[K]) shardOf(key K) *shard[K] {
@@ -280,7 +315,7 @@ func (c *Cache[K]) staleOr(ctx context.Context, s *shard[K], key K, revoked bool
 	e, ok := s.entries[key]
 	s.mu.RUnlock()
 	now := c.cfg.Now()
-	if !ok || !now.Before(e.at.Add(c.keep())) {
+	if !ok || !c.judge(now).kept(e.at) {
 		return revoked, at, err
 	}
 	// A live answer covers its tags; with a revocation let go to make room,
@@ -378,13 +413,13 @@ func (c *Cache[K]) Cached(keys []K) (revoked bool, missing []K, epoch uint64) {
 // a stale live answer about a question that spans one of them must not
 // stand for it.
 func (c *Cache[K]) HeldRevoked(keys []K) bool {
-	now, keep := c.cfg.Now(), c.keep()
+	j := c.judge(c.cfg.Now())
 	for _, k := range keys {
 		s := c.shardOf(k)
 		s.mu.RLock()
 		e, ok := s.entries[k]
 		s.mu.RUnlock()
-		if ok && e.revoked && now.Before(e.at.Add(keep)) {
+		if ok && e.revoked && j.kept(e.at) {
 			return true
 		}
 	}
@@ -410,7 +445,7 @@ func (c *Cache[K]) SeedRevoked(key K, epoch uint64) {
 		return
 	}
 	now := c.cfg.Now()
-	c.noteLost(s.makeRoomLocked(now, c.TTL(), c.keep()))
+	c.noteLost(s.makeRoomLocked(c.judge(now)))
 	s.entries[key] = cacheEntry[K]{revoked: true, at: now}
 	s.enqueueLocked(key, now)
 }
@@ -421,11 +456,10 @@ func (c *Cache[K]) SeedRevoked(key K, epoch uint64) {
 // keys would outlive an answer served from the cache near its end. A key
 // that has a fresh answer or a lookup of its own in flight keeps that.
 func (c *Cache[K]) SeedLive(keys []K, epoch uint64, at time.Time) {
-	now := c.cfg.Now()
-	if !c.fresh(at, now) {
+	j := c.judge(c.cfg.Now())
+	if !j.fresh(at) {
 		return
 	}
-	ttl, keep := c.TTL(), c.keep()
 	for _, k := range keys {
 		s := c.shardOf(k)
 		s.mu.Lock()
@@ -436,8 +470,8 @@ func (c *Cache[K]) SeedLive(keys []K, epoch uint64, at time.Time) {
 			continue
 		}
 		_, inflight := s.inflight[k]
-		if e, ok := s.entries[k]; !inflight && (!ok || !c.fresh(e.at, now)) {
-			c.noteLost(s.makeRoomLocked(now, ttl, keep))
+		if e, ok := s.entries[k]; !inflight && (!ok || !j.fresh(e.at)) {
+			c.noteLost(s.makeRoomLocked(j))
 			s.entries[k] = cacheEntry[K]{at: at}
 			s.enqueueLocked(k, at)
 		}
@@ -458,7 +492,7 @@ func (c *Cache[K]) finish(s *shard[K], key K, call *lookupCall[K]) {
 	undoes := ok && held.revoked && !call.revoked && !held.at.Before(call.at)
 	call.discarded = call.err == nil && !c.mayCacheLocked(call.seq, call.revoked, key, call.tags)
 	if call.err == nil && !call.discarded && !undoes {
-		c.noteLost(s.makeRoomLocked(c.cfg.Now(), c.TTL(), c.keep()))
+		c.noteLost(s.makeRoomLocked(c.judge(c.cfg.Now())))
 		s.entries[key] = cacheEntry[K]{revoked: call.revoked, at: call.at, tags: call.tags}
 		s.enqueueLocked(key, call.at)
 	}
@@ -478,10 +512,10 @@ const orderSlack = 2
 // the order, so making room costs no walk of the entries. It returns until
 // when the latest revoked answer it dropped would still have been kept,
 // zero for none.
-func (s *shard[K]) makeRoomLocked(now time.Time, ttl, keep time.Duration) time.Time {
+func (s *shard[K]) makeRoomLocked(j judge) time.Time {
 	var lost time.Time
 	s.compactLocked()
-	s.sweepLocked(now, keep)
+	s.sweepLocked(j)
 	for len(s.entries) >= s.maxEntries {
 		if len(s.order) == 0 {
 			return lost
@@ -492,10 +526,10 @@ func (s *shard[K]) makeRoomLocked(now time.Time, ttl, keep time.Duration) time.T
 		if !ok || !e.at.Equal(q.at) {
 			continue
 		}
-		if until := e.at.Add(keep); e.revoked && now.Before(until) && until.After(lost) {
+		if until := e.at.Add(j.ttlOf(e.at) + j.maxStale); e.revoked && j.now.Before(until) && until.After(lost) {
 			lost = until
 		}
-		if now.Before(e.at.Add(ttl)) {
+		if j.fresh(e.at) {
 			s.evictions++
 		}
 	}
@@ -546,12 +580,13 @@ func (s *shard[K]) popLocked() bool {
 	return true
 }
 
-// sweepLocked drops every expired entry of the shard, oldest first, and
-// returns how many it dropped. It stops at the first place not yet expired:
-// every place after it expires later.
-func (s *shard[K]) sweepLocked(now time.Time, ttl time.Duration) int {
+// sweepLocked drops every entry of the shard past its TTL and MaxStale,
+// oldest first, and returns how many it dropped. It stops at the first
+// place still kept: every place after it was read later, and an Extension
+// serves no later answer for less, so it is kept too.
+func (s *shard[K]) sweepLocked(j judge) int {
 	dropped := 0
-	for len(s.order) > 0 && !now.Before(s.order[0].at.Add(ttl)) {
+	for len(s.order) > 0 && !j.kept(s.order[0].at) {
 		before := len(s.entries)
 		s.popLocked()
 		dropped += before - len(s.entries)
@@ -680,11 +715,11 @@ func (c *Cache[K]) Forget(keys []K) int {
 // Sweep drops every entry past the TTL and MaxStale, and returns how many
 // it dropped.
 func (c *Cache[K]) Sweep() int {
-	now, ttl := c.cfg.Now(), c.keep()
+	j := c.judge(c.cfg.Now())
 	dropped := 0
 	for _, s := range c.shards {
 		s.mu.Lock()
-		dropped += s.sweepLocked(now, ttl)
+		dropped += s.sweepLocked(j)
 		s.mu.Unlock()
 	}
 	return dropped

@@ -676,25 +676,22 @@ func TestARecachedKeyOutlivesItsOldPlace(t *testing.T) {
 	}
 }
 
-// SetTTL judges every answer by the TTL in force when it is read: a
-// shorter one makes an answer read longer ago stale at once, a longer one
-// serves an answer longer, and Sweep drops by the one in force.
-func TestSetTTLJudgesEveryAnswer(t *testing.T) {
+// An Extension judges every answer it covers when it is read: in force, it
+// serves an answer longer; ended, the answer older than the cache's TTL is
+// stale at once, and Sweep drops by the TTL in force.
+func TestAnExtensionJudgesEveryAnswer(t *testing.T) {
 	c, clk := newCache(10)
 	var calls atomic.Int32
-	long := testTTL * 10
-	c.SetTTL(long)
+	c.Extend(&Extension{TTL: testTTL * 10, Since: clk.Now()})
+	clk.advance(time.Nanosecond)
 	if _, _, err := c.Get(t.Context(), "a", counted(false, &calls)); err != nil {
 		t.Fatal(err)
 	}
 	clk.advance(testTTL * 2)
 	if _, _, _ = c.Get(t.Context(), "a", counted(false, &calls)); calls.Load() != 1 {
-		t.Fatalf("under the long TTL: %d lookups, want the answer served", calls.Load())
+		t.Fatalf("under the extension: %d lookups, want the answer served", calls.Load())
 	}
-	c.SetTTL(testTTL)
-	if c.TTL() != testTTL {
-		t.Fatalf("TTL = %s, want %s", c.TTL(), testTTL)
-	}
+	c.Extend(nil)
 	if _, missing, _ := c.Cached([]string{"a"}); len(missing) != 1 {
 		t.Error("an answer older than the shorter TTL still served by Cached")
 	}
@@ -703,6 +700,36 @@ func TestSetTTLJudgesEveryAnswer(t *testing.T) {
 	}
 	if _, _, _ = c.Get(t.Context(), "a", counted(false, &calls)); calls.Load() != 2 {
 		t.Errorf("under the shorter TTL: %d lookups, want the answer read again", calls.Load())
+	}
+}
+
+// An Extension serves longer only the answers read since it began: one
+// read before keeps the cache's own TTL, whenever the Extension came into
+// force, and is swept by it while a later answer is kept.
+func TestAnExtensionCoversOnlyTheAnswersReadSince(t *testing.T) {
+	c, clk := newCache(10)
+	var calls atomic.Int32
+	if _, _, err := c.Get(t.Context(), "before", counted(false, &calls)); err != nil {
+		t.Fatal(err)
+	}
+	clk.advance(testTTL / 2)
+	c.Extend(&Extension{TTL: testTTL * 10, Since: clk.Now()})
+	clk.advance(time.Nanosecond)
+	if _, _, err := c.Get(t.Context(), "since", counted(false, &calls)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _ = c.Get(t.Context(), "before", counted(false, &calls)); calls.Load() != 2 {
+		t.Fatalf("within the TTL: %d lookups, want the answer read before served", calls.Load())
+	}
+	clk.advance(testTTL / 2)
+	if dropped := c.Sweep(); dropped != 1 {
+		t.Errorf("Sweep dropped %d, want the answer read before the extension", dropped)
+	}
+	for key, lookups := range map[string]int32{"before": 1, "since": 0} {
+		n := calls.Load()
+		if _, _, err := c.Get(t.Context(), key, counted(false, &calls)); err != nil || calls.Load()-n != lookups {
+			t.Errorf("%s, a TTL on: %d lookups, %v; want %d", key, calls.Load()-n, err, lookups)
+		}
 	}
 }
 
@@ -716,7 +743,7 @@ const forgetRounds = 100
 func TestTheOrderStaysBoundedUnderForget(t *testing.T) {
 	const bound = 4
 	c, _ := newCache(bound)
-	c.SetTTL(testTTL * 10)
+	c.Extend(&Extension{TTL: testTTL * 10})
 	var calls atomic.Int32
 	for round := range forgetRounds {
 		keys := []string{keyName(round % fuzzKeys), keyName((round + 1) % fuzzKeys), keyName((round + 2) % fuzzKeys)}
