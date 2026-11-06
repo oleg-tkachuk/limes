@@ -75,7 +75,13 @@ export async function lastStableTag(module: Module, rev: string, cwd: string): P
 // and counting it as well would count their change twice.
 export async function pendingCommits(module: Module, rev: string, commits: ReleaseCommits, cwd: string): Promise<Pending[]> {
   const from = await lastStableTag(module, rev, cwd);
-  const range = from === undefined ? rev : `${from}..${rev}`;
+  return releasingCommits(module, from === undefined ? rev : `${from}..${rev}`, commits, cwd);
+}
+
+// releasingCommits is every commit of the revision range that touches the
+// module and that its rules release, merges not counted, as pendingCommits
+// counts them.
+export async function releasingCommits(module: Module, range: string, commits: ReleaseCommits, cwd: string): Promise<Pending[]> {
   const hashes = lines(await git(["log", "--no-merges", "--format=%H", range], cwd));
   const scope = module.table?.configFor(module.name);
   const pending: Pending[] = [];

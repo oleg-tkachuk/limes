@@ -89,7 +89,8 @@ export interface PullRequestText {
   title: string;
   body: string;
   // draft opens the pull request as a draft, or makes an open one a draft:
-  // merge-green.ts leaves a draft for a person. Absent, it is left as it is.
+  // merge-green.ts leaves a draft for a person. false opens it ready, or
+  // makes an open draft ready for review. Absent, it is left as it is.
   draft?: boolean;
 }
 
@@ -146,6 +147,9 @@ export interface GitHub {
   sameRepoPullRequest(head: string, base: string): Promise<number | undefined>;
   createPullRequest(head: string, base: string, text: PullRequestText): Promise<number>;
   editPullRequest(number: number, text: PullRequestText): Promise<void>;
+  // setDraft makes an open pull request a draft, or ready for review; one
+  // already so is left as it is.
+  setDraft(number: number, draft: boolean): Promise<void>;
   // finishedRunsOf is the ids of the completed push runs of the workflow
   // file on branch that tested sha, whatever they concluded, newest first.
   finishedRunsOf(workflow: string, branch: string, sha: string): Promise<number[]>;
@@ -203,9 +207,12 @@ function workflowFile(workflow: string): string {
   return workflow.split("/").at(-1) ?? workflow;
 }
 
-// OctokitGitHub is the GitHub of repo through octokit's REST API.
-// CONVERT_TO_DRAFT makes an open pull request a draft.
+// CONVERT_TO_DRAFT makes an open pull request a draft; MARK_READY makes a
+// draft ready for review. The REST API does neither.
 const CONVERT_TO_DRAFT = "mutation($id: ID!) { convertPullRequestToDraft(input: { pullRequestId: $id }) { clientMutationId } }";
+const MARK_READY = "mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { clientMutationId } }";
+
+// OctokitGitHub is the GitHub of repo through octokit's REST API.
 
 class OctokitGitHub implements GitHub {
   private readonly octokit: Octokit;
@@ -337,9 +344,21 @@ class OctokitGitHub implements GitHub {
 
   async editPullRequest(number: number, text: PullRequestText): Promise<void> {
     const { data } = await this.octokit.rest.pulls.update({ ...this.repo, pull_number: number, title: text.title, body: text.body });
-    // The REST API cannot make an open pull request a draft; GraphQL can.
-    if (text.draft === true && !(data.draft ?? false)) {
-      await this.octokit.graphql(CONVERT_TO_DRAFT, { id: data.node_id });
+    if (text.draft !== undefined) {
+      await this.draftAs(data.node_id, data.draft ?? false, text.draft);
+    }
+  }
+
+  async setDraft(number: number, draft: boolean): Promise<void> {
+    const { data } = await this.octokit.rest.pulls.get({ ...this.repo, pull_number: number });
+    await this.draftAs(data.node_id, data.draft ?? false, draft);
+  }
+
+  // draftAs makes the pull request of node id, a draft now or not, a draft
+  // or ready for review, through GraphQL.
+  private async draftAs(id: string, now: boolean, draft: boolean): Promise<void> {
+    if (now !== draft) {
+      await this.octokit.graphql(draft ? CONVERT_TO_DRAFT : MARK_READY, { id });
     }
   }
 

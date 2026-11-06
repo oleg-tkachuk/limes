@@ -169,8 +169,9 @@ jobs:
       # The releases a merged release pull request planned, each tagged on
       # the commit that merged it with the deploy key, published with its
       # changelog entry as its notes, and the Go proxy told of it; a nested
-      # module no tag names yet has its release line started first. See
-      # .github/ci/release-tag.ts.
+      # module no tag names yet has its release line started first. A plan
+      # merged after a commit it did not count tags nothing and fails the
+      # run. See .github/ci/release-tag.ts.
       - name: Tag the planned releases
         id: tag
         if: steps.catchup.outputs.release == 'true' && (inputs.channel || 'release') == 'release'
@@ -215,7 +216,9 @@ jobs:
   # After the tags, the next release pull request: one commit raising each
   # nested module's requirement of limes and adding each changelog entry,
   # from the semantic-release dry runs of main's head. A pull request that
-  # cuts a major is a draft, which auto-merge.yaml leaves for a person. It
+  # cuts a major is a draft, which auto-merge.yaml leaves for a person; any
+  # other is made ready, once release-stale.yaml made it a draft for a
+  # commit its plan had not counted, unless main moved past this plan too. It
   # acts through AUTOMERGE_TOKEN, never GITHUB_TOKEN: a branch pushed with
   # GITHUB_TOKEN would get no CI, and its pull request would wait forever on
   # its required check (auto-merge.yaml, which then merges it). Without the

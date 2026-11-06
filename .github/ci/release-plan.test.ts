@@ -355,10 +355,40 @@ describe("the release plan", () => {
       dryRuns.limes = "# [1.0.0](https://example.com/compare) (2026-10-31)\n\n* broke\n";
       data.pullsFrom.set(BRANCH, 7);
       const proposed = await proposeRelease(ctx());
-      assert.deepEqual(proposed, { pullRequest: 7, major: true });
+      assert.deepEqual(proposed, { pullRequest: 7, major: true, stale: false });
       assert.deepEqual(data.createdPulls, []);
       assert.match(data.editedPulls[0]?.text.body ?? "", /cuts a major/);
       assert.equal(data.editedPulls[0]?.text.draft, true, "a major is held as a draft, which merge-green leaves");
+    });
+
+    test("the pull request still open, made a draft by a stale plan, is made ready by a plan of no major", async () => {
+      data.pullsFrom.set(BRANCH, 7);
+      const proposed = await proposeRelease(ctx());
+      assert.deepEqual(proposed, { pullRequest: 7, major: false, stale: false });
+      assert.equal(data.editedPulls[0]?.text.draft, false, "a plan of no major is made ready for review");
+    });
+
+    test("a plan main has moved past while it was made is left a draft", async () => {
+      // main gains a feature on the remote that this checkout, the plan's
+      // base, does not hold.
+      repo.write("later.go", "package limes\n");
+      await repo.commit("feat: a feature after the plan");
+      await repo.run("push", "--quiet", "origin", "main");
+      await repo.run("reset", "--quiet", "--hard", "HEAD~1");
+      data.pullsFrom.set(BRANCH, 7);
+      const proposed = await proposeRelease(ctx());
+      assert.deepEqual(proposed, { pullRequest: 7, major: false, stale: true });
+      assert.equal(data.editedPulls[0]?.text.draft, true, "a stale plan stays a draft for the next run");
+    });
+
+    test("a plan main has moved past with documentation alone is made ready", async () => {
+      repo.write("README.md", "# limes\n");
+      await repo.commit("docs: a word");
+      await repo.run("push", "--quiet", "origin", "main");
+      await repo.run("reset", "--quiet", "--hard", "HEAD~1");
+      const proposed = await proposeRelease(ctx());
+      assert.equal(proposed?.stale, false);
+      assert.equal(data.createdPulls[0]?.text.draft, false);
     });
 
     test("nothing due proposes nothing", async () => {
