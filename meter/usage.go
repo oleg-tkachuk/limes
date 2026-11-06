@@ -215,10 +215,15 @@ type BudgetMeter interface {
 	// the tenant aggregate, checking every ceiling against spend plus
 	// what is already held. Holds count against later charges and
 	// reservations exactly as spend does, until the reservation is
-	// settled, released or expires. A hold expires req.TTL from now, or when
-	// its capability's record does if that comes sooner: past it no one can
-	// settle the hold. A capability whose record has already expired — one
-	// a late cost names through StoredMeterSubject — is refused ErrExpired.
+	// settled, released or expires. A hold expires req.TTL from now, or with
+	// its capability's record if that comes sooner: past it no one can
+	// settle the hold. Whether a token has expired is its verifier's to
+	// decide, by its own clock and leeway, so a store whose clock is not the
+	// verifier's may end the hold up to the leeway past the record's expiry
+	// that a verifier may still accept the token for. A capability past
+	// that — one a late cost names through StoredMeterSubject — is refused
+	// ErrExpired; a store that shares the verifier's clock may refuse it
+	// from the record's expiry on.
 	// Rejections return the Charge sentinels and hold nothing.
 	//
 	// With req.ReservationID set, Reserve is idempotent on it: a hold
@@ -570,8 +575,8 @@ type ReserveRequest struct {
 	// (Nanos.Validate).
 	Amount limes.Nanos
 	// TTL is how long the hold lasts if never settled or released, at most
-	// until its capability expires. 0 = DefaultReservationTTL; negative is
-	// ErrInvalidRequest.
+	// until its capability expires (Meter.Reserve). 0 =
+	// DefaultReservationTTL; negative is ErrInvalidRequest.
 	TTL time.Duration
 	// Op and Actor are carried onto the charge Settle records.
 	Op    limes.Op
