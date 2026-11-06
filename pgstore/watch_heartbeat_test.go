@@ -21,8 +21,22 @@ import (
 const heartbeatForTests = 100 * time.Millisecond
 
 // quietBeats is how many heartbeats a live, quiet connection is watched
-// through.
-const quietBeats = 3
+// through: twice a signalled cache's lease, which the answered heartbeats
+// alone must keep renewing.
+const quietBeats = 2 * watchLeaseBeats
+
+// renewalGapBeats is the longest a quiet, live connection goes between two
+// renewals, in heartbeats: a wait for a notification, then a ping.
+const renewalGapBeats = 2
+
+// The lease a signalled cache is given outlasts the longest gap between two
+// renewals of a live connection, so only a watcher that stopped lets it
+// lapse.
+func TestTheWatchLeaseOutlastsTheGapBetweenRenewals(t *testing.T) {
+	if watchLeaseBeats <= renewalGapBeats {
+		t.Errorf("a lease of %d heartbeats lapses within the %d a live connection may go unrenewed", watchLeaseBeats, renewalGapBeats)
+	}
+}
 
 // proxyBuffer is the size of each read the proxy relays.
 const proxyBuffer = 32 << 10
@@ -110,7 +124,7 @@ func (p *freezingProxy) connect(ctx context.Context) (*pgx.Conn, error) {
 }
 
 // A quiet connection that answers its heartbeats keeps vouching for the
-// cache; one that stops answering, though its socket stays open, ends as a
+// cache, each answer renewing its lease; one that stops answering, though its socket stays open, ends as a
 // lost one does, so the cache serves its short TTL within a few heartbeats
 // rather than once TCP gives up.
 func TestRevocationWatcherHeartbeatFindsADeadConnection(t *testing.T) {
