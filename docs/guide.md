@@ -1422,9 +1422,13 @@ its context and which is `onCharged`'s only while it runs: kept past it, a
 call fails with `pgx.ErrTxClosed`. It is the store's to end — `Commit` or
 `Rollback` on it returns `ErrChargeTransaction`, and a charge whose
 transaction `onCharged` ended with SQL of its own (`COMMIT`, `ROLLBACK`, or
-either followed by `BEGIN`) is refused with `ErrChargeTransaction`; a
-savepoint it begins is its own to end. Every time it writes comes from
-`Config.Now`, never from the database's clock.
+either followed by `BEGIN`) is refused with `ErrChargeTransaction` and
+`meter.ErrOutcomeUnknown`, since the charge's writes, sent before
+`onCharged` ran, went with that `COMMIT` or that `ROLLBACK`; a savepoint it
+begins is its own to end. Every time it writes comes from `Config.Now`; with
+`Config.Now` nil, holds' and leases' expiry is measured by the database's
+clock, `now()` as the call's transaction began, so replicas whose clocks
+drift apart agree on which holds are live.
 
 A tenant's ceiling is exact because every call that moves its spend or holds
 — `Charge`, `Reserve`, `Settle`, `Refund`, `Release`, `ReleaseExpired`,
@@ -1434,8 +1438,9 @@ no number of connections or replicas raises that: pgstore's benchmarks, with
 PostgreSQL on the same host, put it at some 350–700 charges a second for one
 tenant. Other tenants do not wait on it, nor do `Bump` and the revocation
 checks. A network to the database adds its round trip to every statement of
-the transaction, and `onCharged` runs while the lock is held, so keep it
-short; a tenant that needs more is served by fewer, larger charges — a
+the transaction, and `onCharged` runs while the lock is held — after the
+charge's writes, before `COMMIT` — so keep it short and on the same
+database, with no network call in it; a tenant that needs more is served by fewer, larger charges — a
 `Reserve` settled once for many units of work — not by a setting.
 
 The schema is created and upgraded by `pgstore/migrate`, which only a

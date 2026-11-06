@@ -1,6 +1,6 @@
 # ADR-0018: Fewer round trips per charge
 
-**Status:** Accepted, amended by its rollout and on 2026-11-05 (below)
+**Status:** Accepted, amended by its rollout, on 2026-11-05 and on 2026-11-06 (below)
 **Date:** 2026-10-31
 **Deciders:** Oleg Tkachuk
 **Relates to:** [ADR-0007](0007-pgstore-components.md), [ADR-0017](0017-budget-leases.md)
@@ -199,12 +199,31 @@ What the rollout did not do, and why:
   `BeginTx` and `QueryRow` for v1; step 6 adds `ConnLender` beside it,
   found by type assertion, rather than a method on it. A `DB` of one's own
   that does not implement `ConnLender` keeps step 4's round
-  trips. `Settle` deletes its hold after the write batch, so its `COMMIT`
-  stays a round trip of its own.
+  trips.
 
-The figures in force are step 6's, pinned by `pgstore/round_trips_test.go`:
-`Charge` 4 round trips, `Bump` 3, `Reserve` 5 and a `Bump` under a lease 3,
-whatever the depth, on a `Config.DB` that lends a connection; 6, 5, 7 and 5
-on one that does not. A `Charge` holds the tenant's aggregate for two.
+7. The calls that end a hold or a charge, and `onCharged`, on 2026-11-06.
+   `onCharged` ran before the write batch, with a transaction id read on
+   each side of it: under every lock, two round trips and the callback's
+   own time. The write batch now goes first, without `COMMIT`, marking
+   the transaction (a `set_config` local to it); `onCharged` runs; and
+   `COMMIT` goes in one batch with a statement that fails unless the
+   transaction still carries the mark, so one `onCharged` ended and began
+   again with SQL of its own does not commit. Its writes went before it, so
+   a `COMMIT` or `ROLLBACK` of its own took them along: the call is refused
+   as `ErrChargeTransaction` and `meter.ErrOutcomeUnknown`. `Settle` deletes
+   its hold in its write batch, and `Settle`, `Release` and `Refund` carry
+   `COMMIT` in theirs, a keyed `Refund` its key's lookup with the charge's
+   lock and its record with the writes. `ReleaseExpired`, `ReleaseMatching`
+   and `DeleteUsage` read every counter of their holds in the batch that
+   locks them, sum the releases and write them in one batch: as many round
+   trips for a thousand holds as for one, where each hold took three.
+
+The figures in force are step 7's, pinned by `pgstore/round_trips_test.go`:
+`Charge` 4 round trips, 5 with `onCharged`, `Bump` 3, `Reserve` 5, a keyed
+`Reserve` 6, `Settle` 5, `Release` 4, `Refund` 5, keyed or not, and a `Bump`
+under a lease 3, whatever the depth, on a `Config.DB` that lends a
+connection; two more each on one that does not. `ReleaseExpired` takes 5
+for one batch of holds of any size. A `Charge` holds the tenant's
+aggregate for two, and one with `onCharged` for two and the callback.
 They replace the three round trips of decisions 1 and 6, Option A and the
 Consequences.

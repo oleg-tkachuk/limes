@@ -148,10 +148,15 @@ type BudgetMeter interface {
 	// (pgstore.TxFrom; a store with none hands the caller's context on), and
 	// the receipt the call will return (Charged), so
 	// a side effect such as an outbox write commits with the spend and names
-	// the ChargeID. The ledger row is written after onCharged returns: it is
-	// not there yet to read. Pass nil to skip it. It must not call back into the Meter: an implementation may
-	// hold its counters while onCharged runs, so a nested call can wait on
-	// itself.
+	// the ChargeID. Whether the ledger row is there yet to read is the
+	// store's: pgstore writes it before onCharged runs, memstore after. Pass
+	// nil to skip it. It must not call back into the Meter: an
+	// implementation may hold its counters while onCharged runs, so a nested
+	// call can wait on itself. A store with transactions runs it inside the
+	// locked transaction — the chain's counters and the tenant's aggregate,
+	// which every other charge of the tenant waits for — so it is short, and
+	// touches only that store's database, through the transaction it is
+	// handed: no network call.
 	//
 	// The returned receipt carries the ledger row's ID; Refund takes it.
 	//
