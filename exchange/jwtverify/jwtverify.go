@@ -88,8 +88,14 @@ type Config struct {
 	ClientIDClaim string
 	// Algorithms are the JWS algorithms accepted. Empty: DefaultAlgorithms.
 	Algorithms []string
-	// ClockSkew is how far exp, nbf and iat may be off the clock.
+	// ClockSkew is how far exp, nbf and iat may be off the clock: the
+	// identity provider's clock is not the verifier's. Zero:
+	// limes.DefaultLeeway, the skew a limes verifier allows a capability's
+	// times; negative is refused.
 	ClockSkew time.Duration
+	// NoClockSkew holds exp, nbf and iat to the clock exactly, for an
+	// identity provider that shares it. It excludes a ClockSkew.
+	NoClockSkew bool
 	// Now is the clock. Nil: time.Now.
 	Now func() time.Time
 }
@@ -174,11 +180,30 @@ func New(cfg Config) (*Verifier, error) {
 			return nil, fmt.Errorf("%w: jwtverify: Config.Algorithms names %q, which is not one of %q", limes.ErrInvalidConfig, alg, DefaultAlgorithms)
 		}
 	}
+	if err := setClockSkew(&cfg); err != nil {
+		return nil, err
+	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
 	cfg.Types, cfg.Algorithms = slices.Clone(cfg.Types), slices.Clone(cfg.Algorithms)
 	return &Verifier{cfg: cfg}, nil
+}
+
+// setClockSkew refuses a negative skew or one beside NoClockSkew, and gives
+// an unset one limes.DefaultLeeway.
+func setClockSkew(cfg *Config) error {
+	switch {
+	case cfg.ClockSkew < 0:
+		return fmt.Errorf("%w: jwtverify: Config.ClockSkew %s is negative", limes.ErrInvalidConfig, cfg.ClockSkew)
+	case cfg.NoClockSkew && cfg.ClockSkew != 0:
+		return fmt.Errorf("%w: jwtverify: Config.ClockSkew %s beside NoClockSkew", limes.ErrInvalidConfig, cfg.ClockSkew)
+	case cfg.NoClockSkew:
+		// ClockSkew stays 0: the times are held to the clock exactly.
+	case cfg.ClockSkew == 0:
+		cfg.ClockSkew = limes.DefaultLeeway
+	}
+	return nil
 }
 
 // VerifySubject verifies token as an RFC 9068 access token of the
