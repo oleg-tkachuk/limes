@@ -1954,7 +1954,7 @@ ex, err := exchange.NewExchanger(exchange.Config{
   within one trust domain. An exchange asking for another audience than the
   capability's is refused.
 - A policy that names no TTL gives the capability the subject token's
-  remaining life, not `DefaultTTL`; one that names a shorter TTL leaves the
+  remaining life, not the issuer's default; one that names a shorter TTL leaves the
   rest of the token's life refused.
 - The policy runs on every exchange, since it names the tenant.
 

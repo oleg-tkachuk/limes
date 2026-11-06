@@ -268,8 +268,12 @@ at an RFC 8693 token endpoint (`Handler`):
   names the client in another claim, is read only by naming either in its
   config. A token bound otherwise than by a DPoP key (`cnf` without `jkt`,
   or with more) is refused: a bearer capability would drop the binding.
-  Keys its `KeySource` cannot give, the identity provider's JWKS never
-  fetched, are the server's failure, not a refusal of the token. Its `sid`,
+  Its times are checked with `limes.DefaultLeeway` of skew unless its
+  config names another. Keys its `KeySource` cannot give, the identity
+  provider's JWKS never fetched or failing for longer than
+  `jwks.DefaultMaxStale`, are the server's failure, not a refusal of the
+  token; a kid the set does not hold fetches it again, at most once per
+  `jwks.DefaultMinRefreshInterval`. Its `sid`,
   the session of OpenID Connect Back-Channel Logout §2.4, is read as the
   subject's session and recorded beside the capability, so a logout token
   for the session revokes what was exchanged in it
@@ -296,7 +300,8 @@ at an RFC 8693 token endpoint (`Handler`):
   of no one else: a policy naming another is the server's fault.
 - **The response.** A capability, `issued_token_type` its URI,
   `token_type` `DPoP` when bound and `Bearer` otherwise; `Cache-Control:
-  no-store`. A refusal is RFC 6749 §5.2's JSON with RFC 8707's
+  no-store`; `scope`, when asked for, the scopes the policy granted, each
+  one asked (RFC 6749 §5.1). A refusal is RFC 6749 §5.2's JSON with RFC 8707's
   `invalid_target`, RFC 9396's `invalid_authorization_details` and RFC 9449's `invalid_dpop_proof` and
   `use_dpop_nonce`, and a fixed description per code. A client past its
   share of the replay cache gets 429 and `temporarily_unavailable`, RFC
@@ -333,9 +338,10 @@ at an RFC 8693 token endpoint (`Handler`):
   and budget ceiling lowered to the tightest a Biscuit copy's blocks set.
   A copy with limits of its own on a verifier without `MeterCopies` is
   answered inactive, as `Verify` refuses it. A store that
-  cannot answer is a 500, never an inactive token. With
-  `IntrospectionConfig.Audiences`, a token whose `aud` names none of the
-  calling client's audiences is answered inactive (§4). Neither audience nor
+  cannot answer is a 500, never an inactive token. A token whose `aud`
+  names none of the calling client's audiences
+  (`IntrospectionConfig.Audiences`) is answered inactive (§4); an endpoint
+  is built without them only when `AnyAudience` says so. Neither audience nor
   proof of possession is checked: the answer is no authorization, and
   `Introspect` yields nothing `Delegate` takes.
 
@@ -348,8 +354,12 @@ at an RFC 8693 token endpoint (`Handler`):
 `TestNarrowHoldsABoundParentToItsKey`, `TestNarrowRefusals`,
 `TestWellKnownURLs`, `TestResourceMetadataHandler`,
 `TestAuthorizationServerMetadataHandler`, `TestKeysOutageIsTheServers`,
+`TestVerifierClockSkew`, `TestRemoteKeysFetchAnUnknownKID`,
+`TestRemoteKeysServeAStaleSetForABoundedTime`,
 `TestJWTVerifierKeepsTheContract`, `TestIntrospectionActive`,
-`TestIntrospectionInactive`, `TestIntrospectionOutage`, `TestIntrospectionHoldsACopyToItsLimits`, `TestIntrospectionHoldsTheClientToItsAudiences`, `TestEffectiveCaveats`, `TestIntrospectHoldsACopyToItsLimits`, `TestIntrospectActive`,
+`TestIntrospectionInactive`, `TestIntrospectionOutage`, `TestIntrospectionHoldsACopyToItsLimits`, `TestIntrospectionHoldsTheClientToItsAudiences`, `TestIntrospectionIsClosedByDefault`,
+`TestHandlerAnswersTheScopesGranted`, `TestExchangeHoldsTheGrantedScopes`,
+`TestEffectiveCaveats`, `TestIntrospectHoldsACopyToItsLimits`, `TestIntrospectActive`,
 `TestIntrospectInactive`, `TestIntrospectOutageIsNotInactive`, `TestMarshalCaveatsIsTheClaim`, and the fuzz target
 `FuzzCheckForm`, in `exchange`; and the `mcp-exchange` example.
 

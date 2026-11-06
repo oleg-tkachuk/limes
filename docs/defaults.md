@@ -176,7 +176,8 @@ or be marked breaking by hand.
 | `exchange.HandlerConfig` | `Logger` | `slog.Default()` |  |
 | `exchange.IntrospectionConfig` | `Verifier` | required |  |
 | `exchange.IntrospectionConfig` | `Authenticate` | required |  |
-| `exchange.IntrospectionConfig` | `Audiences` | none | Any authenticated client learns about any token. |
+| `exchange.IntrospectionConfig` | `Audiences` | required | Unless `AnyAudience`. |
+| `exchange.IntrospectionConfig` | `AnyAudience` | off | A client learns only about tokens of the audiences `Audiences` gives it. |
 | `exchange.IntrospectionConfig` | `MaxBodyBytes` | `DefaultMaxBodyBytes` |  |
 | `exchange.IntrospectionConfig` | `Logger` | `slog.Default()` |  |
 | `jwtverify.Config` | `Issuer` | required |  |
@@ -184,13 +185,13 @@ or be marked breaking by hand.
 | `jwtverify.Config` | `Types` | `TypeAccessToken`, `TypeAccessTokenMedia` |  |
 | `jwtverify.Config` | `ClientIDClaim` | `ClaimClientID` |  |
 | `jwtverify.Config` | `Algorithms` | `DefaultAlgorithms` |  |
-| `jwtverify.Config` | `ClockSkew` | none | exp, nbf and iat are held to the clock exactly. |
+| `jwtverify.Config` | `ClockSkew` | `limes.DefaultLeeway` |  |
+| `jwtverify.Config` | `NoClockSkew` | off | `ClockSkew` applies. |
 | `jwtverify.Config` | `Now` | `time.Now` |  |
 
 | Constant | Value |
 |---|---|
 | `exchange.DefaultMaxBodyBytes` | `64 << 10` |
-| `exchange.DefaultTTL` | `15 * time.Minute` |
 | `jwtverify.DefaultAlgorithms` | `[]string{"RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "ES512", "EdDSA", "Ed25519"}` |
 
 otelmetric and biscuit take no `Config`.

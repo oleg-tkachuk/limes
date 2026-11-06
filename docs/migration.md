@@ -90,6 +90,47 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
   `exchange.ErrorCodes` name the new code. The holder at the token
   endpoint is the client, so with the defaults one client passes about 15
   DPoP-bound exchanges a second ([guide](guide.md#the-replay-caches-share-caps-a-holders-rate)).
+- `exchange.DefaultTTL` is gone. A policy that names no TTL gives the
+  capability the Issuer's own default, `IssuerConfig.DefaultTTL`
+  (`limes.Issuer.DefaultTTL`, new in limes `v0.168.0`, which this release
+  needs), still capped at the subject token's remaining life, where the
+  exchange's fifteen minutes overrode it. An issuer configured with
+  another default now sets the exchange's.
+- A `Policy` returns an `exchange.Decision`, a `NarrowPolicy` an
+  `exchange.NarrowDecision`: the capability as before, beside the scopes
+  granted. The token response's `scope` is those scopes, where it echoed
+  the scopes asked (RFC 6749 §5.1); `Result.Scopes` carries them. Empty
+  grants every scope asked, as before; a scope not asked for is the
+  policy's fault, answered `server_error`.
+
+  ```go
+  // before
+  func policy(ctx context.Context, g exchange.Grant) (limes.IssueRequest, error) {
+  	return limes.IssueRequest{ /* … */ }, nil
+  }
+  // after
+  func policy(ctx context.Context, g exchange.Grant) (exchange.Decision, error) {
+  	return exchange.Decision{Issue: limes.IssueRequest{ /* … */ }, Scopes: granted}, nil
+  }
+  ```
+- `IntrospectionConfig` needs `Audiences`, or the new `AnyAudience: true`:
+  a nil `Audiences` let any authenticated client learn about any token,
+  and now `NewIntrospectionHandler` refuses it, as it refuses both set
+  (RFC 7662 §4). A deployment that meant the open endpoint sets
+  `AnyAudience`.
+- `jwtverify.Config.ClockSkew` zero is `limes.DefaultLeeway`, 30 seconds,
+  where it held exp, nbf and iat to the clock exactly; the new
+  `NoClockSkew: true` keeps the exact check, and a negative skew is
+  refused.
+- `jwtverify.RemoteKeys` serves the last set fetched for at most
+  `jwks.DefaultMaxStale` while the JWKS URL is out of reach, where it
+  served it for good; past it, and before any fetch, the keys are an
+  error wrapping `jwks.ErrUnavailable`, answered as the server's failure.
+  A token naming a kid the set does not hold fetches it again, at most
+  once per `jwks.DefaultMinRefreshInterval`, and the set is fetched every
+  `jwks.DefaultRefreshInterval` whatever the provider's Cache-Control
+  says. Fetches a token starts, and failed fetches, are logged to
+  `slog.Default()`.
 
 ## pgstore/v0.68.0
 
