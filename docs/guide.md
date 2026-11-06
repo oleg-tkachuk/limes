@@ -1493,7 +1493,8 @@ PostgreSQL on the same host, put it at some 350–700 charges a second for one
 tenant. Other tenants do not wait on it, nor do `Bump` and the revocation
 checks. A network to the database adds its round trip to every statement of
 the transaction, and `onCharged` runs while the lock is held — after the
-charge's writes, before `COMMIT` — so keep it short and on the same
+charge's writes, so that its own writes see the charge's row, and before
+`COMMIT`, which then costs a round trip of its own — so keep it short and on the same
 database, with no network call in it; a tenant that needs more is served by fewer, larger charges — a
 `Reserve` settled once for many units of work — not by a setting.
 
