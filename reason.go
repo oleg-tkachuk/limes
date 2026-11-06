@@ -25,6 +25,7 @@ const (
 	ReasonExpired                Reason = "expired"
 	ReasonNotYetValid            Reason = "not_yet_valid"
 	ReasonRevoked                Reason = "revoked"
+	ReasonUnrecorded             Reason = "unrecorded"
 	ReasonAudienceMismatch       Reason = "audience_mismatch"
 	ReasonBiscuitAttenuation     Reason = "biscuit_attenuation"
 	ReasonProofRequired          Reason = "proof_required"
@@ -78,6 +79,9 @@ var refusalRules = []refusalRule{
 	{ErrExpired, ReasonExpired, true, answerToken},
 	{ErrNotYetValid, ReasonNotYetValid, false, answerToken},
 	{ErrRevoked, ReasonRevoked, true, answerToken},
+	// The record may yet be seen — a replica catching up, a store restored —
+	// so the refusal does not stand.
+	{ErrUnrecorded, ReasonUnrecorded, false, answerToken},
 	{ErrAudienceMismatch, ReasonAudienceMismatch, true, answerToken},
 	{ErrUnauthenticated, "", false, answerToken},
 

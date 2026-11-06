@@ -57,7 +57,28 @@ type VerifierConfig struct {
 	// Revocations answers whether a capability — or any ancestor in its
 	// delegation chain — is revoked. Wrap the store in a
 	// RevocationCache to keep the per-call cost flat.
+	//
+	// It must see the records of every issuer in TrustedIssuers: a
+	// capability it has no record of reads as not revoked (IsRevoked), so
+	// one whose issuer records elsewhere — another store, a tenant the
+	// lookup's role cannot see, rows a restore from backup lost — verifies
+	// and can never be revoked. RequireRecord refuses such a capability
+	// instead.
 	Revocations RevocationLookup
+
+	// RequireRecord refuses, with ErrUnrecorded, a capability Revocations
+	// has no record of, where it would be read as not revoked; a Biscuit's
+	// capability as a JWT's. Revocations must then tell the two apart: a
+	// RevocationLineageLookup, as memstore's and pgstore's Store are, or a
+	// RevocationCache over one; NewVerifier refuses any other with
+	// ErrInvalidConfig. A type of yours that wraps such a cache is not seen
+	// through: pass the cache itself. A RevocationLineageLookup that
+	// answers an id not on record as not revoked, against its contract,
+	// defeats the option unseen. An Issuer returns a token only once its
+	// record is written, so with the option on only a lookup that reads a
+	// lagging replica refuses a token for want of its record, until the
+	// record arrives there; a RevocationCache keeps that answer for its TTL.
+	RequireRecord bool
 
 	// TrustedIssuers is the set of issuer values the verifier accepts.
 	// Tokens whose `iss` claim is not in the set are rejected with
@@ -229,8 +250,21 @@ func checkVerifierWiring(cfg VerifierConfig) error {
 		return invalidConfig("limes: VerifierConfig.Revocations required")
 	case len(cfg.TrustedIssuers) == 0:
 		return invalidConfig("limes: VerifierConfig.TrustedIssuers required")
+	case cfg.RequireRecord && !tellsUnrecorded(cfg.Revocations):
+		return invalidConfig("limes: VerifierConfig.RequireRecord over %T, which tells no capability not on record from one not revoked", cfg.Revocations)
 	}
 	return nil
+}
+
+// tellsUnrecorded reports whether lookup tells a capability not on record
+// from one not revoked: a RevocationCache whose upstream does, or a
+// RevocationLineageLookup of any other type.
+func tellsUnrecorded(lookup RevocationLookup) bool {
+	if c, ok := lookup.(*RevocationCache); ok {
+		return c.tellsUnrecorded()
+	}
+	_, ok := lookup.(RevocationLineageLookup)
+	return ok
 }
 
 // biscuitConfig is a copy of b, so the caller's struct stays the caller's,
@@ -496,7 +530,10 @@ func (v *Verifier) checkWindow(cap *grant) error {
 // (8), and a Biscuit copy revoked itself or through a copy it was attenuated
 // from (9). A lookup that fails is the server's error, not a refusal.
 func (v *Verifier) checkRevoked(ctx context.Context, cap *grant, biscuitIDs [][]byte) error {
-	revoked, err := v.cfg.Revocations.IsRevoked(ctx, cap.ID)
+	revoked, err := v.isRevoked(ctx, cap.ID)
+	if errors.Is(err, ErrNotFound) {
+		return fmt.Errorf("%w: %s", ErrUnrecorded, cap.ID)
+	}
 	if err != nil {
 		return errs.Errorf("limes: revocation lookup: %w", err)
 	}
@@ -513,6 +550,21 @@ func (v *Verifier) checkRevoked(ctx context.Context, cap *grant, biscuitIDs [][]
 		}
 	}
 	return nil
+}
+
+// isRevoked asks Revocations about id: IsRevoked, or under RequireRecord the
+// question that answers ErrNotFound for an id not on record. A copy's own
+// revocation ids are no record, so a Biscuit's are asked as before.
+func (v *Verifier) isRevoked(ctx context.Context, id uuid.UUID) (bool, error) {
+	if !v.cfg.RequireRecord {
+		return v.cfg.Revocations.IsRevoked(ctx, id)
+	}
+	if c, ok := v.cfg.Revocations.(*RevocationCache); ok {
+		return c.revokedOnRecord(ctx, id)
+	}
+	// NewVerifier refused any other lookup under RequireRecord.
+	a, err := v.cfg.Revocations.(RevocationLineageLookup).RevocationLineage(ctx, id)
+	return a.Revoked, err
 }
 
 // Introspection is what Introspect says of an active token.

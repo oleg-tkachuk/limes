@@ -358,3 +358,32 @@ func TestVerifierRefusesBiscuitUnlessEnabled(t *testing.T) {
 		t.Fatalf("err = %v, want ErrInvalidToken", err)
 	}
 }
+
+// noRecords is a revocation lookup with no record of any capability, which
+// it tells apart from one not revoked.
+type noRecords struct{}
+
+func (noRecords) IsRevoked(context.Context, uuid.UUID) (bool, error) { return false, nil }
+
+func (noRecords) RevocationLineage(context.Context, uuid.UUID) (RevocationAnswer, error) {
+	return RevocationAnswer{}, ErrNotFound
+}
+
+// RequireRecord holds a Biscuit's capability to its record as a JWT's: one
+// the lookup has no record of verifies without it, and is refused as
+// unrecorded with it.
+func TestBiscuitRequireRecord(t *testing.T) {
+	_, v, _, _, token := biscuitFixture(t)
+	for _, require := range []bool{false, true} {
+		cfg := v.cfg
+		cfg.Revocations, cfg.RequireRecord = noRecords{}, require
+		verifier, err := NewVerifier(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = verifier.Verify(context.Background(), VerifyRequest{Token: token, Audience: audienceData})
+		if refused := errors.Is(err, ErrUnrecorded); refused != require || (!require && err != nil) {
+			t.Errorf("RequireRecord %v: Verify = %v", require, err)
+		}
+	}
+}

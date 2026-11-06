@@ -41,6 +41,7 @@ or be marked breaking by hand.
 | `limes.RevocationCacheConfig` | `Now` | `time.Now` |  |
 | `limes.VerifierConfig` | `Keys` | required |  |
 | `limes.VerifierConfig` | `Revocations` | required |  |
+| `limes.VerifierConfig` | `RequireRecord` | off | A capability `Revocations` has no record of reads as not revoked, and verifies. |
 | `limes.VerifierConfig` | `TrustedIssuers` | required |  |
 | `limes.VerifierConfig` | `KeyIssuers` | none | No kid is bound: taken with one trusted issuer, refused with several unless `SharedKeys` is set. |
 | `limes.VerifierConfig` | `SharedKeys` | off |  |

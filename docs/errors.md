@@ -258,6 +258,7 @@ unauthenticated code, not to its permission-denied one.
 | `tenant_erased` | 401 | `limes.ErrTenantErased` | `revoked` (permanent) | `invalid_token` | The access token is invalid | `unauthenticated` |
 | `delegation_too_deep` | 401 | `limes.ErrDelegationTooDeep` | `revoked` (permanent) | `invalid_token` | The access token is invalid | `unauthenticated` |
 | `revoked` | 401 | `limes.ErrRevoked` | `revoked` (permanent) | `invalid_token` | The access token is invalid | `unauthenticated` |
+| `unrecorded` | 401 | `limes.ErrUnrecorded` | `unrecorded` | `invalid_token` | The access token is invalid | `unauthenticated` |
 | `audience_mismatch` | 401 | `limes.ErrAudienceMismatch` | `audience_mismatch` (permanent) | `invalid_token` | The access token is invalid | `unauthenticated` |
 | `unauthenticated` | 401 | `limes.ErrUnauthenticated` |  | `invalid_token` | The access token is invalid | `unauthenticated` |
 | `op_not_allowed` | 403 | `limes.ErrOpNotAllowed` | `op_not_allowed` (permanent) | `insufficient_scope` | The token does not allow this request | `denied` |
@@ -387,6 +388,7 @@ type means the same for the whole of v1.
 | <a id="tenant_erased"></a>`tenant_erased` | 401 | [limes's codes](#limess-codes) |
 | <a id="delegation_too_deep"></a>`delegation_too_deep` | 401 | [limes's codes](#limess-codes) |
 | <a id="revoked"></a>`revoked` | 401 | [limes's codes](#limess-codes) |
+| <a id="unrecorded"></a>`unrecorded` | 401 | [limes's codes](#limess-codes) |
 | <a id="audience_mismatch"></a>`audience_mismatch` | 401 | [limes's codes](#limess-codes) |
 | <a id="unauthenticated"></a>`unauthenticated` | 401 | [limes's codes](#limess-codes) |
 | <a id="op_not_allowed"></a>`op_not_allowed` | 403 | [limes's codes](#limess-codes) |

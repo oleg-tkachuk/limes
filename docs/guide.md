@@ -1097,6 +1097,37 @@ any `Leeway` up to `MaxLeeway`, and `Purge` any `ExpiredFor` from
 `MinPurgeRetention` up. Where clocks may drift further apart than
 `PurgeClockSkew`, keep revocations longer by passing a longer `ExpiredFor`.
 
+### A lookup that sees every record
+
+A verifier reads revocation through its one `VerifierConfig.Revocations`,
+whatever issuer minted the token, so that lookup must see the records of
+every issuer in `TrustedIssuers`. `IsRevoked` answers a capability it has no
+record of as not revoked: a token from an issuer that records in another
+store verifies, and nothing revoked there ever stops it. The same holds for
+records a tenant-scoped role cannot read, and for those a restore from an
+older backup lost. Nothing warns: with several issuers sharing one store the
+configuration is right, and the verifier cannot tell the two apart.
+
+`VerifierConfig.RequireRecord` refuses such a capability instead, with
+`ErrUnrecorded` (code and reason `unrecorded`, 401), which is not
+`ErrRevoked`: an operator tells a lookup blind to a record from a capability
+someone stopped. It is no permanent refusal, as the record may yet appear.
+A Biscuit's capability is held to its record as a JWT's; a copy's own
+revocation ids are no record, and are asked about as before. The lookup must
+tell a capability not on record from one not revoked: a
+`RevocationLineageLookup`, as memstore's and pgstore's `Store` are, or a
+`RevocationCache` over one. `NewVerifier` refuses any other with
+`ErrInvalidConfig`, and does not see through a type of yours that wraps the
+cache. A lookup of your own that answers an id not on record as not revoked,
+against the `RevocationLineageLookup` contract, defeats the option unseen;
+`storetest` checks a store for it. The cache keeps the answer that an id has no record for its `TTL`,
+never its `SyncedTTL` — a revocation signal says nothing of a record
+appearing — apart from its other answers (`Stats().Unrecorded`); `Clear`
+drops it, and `ClearRevoked` of the id. An `Issuer` returns a token only
+once its record is written, so a verifier reading the primary never refuses
+a token for want of its record; one reading a replica that lags refuses it
+until the record arrives, and for up to `TTL` after through a cache.
+
 ### Revoke a user, a client or a session
 
 The events an operator acts on name no capability: a user leaves, a client

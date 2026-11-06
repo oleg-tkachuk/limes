@@ -22,6 +22,7 @@ func TestReasonOf(t *testing.T) {
 		{"expired", ErrExpired, ReasonExpired, true},
 		{"not yet valid", ErrNotYetValid, ReasonNotYetValid, false},
 		{"revoked", fmt.Errorf("wrapped: %w", ErrRevoked), ReasonRevoked, true},
+		{"unrecorded", fmt.Errorf("wrapped: %w", ErrUnrecorded), ReasonUnrecorded, false},
 		{"audience", ErrAudienceMismatch, ReasonAudienceMismatch, true},
 		{"biscuit block", fmt.Errorf("%w: rule", ErrBiscuitAttenuation), ReasonBiscuitAttenuation, true},
 		{"proof missing", dpop.ErrRequired, ReasonProofRequired, false},
