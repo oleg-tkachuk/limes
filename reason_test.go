@@ -30,6 +30,7 @@ func TestReasonOf(t *testing.T) {
 		{"proof missing", dpop.ErrRequired, ReasonProofRequired, false},
 		{"proof invalid", fmt.Errorf("%w: htm", dpop.ErrInvalid), ReasonProofInvalid, false},
 		{"proof replayed", dpop.ErrReplayed, ReasonProofReplayed, false},
+		{"proof quota exceeded", dpop.ErrReplayQuota, ReasonProofQuotaExceeded, false},
 		{"nonce challenge", dpop.ErrNonceRequired, ReasonNonceRequired, false},
 		{"wrong scheme", fmt.Errorf("%w: Bearer", ErrAuthSchemeMismatch), ReasonAuthSchemeMismatch, false},
 		{"op", fmt.Errorf("%w: %q", ErrOpNotAllowed, "put"), ReasonOpNotAllowed, true},

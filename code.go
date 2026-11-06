@@ -38,6 +38,7 @@ const (
 	CodeAuthSchemeMismatch     = Code(ReasonAuthSchemeMismatch)
 	CodeProofInvalid           = Code(ReasonProofInvalid)
 	CodeProofReplayed          = Code(ReasonProofReplayed)
+	CodeProofQuotaExceeded     = Code(ReasonProofQuotaExceeded)
 	CodeOpNotAllowed           = Code(ReasonOpNotAllowed)
 	CodeResourceNotAllowed     = Code(ReasonResourceNotAllowed)
 	CodeSourceIPNotAllowed     = Code(ReasonSourceIPNotAllowed)
@@ -143,6 +144,7 @@ var codeRules = []codeRule{
 	{dpop.ErrRequired, CodeProofRequired, 0, "", CategoryUnauthenticated},
 	{dpop.ErrInvalid, CodeProofInvalid, 0, "", CategoryUnauthenticated},
 	{dpop.ErrReplayed, CodeProofReplayed, 0, "", CategoryUnauthenticated},
+	{dpop.ErrReplayQuota, CodeProofQuotaExceeded, 0, "", CategoryExhausted},
 	{ErrAuthSchemeMismatch, CodeAuthSchemeMismatch, 0, "", CategoryUnauthenticated},
 	{ErrProofOfPossession, CodeProofOfPossession, 0, "", CategoryUnauthenticated},
 	{ErrBiscuitAttenuation, CodeBiscuitAttenuation, 0, "", CategoryUnauthenticated},

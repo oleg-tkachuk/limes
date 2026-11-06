@@ -24,6 +24,7 @@ var dpopSentinels = map[string]error{
 	"ErrRequired":      dpop.ErrRequired,
 	"ErrInvalid":       dpop.ErrInvalid,
 	"ErrReplayed":      dpop.ErrReplayed,
+	"ErrReplayQuota":   dpop.ErrReplayQuota,
 	"ErrNonceRequired": dpop.ErrNonceRequired,
 }
 

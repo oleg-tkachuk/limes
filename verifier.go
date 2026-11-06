@@ -774,7 +774,7 @@ func (v *Verifier) checkIssuer(kid, issuer string) error {
 
 // proofRefusals are the dpop errors that refuse a proof; any other error
 // from dpop.Verifier is a failure of its replay cache or nonces.
-var proofRefusals = []error{dpop.ErrRequired, dpop.ErrInvalid, dpop.ErrReplayed, dpop.ErrNonceRequired}
+var proofRefusals = []error{dpop.ErrRequired, dpop.ErrInvalid, dpop.ErrReplayed, dpop.ErrReplayQuota, dpop.ErrNonceRequired}
 
 // proofError is an error from dpop.Verifier as Verify returns it: a refused
 // proof in the ErrProofOfPossession family, a failure of the replay cache or

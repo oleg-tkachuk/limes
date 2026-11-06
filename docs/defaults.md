@@ -66,8 +66,9 @@ or be marked breaking by hand.
 | `dpop.VerifierConfig` | `MaxProofBytes` | `DefaultMaxProofBytes` |  |
 | `dpop.VerifierConfig` | `MatchPathOnly` | off | The whole URL is compared. |
 | `dpop.MemoryReplayCacheConfig` | `MaxEntries` | `DefaultReplayCacheEntries` |  |
-| `dpop.MemoryReplayCacheConfig` | `EntriesPerHolder` | `DefaultReplayEntriesPerHolder` | Or `MaxEntries` when smaller. |
+| `dpop.MemoryReplayCacheConfig` | `EntriesPerHolder` | `DefaultReplayEntriesPerHolder` | Or `MaxEntries` when smaller. Caps one holder at `EntriesPerHolder / (Window + ReplayClockSkew)` proofs a second: about 15 with the defaults. |
 | `dpop.MemoryReplayCacheConfig` | `Now` | `time.Now` |  |
+| `dpop.MemoryReplayCacheConfig` | `Logger` | `slog.Default()` |  |
 | `dpop.HMACNoncesConfig` | `Keys` | required |  |
 | `dpop.HMACNoncesConfig` | `Lifetime` | `DefaultNonceLifetime` |  |
 | `dpop.HMACNoncesConfig` | `Now` | `time.Now` |  |

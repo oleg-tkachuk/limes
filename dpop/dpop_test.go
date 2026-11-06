@@ -149,7 +149,7 @@ func TestMemoryReplayCacheIsBoundedAndForgetsExpired(t *testing.T) {
 	if seen(t, c, "k", "a", now.Add(time.Minute)) || seen(t, c, "k", "b", now.Add(time.Second)) {
 		t.Fatal("fresh ids reported seen")
 	}
-	if !seen(t, c, "k", "c", now.Add(time.Minute)) {
+	if !refusedForRoom(t, c, testHolder, "k", "c", now.Add(time.Minute)) {
 		t.Fatal("a full cache accepted an id it could not record")
 	}
 	now = now.Add(2 * time.Second) // b expires
@@ -257,7 +257,7 @@ func TestMemoryReplayCacheBoundsEachHolder(t *testing.T) {
 			t.Fatalf("proof %d of the noisy holder refused within its share", i)
 		}
 	}
-	if !seenAs(t, c, "noisy", "yet another key", "one more", now.Add(time.Minute)) {
+	if !refusedForRoom(t, c, "noisy", "yet another key", "one more", now.Add(time.Minute)) {
 		t.Error("the noisy holder recorded past its share under a new key")
 	}
 	if seenAs(t, c, "quiet", "key-0", "first", now.Add(time.Minute)) {
@@ -382,6 +382,20 @@ func seenAs(t testing.TB, c ReplayCache, holder, jkt, jti string, expires time.T
 		t.Fatal(err)
 	}
 	return ok
+}
+
+// refusedForRoom reports whether c refuses the id with ErrReplayQuota,
+// failing the test on any other error or on a refusal as a replay.
+func refusedForRoom(t testing.TB, c ReplayCache, holder, jkt, jti string, expires time.Time) bool {
+	t.Helper()
+	replay, err := c.Seen(context.Background(), ReplayEntry{JKT: jkt, JTI: jti, Holder: holder, ExpiresAt: expires})
+	if replay {
+		t.Fatalf("Seen(%s, %s) refused the id as a replay", jkt, jti)
+	}
+	if err != nil && !errors.Is(err, ErrReplayQuota) {
+		t.Fatal(err)
+	}
+	return err != nil
 }
 
 // valid is n.Valid with a failure of the nonces failing the test.

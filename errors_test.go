@@ -69,6 +69,7 @@ var sentinelMatrix = map[string]sentinelCase{
 	"dpop.ErrRequired":          {proofRefusal(dpop.ErrRequired), []string{famUnauthenticated, famProof}, ReasonProofRequired, http.StatusUnauthorized},
 	"dpop.ErrInvalid":           {proofRefusal(dpop.ErrInvalid), []string{famUnauthenticated, famProof}, ReasonProofInvalid, http.StatusUnauthorized},
 	"dpop.ErrReplayed":          {proofRefusal(dpop.ErrReplayed), []string{famUnauthenticated, famProof}, ReasonProofReplayed, http.StatusUnauthorized},
+	"dpop.ErrReplayQuota":       {proofRefusal(dpop.ErrReplayQuota), []string{famUnauthenticated, famProof}, ReasonProofQuotaExceeded, http.StatusTooManyRequests},
 	"dpop.ErrNonceRequired":     {proofRefusal(dpop.ErrNonceRequired), []string{famUnauthenticated, famProof}, ReasonNonceRequired, http.StatusUnauthorized},
 	"ErrAuthSchemeMismatch":     {ErrAuthSchemeMismatch, []string{famUnauthenticated, famProof}, ReasonAuthSchemeMismatch, http.StatusUnauthorized},
 	"jwks.ErrUnavailable":       {jwks.ErrUnavailable, nil, ReasonKeysUnavailable, http.StatusServiceUnavailable},

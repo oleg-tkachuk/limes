@@ -481,7 +481,7 @@ keys sealed with `dpop.SealNonceKeys`, so replicas
 holding the same keys accept each other's nonces with no shared state, given
 clocks within `dpop.HMACNonceClockSkew`. `dpop.MemoryReplayCache` gives each holder — the
 capability the token carries — a share of its own, so one past its share has
-only its own proofs refused, however many keys its Biscuit copies are bound
+only its own proofs refused, with `dpop.ErrReplayQuota`, however many keys its Biscuit copies are bound
 to; a full cache refuses rather than forgets. `redisreplay.Cache` keeps the
 same per-holder share in Redis, so replicas share one cache; it has no bound
 on the whole. A proof past

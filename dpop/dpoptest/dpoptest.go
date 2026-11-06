@@ -8,13 +8,15 @@
 //
 // The checks cover what the verifier relies on: a proof id is new once and a
 // replay ever after, while it can still be accepted; ids of different keys
-// never collide; a holder's share counts its proofs whatever key signed them;
+// never collide; a holder's share counts its proofs whatever key signed them,
+// and one past it is refused with dpop.ErrReplayQuota rather than as a replay;
 // concurrent proofs carrying one id let exactly one through; a nonce issued
 // is valid, and one never issued or expired is not.
 package dpoptest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -41,7 +43,7 @@ type ReplayEnv struct {
 	// skipped.
 	Advance func(d time.Duration)
 	// EntriesPerHolder is how many live ids the cache holds for one holder
-	// before it refuses the next as a replay. Optional: without it, the
+	// before it refuses the next with dpop.ErrReplayQuota. Optional: without it, the
 	// checks of that share are skipped.
 	EntriesPerHolder int
 	// CheckTimeout bounds one check, setup aside: past it the suite panics
@@ -191,8 +193,9 @@ func checkShare(t *testing.T, e ReplayEnv) {
 			t.Fatalf("id %d of %d within the holder's share was refused", i+1, e.EntriesPerHolder)
 		}
 	}
-	if !e.seen(t, e.entryOf(holder, keyOf(e.EntriesPerHolder))) {
-		t.Error("a holder past its share recorded another id under a new key")
+	replay, err := e.Cache.Seen(e.Ctx, e.entryOf(holder, keyOf(e.EntriesPerHolder)))
+	if !errors.Is(err, dpop.ErrReplayQuota) {
+		t.Errorf("a holder past its share: Seen = %v, %v, want an error wrapping dpop.ErrReplayQuota", replay, err)
 	}
 	if e.seen(t, e.entryOf(otherHolder, jkt)) {
 		t.Error("one holder's full share refused another holder")

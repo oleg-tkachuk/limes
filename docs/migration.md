@@ -119,6 +119,15 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
   `github.com/oleg-tkachuk/limes/exchange` with limes. A consumer's
   `limestest` check without the exchange linked in no longer needs
   `limestest.WithoutExchange`.
+- A proof refused because its holder has no room left in the replay
+  cache is `dpop.ErrReplayQuota`, code `proof_quota_exceeded`, answered
+  429 in category `exhausted` with no challenge, where it was
+  `dpop.ErrReplayed`, `proof_replayed`, 401 `invalid_dpop_proof`. A
+  `dpop.ReplayCache` of your own refuses such an id by returning an error
+  wrapping `dpop.ErrReplayQuota`, which `dpop/dpoptest.RunReplayCache` now
+  requires; one that still reports it as seen is read as a replay. A
+  client mapping by category retries `exhausted` later; one branching on
+  `proof_replayed` no longer sees this case there.
 
 ## pgstore/v0.67.0
 

@@ -1,10 +1,12 @@
 package dpop
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"maps"
 	"testing"
 	"time"
@@ -217,7 +219,47 @@ func TestMemoryReplayCacheBoundsTheWhole(t *testing.T) {
 			t.Fatalf("holder %s refused within the bound", holder)
 		}
 	}
-	if !seenAs(t, c, "third", "key-third", "jti", now.Add(time.Minute)) {
+	if !refusedForRoom(t, c, "third", "key-third", "jti", now.Add(time.Minute)) {
 		t.Error("a third holder recorded past MaxEntries")
+	}
+}
+
+// A holder past its share of the replay cache is refused with
+// ErrReplayQuota, not as a replay, and the cache logs the holder at WARN: a
+// client sending proofs faster than the cache keeps room for them is told so,
+// rather than that it replayed one.
+func TestVerifyRefusesAHolderPastItsShareApartFromAReplay(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	key := dpopKeys(t)["Ed25519"]
+	var logged bytes.Buffer
+	v := newVerifier(t, VerifierConfig{
+		Replay: newReplay(t, MemoryReplayCacheConfig{
+			EntriesPerHolder: 1, Now: func() time.Time { return now },
+			Logger: slog.New(slog.NewJSONHandler(&logged, nil)),
+		}),
+		Now: func() time.Time { return now },
+	})
+	verify := func(jti string) error {
+		proof := craftProof(t, key, now, func(_ *proofHeader, c *proofClaims) { c.JTI = jti }, nil)
+		return v.Verify(context.Background(), Request{
+			Proof: Proof{JWT: proof, Method: "POST", URL: dpopURL}, Token: "the-token", JKT: boundJKT(t, key), Holder: testHolder,
+		})
+	}
+	if err := verify("first"); err != nil {
+		t.Fatalf("the first proof: %v", err)
+	}
+	if err := verify("first"); !errors.Is(err, ErrReplayed) || errors.Is(err, ErrReplayQuota) {
+		t.Errorf("the first proof again: err = %v, want ErrReplayed alone", err)
+	}
+	err := verify("second")
+	if !errors.Is(err, ErrReplayQuota) || errors.Is(err, ErrReplayed) {
+		t.Fatalf("a fresh proof past the share: err = %v, want ErrReplayQuota alone", err)
+	}
+	var line map[string]any
+	if err := json.Unmarshal(logged.Bytes(), &line); err != nil {
+		t.Fatalf("log %q: %v", logged.String(), err)
+	}
+	if line["level"] != slog.LevelWarn.String() || line[logKeyHolder] != testHolder {
+		t.Errorf("logged %v, want a WARN naming holder %q", line, testHolder)
 	}
 }

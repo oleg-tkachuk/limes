@@ -113,6 +113,7 @@ var (
 	answerToken           = refusal{http.StatusUnauthorized, codeInvalidToken, false, false, "invalid-token", "The access token is invalid"}
 	answerScope           = refusal{http.StatusForbidden, codeInsufficientScope, false, false, "insufficient-scope", "The token does not allow this request"}
 	answerExhausted       = refusal{http.StatusForbidden, "", false, false, "budget-exhausted", "The token's request or budget limit is exhausted"}
+	answerProofQuota      = refusal{http.StatusTooManyRequests, "", false, false, "proof-quota-exceeded", "Too many DPoP proofs inside the replay window"}
 	answerConflict        = refusal{http.StatusConflict, "", false, false, "conflict", "The request conflicts with what is on record"}
 )
 

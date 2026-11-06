@@ -429,6 +429,31 @@ holder refused for its share, unlike a replay, is logged at WARN. A database
 that cannot answer refuses the proof with the error. The table has no
 row-level security: the check runs before any tenant is known.
 
+### The replay cache's share caps a holder's rate
+
+Every replay cache gives each holder the same share of live ids,
+`EntriesPerHolder`, and keeps an id for `Window` plus
+`dpop.ReplayClockSkew`. So one holder passes at most
+
+```text
+proofs per second ≤ EntriesPerHolder / (Window + ReplayClockSkew)
+```
+
+— with the defaults, 1 000 / 65 s, about 15 a second, sustained; a burst of
+up to 1 000 passes at once. Past it a fresh proof is refused with
+`dpop.ErrReplayQuota`, unrecorded, and the cache logs the holder at WARN:
+the code is `proof_quota_exceeded`, 429, category `exhausted`, never a
+replay. The holder is the capability at a resource server, and the client
+at the exchange's token endpoint (`Request.Client.ID`), so there it caps
+how many DPoP-bound exchanges one client makes a second — a busy client
+meets it first.
+
+To raise it, raise `EntriesPerHolder` (and, for `dpop.MemoryReplayCache`,
+`MaxEntries` with it: a whole cache full refuses every holder), or shorten
+`Window`, which also narrows how far a client's clock may drift. The share
+also bounds what one holder costs the cache, so raise it for the busiest
+holder you expect, not without bound.
+
 Which to pick:
 
 | Verifier | Replay cache |
@@ -1465,7 +1490,7 @@ Elsewhere, implement these and you are done:
 | `meter.TenantReservationLister` | Lists the holds that make up a tenant's `ReservedAmount`, soonest to expire first (optional) | No |
 | `meter.UsageStore` = `Meter` + `MeterReader` + `TenantBudgets` + `UsageHousekeeping` (only to meter) | Request and spend counters, the charges ledger, tenant ceilings; `DeleteUsage` and `PurgeOrphans` release a reaped capability's holds | Only for atomic side effects |
 | `KeyResolver` | Public verification keys; an unknown kid is `jwks.ErrUnknownKID`, the token's fault (`ErrInvalidToken`), and any other error the resolver's own (`jwks.Static` and `jwks.Remote` ship; `jwkstest` checks yours) | No |
-| `dpop.ReplayCache` | DPoP proof ids seen, per key, each counted against its holder: `Seen(ctx, dpop.ReplayEntry)` reports a holder past its share as seen, and returns an error when its store cannot answer — an outage, not a refused proof (only for key-bound tokens; `dpop.MemoryReplayCache` ships for one process — behind several replicas, `pgstore.ReplayCache` ships one over PostgreSQL and the `redisreplay` module one over Redis, or implement it over another shared store) | No |
+| `dpop.ReplayCache` | DPoP proof ids seen, per key, each counted against its holder: `Seen(ctx, dpop.ReplayEntry)` refuses a holder past its share with an error wrapping `dpop.ErrReplayQuota`, logged at WARN, and returns another error when its store cannot answer — an outage, not a refused proof (only for key-bound tokens; `dpop.MemoryReplayCache` ships for one process — behind several replicas, `pgstore.ReplayCache` ships one over PostgreSQL and the `redisreplay` module one over Redis, or implement it over another shared store) | No |
 | `dpop.Nonces` | Server-provided DPoP nonces (optional; `dpop.HMACNonces` ships and needs no store) | No |
 
 To bill or report from the charges ledger, read it through a
@@ -1951,7 +1976,7 @@ status, its sentinel and how to retry.
 | `jwks.RemoteConfig` | `jwks.DefaultFetchTimeout` 10s · `DefaultRefreshInterval` 5m · `DefaultMinRefreshInterval` 10s · `DefaultMaxStale` 1h · `DefaultMaxDocumentBytes` 1 MiB |
 | `dpop.VerifierConfig.Window` | `dpop.DefaultWindow`, 1 minute; a proof's id is remembered for `Window` plus `dpop.ReplayClockSkew`, 5 seconds |
 | `dpop.VerifierConfig.MaxProofBytes` | `dpop.DefaultMaxProofBytes`, 4 KiB; a `jti` past `dpop.MaxJTIBytes`, 128 bytes, is refused |
-| `dpop.MemoryReplayCacheConfig` | `dpop.DefaultReplayCacheEntries`, 100 000 ids; `dpop.DefaultReplayEntriesPerHolder`, 1 000, per capability |
+| `dpop.MemoryReplayCacheConfig` | `dpop.DefaultReplayCacheEntries`, 100 000 ids; `dpop.DefaultReplayEntriesPerHolder`, 1 000, per capability — with the default `Window`, about 15 proofs a second per holder ([the share caps a holder's rate](#the-replay-caches-share-caps-a-holders-rate)) |
 | `redisreplay.Config` | `redisreplay.DefaultKeyPrefix`, `limes:dpop:replay:`; `dpop.DefaultReplayEntriesPerHolder`, 1 000, per capability |
 | `pgstore.ReplayConfig` | `dpop.DefaultReplayEntriesPerHolder`, 1 000, per capability; `pgstore.DefaultReplayPurgeBatch`, 10 000 ids per `PurgeExpired` |
 | `dpop.HMACNoncesConfig` | `dpop.DefaultNonceLifetime`, 5 minutes; `dpop.HMACNonceClockSkew`, 5 seconds, for a nonce issued ahead of this replica's clock; keys of at least `dpop.HMACNonceKeyBytes`, 32 |
