@@ -174,7 +174,7 @@ type Decision struct {
 // Policy turns a grant into the capability to issue and the scopes granted,
 // or refuses it with ErrInvalidGrant, ErrInvalidTarget, ErrInvalidScope or
 // ErrInvalidAuthorizationDetails. It refuses authorization_details of a
-// type it does not understand (RFC 9396 §5). Its IssueRequest's
+// type it does not understand (RFC 9396 §5). Its Decision.Issue's
 // Audience must be drawn from the grant's resources and audiences, or be
 // empty to take them all; its ConfirmationJKT must be empty, the Exchanger
 // setting it from the proof; its TTL, the Issuer's default when zero
