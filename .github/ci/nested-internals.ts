@@ -19,7 +19,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { code, error, info, summarize, table } from "./lib/actions.ts";
+import { code, error, info, summarize, table, warning } from "./lib/actions.ts";
 import { execute } from "./lib/exec.ts";
 import { git, lines } from "./lib/git.ts";
 import { runMain } from "./lib/main.ts";
@@ -35,6 +35,9 @@ const INTERNAL_IMPORT = new RegExp(`"(${LIMES_MODULE.replaceAll(".", "\\.")}/int
 // on, every release of the module's current major is checked, as each is a
 // version a consumer may still pair with this limes.
 export const STABLE_MAJOR = 1;
+// PRE_STABLE_BREAK is what a release before STABLE_MAJOR that limes's
+// exported API no longer builds is passed with.
+const PRE_STABLE_BREAK = "allowed before v1: an exported break, which docs/migration.md records";
 // GO_SOURCE and TEST_SOURCE name a Go source and a test's.
 const GO_SOURCE = ".go";
 const TEST_SOURCE = "_test.go";
@@ -152,13 +155,27 @@ export interface Verdict {
 }
 
 // failure is the verdict on module's release tag that go, run with args,
-// refused with output.
-export function failure(module: string, tag: string, args: readonly string[], output: string, imports: readonly string[]): Verdict {
+// refused with output. stable says whether the release is at STABLE_MAJOR or
+// later. Before it, limes may break its exported API in a minor release,
+// marked and recorded in docs/migration.md, so a release the compiler
+// refuses for no internal symbol passes, with a warning. Its internal
+// packages are what no marker covers, and from STABLE_MAJOR on, every
+// break fails.
+export function failure(
+  module: string,
+  tag: string,
+  args: readonly string[],
+  output: string,
+  imports: readonly string[],
+  stable: boolean,
+): Verdict {
   const symbols = brokenSymbols(output, imports);
   const named = symbols.length > 0 ? `the internal symbols it uses: ${symbols.join(", ")}` : "no internal symbol named; see the output";
+  const ok = !stable && symbols.length === 0;
+  const verdict = ok ? `${PRE_STABLE_BREAK} — ${named}` : named;
   return {
-    ok: false,
-    message: `${module}: ${tag} no longer passes go ${args.join(" ")} against this limes — ${named}\n${output.trim()}`,
+    ok,
+    message: `${module}: ${tag} no longer passes go ${args.join(" ")} against this limes — ${verdict}\n${output.trim()}`,
   };
 }
 
@@ -183,7 +200,8 @@ export async function checkRelease(root: string, module: Module, tag: string): P
       try {
         await execute("go", args, { cwd: dir, env });
       } catch (err) {
-        return failure(module.name, tag, args, err instanceof Error ? err.message : String(err), imports);
+        const stable = (versionOf(module.prefix, tag)?.major ?? 0) >= STABLE_MAJOR;
+        return failure(module.name, tag, args, err instanceof Error ? err.message : String(err), imports, stable);
       }
     }
     return { ok: true, message: `${module.name}: ${tag} builds against this limes (internal packages: ${imports.join(", ") || "none"})` };
@@ -226,7 +244,9 @@ export async function checkNested(root: string, check: ReleaseCheck): Promise<Mo
     const failed: string[] = [];
     for (const tag of tags) {
       const verdict = await check(module, tag);
-      if (verdict.ok) {
+      if (verdict.ok && verdict.message.includes(PRE_STABLE_BREAK)) {
+        warning(verdict.message);
+      } else if (verdict.ok) {
         info(verdict.message);
       } else {
         error(verdict.message);
