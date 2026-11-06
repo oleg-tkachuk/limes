@@ -158,6 +158,10 @@ func init() {
 	}
 }
 
+// errBiscuitNotAccepted refuses a Biscuit presented to a verifier
+// configured with no VerifierConfig.Biscuit.
+var errBiscuitNotAccepted = fmt.Errorf("%w: Biscuit tokens are not accepted here", ErrInvalidToken)
+
 // errNoBiscuitRevocations is returned by NewVerifier when Biscuits
 // are accepted with nothing to check their copies against.
 var errNoBiscuitRevocations = invalidConfig("limes: VerifierConfig.Biscuit.Revocations required")

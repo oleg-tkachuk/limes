@@ -24,6 +24,18 @@ func revokeCopy(t *testing.T, v *Verifier, store *memStore, token string) Biscui
 	return c
 }
 
+// A verifier that accepts no Biscuit refuses one handed to BiscuitCopy as it
+// refuses one handed to Verify, rather than read a Biscuit configuration it
+// was never given.
+func TestBiscuitCopyWithoutBiscuitsRefusesTheToken(t *testing.T) {
+	_, v, _, _, root := biscuitFixture(t)
+	v.cfg.Biscuit = nil
+	_, err := v.BiscuitCopy(context.Background(), root)
+	if !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("err = %v, want %v", err, ErrInvalidToken)
+	}
+}
+
 // Revoking one copy stops it and every copy attenuated from it, and nothing
 // above or beside it.
 func TestRevokingABiscuitCopy(t *testing.T) {

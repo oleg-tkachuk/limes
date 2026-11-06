@@ -521,9 +521,6 @@ func (v *Verifier) authenticate(ctx context.Context, token string) (*grant, [][]
 // returns the grant and, for a Biscuit, the ids of its verified chain.
 func (v *Verifier) verifyToken(ctx context.Context, token string) (*grant, [][]byte, error) {
 	if isBiscuit(token) {
-		if v.cfg.Biscuit == nil {
-			return nil, nil, fmt.Errorf("%w: Biscuit tokens are not accepted here", ErrInvalidToken)
-		}
 		return v.verifyBiscuit(ctx, token)
 	}
 	cap, err := v.verifySigned(ctx, token)
@@ -694,6 +691,9 @@ func (v *Verifier) Authorize(ctx context.Context, req AuthorizeRequest) (Verifie
 // Biscuit grants, copy limits included, and its revocation ids, authority
 // first.
 func (v *Verifier) verifyBiscuit(ctx context.Context, token string) (*grant, [][]byte, error) {
+	if v.cfg.Biscuit == nil {
+		return nil, nil, errBiscuitNotAccepted
+	}
 	inner, unseal, err := v.cfg.Biscuit.Form.Open(token)
 	if err != nil {
 		return nil, nil, formRefusal(err)
