@@ -63,7 +63,8 @@ func (e Env) counterEnv() CounterEnv {
 // refusals, so a store that counts requests and nothing else passes them:
 // a capability's own ceiling, an ancestor's from its record bounding its
 // whole subtree, a chain at the deepest delegation, a Biscuit copy's
-// ceiling, a refusal that counts nothing, concurrent bumps at a ceiling, the
+// ceiling, a refusal that counts nothing, concurrent bumps at a ceiling,
+// siblings' at their root's among them, the
 // zero ceiling and subject, a capability not on record, and, where the
 // CounterEnv enables them, an ancestor removed, another tenant's scope and a
 // read-only one.
@@ -78,6 +79,7 @@ func RunCounter(t *testing.T, setup func(t *testing.T) CounterEnv) {
 		{Name: "ACopyCeilingBoundsItsCopyAlone", Run: checkCounterCopy},
 		{Name: "ARefusedBumpCountsNothing", Run: checkCounterRefusalCountsNothing},
 		{Name: "ConcurrentBumpsKeepTheCeiling", Run: checkCounterConcurrent},
+		{Name: "SiblingsBumpingAtOnceKeepTheirRootsCeiling", Run: checkCounterSiblings},
 		{Name: "AZeroCeilingAllowsNothing", Run: checkCounterZeroCeiling},
 		{Name: "TheZeroSubjectIsRefused", Run: checkCounterZeroSubject},
 		{Name: "ACapabilityNotOnRecordIsRefused", Run: checkCounterNotOnRecord},
