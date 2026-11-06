@@ -2,6 +2,26 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.69.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.68.0...pgstore%2Fv0.69.0) (2026-11-06)
+
+### Features
+
+* **pgstore:** renew a signalled cache's lease on every answered heartbeat ([f5460a9](https://github.com/oleg-tkachuk/limes/commit/f5460a972c7378ff5cb7681785cac652a38bada7))
+
+### Bug Fixes
+
+* **pgstore:** measure hold and lease expiry by the database's clock ([28857ca](https://github.com/oleg-tkachuk/limes/commit/28857ca5c67eaa6f269a159edc9a8b944f19b042))
+
+### Performance Improvements
+
+* **pgstore:** release a batch of holds in one write ([17c9d6d](https://github.com/oleg-tkachuk/limes/commit/17c9d6dab7707575b7faa5064ca41df0d87459b4))
+* **pgstore:** run onCharged after the charge's writes, before commit ([5c016c1](https://github.com/oleg-tkachuk/limes/commit/5c016c18e24c2adde998ef84d7b6d2f65228d8e0))
+* **pgstore:** send commit with the last write of settle, release and refund ([aae03d2](https://github.com/oleg-tkachuk/limes/commit/aae03d25d6862a0ac5d96389a3df143662a78e98))
+
+### Dependencies
+
+* require limes v0.169.0
+
 ## [0.68.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.67.0...pgstore%2Fv0.68.0) (2026-11-06)
 
 ### ⚠ BREAKING CHANGES
