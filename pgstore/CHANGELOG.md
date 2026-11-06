@@ -2,6 +2,21 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.68.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.67.0...pgstore%2Fv0.68.0) (2026-11-06)
+
+### ⚠ BREAKING CHANGES
+
+* **pgstore:** refuse a holder past its replay share with dpop.ErrReplayQuota
+
+### Features
+
+* **pgstore:** key reservations and refunds, and report a lost commit ([08a2d9d](https://github.com/oleg-tkachuk/limes/commit/08a2d9d44e295e07d94c5fd4b97e1d27b21d39ef))
+* **pgstore:** refuse a holder past its replay share with dpop.ErrReplayQuota ([616dade](https://github.com/oleg-tkachuk/limes/commit/616dade31e3acd6bc5d7c5d103c331d578518300))
+
+### Dependencies
+
+* require limes v0.168.0
+
 ## [0.67.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.66.1...pgstore%2Fv0.67.0) (2026-11-05)
 
 ### ⚠ BREAKING CHANGES

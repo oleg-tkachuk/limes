@@ -2,6 +2,20 @@
 
 Every release of the exchange module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.19.0](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.18.0...exchange%2Fv0.19.0) (2026-11-06)
+
+### ⚠ BREAKING CHANGES
+
+* **exchange:** answer a client past its replay share with 429
+
+### Features
+
+* **exchange:** answer a client past its replay share with 429 ([9e55be4](https://github.com/oleg-tkachuk/limes/commit/9e55be466cb69249a165cfef844cedec29e97154))
+
+### Dependencies
+
+* require limes v0.168.0
+
 ## [0.18.0](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.17.0...exchange%2Fv0.18.0) (2026-11-06)
 
 ### ⚠ BREAKING CHANGES
