@@ -34,9 +34,12 @@ type RevocationLineageLookup interface {
 	// RevocationLineage answers as IsRevoked does, and names the ancestors
 	// of id still on record that the answer read: every one, when id is
 	// not revoked. An id not on record is ErrNotFound: the cache answers
-	// it not revoked, as IsRevoked does, but keeps no answer, which no
-	// ancestor's revocation could reach. One that answers such an id not
-	// revoked instead is cached as any other.
+	// it not revoked, as IsRevoked does — or, to a verifier under
+	// VerifierConfig.RequireRecord, not on record — and keeps that answer
+	// for TTL apart from the others. One that answers such an id not
+	// revoked instead is cached as any other, and defeats
+	// VerifierConfig.RequireRecord without a word: NewVerifier cannot tell
+	// it from one that keeps this contract, which storetest checks.
 	RevocationLineage(ctx context.Context, id uuid.UUID) (RevocationAnswer, error)
 }
 
@@ -92,7 +95,7 @@ const (
 // DefaultRevocationCacheEntries bounds the cache. Past it, the oldest entry
 // makes room for the new one: a flood of distinct ids costs extra lookups and
 // never unbounded memory. It does evict other callers' answers of the same
-// kind, each costing one lookup more; the other kind's are kept
+// kind, each costing one lookup more; the other kinds' are kept
 // (RevocationCacheConfig.MaxEntries).
 const DefaultRevocationCacheEntries = 100_000
 
@@ -119,7 +122,13 @@ type RevocationCache struct {
 	biscuits BiscuitRevocationLookup
 	caps     *ttlcache.Cache[uuid.UUID]
 	copies   *ttlcache.Cache[string]
-	clears   atomic.Uint64
+	// unrecorded holds, as live answers, the ids the lineage upstream has
+	// no record of, for TTL whatever bound caps serves: a revocation
+	// signal says nothing of a record appearing, so SyncedTTL would keep a
+	// record a replica or a restore brings back unseen for as long. Never
+	// served stale: not found is an answer, not a failure.
+	unrecorded *ttlcache.Cache[uuid.UUID]
+	clears     atomic.Uint64
 	// ttl and syncedTTL are how long an answer is served without a
 	// revocation signal and while one vouches for the cache (synced).
 	ttl, syncedTTL time.Duration
@@ -178,8 +187,9 @@ type RevocationCacheConfig struct {
 	// cached under SyncedTTL among them. Zero: TTL; shorter than TTL, or
 	// longer than MaxRevocationCacheSyncedTTL, is refused.
 	SyncedTTL time.Duration
-	// MaxEntries bounds each kind of answer on its own, so a flood of one
-	// never evicts the other. Zero: DefaultRevocationCacheEntries. A Biscuit
+	// MaxEntries bounds each kind of answer on its own — about a
+	// capability, about one not on record, about a Biscuit — so a flood of
+	// one never evicts another. Zero: DefaultRevocationCacheEntries. A Biscuit
 	// answer is one entry per revocation id, and one per set of ids asked
 	// about together, whose key holds every id of the set — up to
 	// MaxBiscuitBlocks+1 block signatures: size memory for MaxEntries times
@@ -247,6 +257,7 @@ func NewRevocationCache(cfg RevocationCacheConfig) (*RevocationCache, error) {
 		biscuits:     cfg.Biscuits,
 		caps:         ttlcache.New[uuid.UUID](withStaleLog(c, logger, staleKindCapability)),
 		copies:       ttlcache.New[string](withStaleLog(c, logger, staleKindBiscuit)),
+		unrecorded:   ttlcache.New[uuid.UUID](ttlcache.Config{TTL: c.TTL, MaxEntries: c.MaxEntries, Now: c.Now}),
 		ttl:          c.TTL,
 		syncedTTL:    synced,
 	}, nil
@@ -337,14 +348,38 @@ func (c *RevocationCache) IsRevoked(ctx context.Context, id uuid.UUID) (bool, er
 		revoked, _, err := c.caps.Get(ctx, id, func(ctx context.Context) (bool, error) { return c.capabilities.IsRevoked(ctx, id) })
 		return revoked, err
 	}
-	revoked, _, err := c.caps.GetTagged(ctx, id, func(ctx context.Context) (bool, []uuid.UUID, error) {
+	revoked, err := c.revokedOnRecord(ctx, id)
+	// Not on record: not revoked, as IsRevoked answers it.
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	return revoked, err
+}
+
+// tellsUnrecorded reports whether the cache tells a capability not on record
+// from one not revoked: whether its upstream is a RevocationLineageLookup.
+func (c *RevocationCache) tellsUnrecorded() bool { return c.lineage != nil }
+
+// revokedOnRecord is IsRevoked over a lineage upstream, with ErrNotFound for
+// an id it has no record of, which it then answers from unrecorded for TTL
+// rather than ask the upstream again on every request.
+func (c *RevocationCache) revokedOnRecord(ctx context.Context, id uuid.UUID) (bool, error) {
+	if c.lineage == nil {
+		return false, broken("revocation cache over %T tells no capability not on record", c.capabilities)
+	}
+	key := []uuid.UUID{id}
+	// The epoch is read before the lookup: a Clear or ClearRevoked while it
+	// runs may be the record's revocation, and keeps the answer out.
+	_, missing, epoch := c.unrecorded.Cached(key)
+	if len(missing) == 0 {
+		return false, ErrNotFound
+	}
+	revoked, at, err := c.caps.GetTagged(ctx, id, func(ctx context.Context) (bool, []uuid.UUID, error) {
 		a, err := c.lineage.RevocationLineage(ctx, id)
 		return a.Revoked, a.Ancestors, err
 	})
-	// Not on record: not revoked, as IsRevoked answers it, and nothing
-	// cached, an error being kept by no cache.
 	if errors.Is(err, ErrNotFound) {
-		return false, nil
+		c.unrecorded.SeedLive(key, epoch, at)
 	}
 	return revoked, err
 }
@@ -358,6 +393,7 @@ func (c *RevocationCache) Clear() {
 	c.clears.Add(1)
 	c.caps.Clear()
 	c.copies.Clear()
+	c.unrecorded.Clear()
 }
 
 // ClearRevoked drops what a revocation of ids outdates: each one's cached
@@ -382,6 +418,8 @@ func (c *RevocationCache) ClearRevoked(ids ...uuid.UUID) {
 	}
 	c.narrowClears.Add(1)
 	c.caps.Forget(ids)
+	// A revoked id is on record, whatever was read of it before.
+	c.unrecorded.Forget(ids)
 }
 
 // RevocationSignalTarget is a cache a revocation signal keeps in step
@@ -536,7 +574,9 @@ func (c *RevocationCache) setTTL(ttl time.Duration) {
 // Sweep drops every expired entry, of either kind, and returns how many it
 // dropped. Optional housekeeping — lookups skip stale entries, and every new
 // answer drops the expired ones before it.
-func (c *RevocationCache) Sweep() int { return c.caps.Sweep() + c.copies.Sweep() }
+func (c *RevocationCache) Sweep() int {
+	return c.caps.Sweep() + c.copies.Sweep() + c.unrecorded.Sweep()
+}
 
 // RevocationCacheStats is what a RevocationCache has counted since it was
 // made, and what it holds now: of each kind of answer, and its clears. The
@@ -547,6 +587,15 @@ type RevocationCacheStats struct {
 	Capabilities RevocationCacheCounts
 	// Biscuits counts the IsBiscuitRevoked questions.
 	Biscuits RevocationCacheCounts
+	// Unrecorded counts the answers about a capability the upstream has no
+	// record of, which the cache keeps for TTL apart from Capabilities':
+	// Hits the questions answered from them, which Capabilities does not
+	// count, Entries how many it holds, Evictions those dropped to stay
+	// within MaxEntries. Its Misses, Lookups and Stale stay zero: the
+	// question that found no record is a miss of Capabilities. Zero over
+	// an upstream that names no lineage (Lineage), which tells no record
+	// apart.
+	Unrecorded RevocationCacheCounts
 	// Clears counts the calls to Clear, and NarrowClears those to
 	// ClearRevoked that dropped only what a revocation outdates; one over
 	// an upstream that names no ancestors is a Clear.
@@ -584,7 +633,8 @@ type RevocationCacheStats struct {
 type RevocationCacheCounts struct {
 	// Hits counts the questions answered from the cache, Misses the ones
 	// that waited on an upstream lookup: each question is one or the
-	// other. A Biscuit question is a hit only when every id of the token
+	// other, but for a capability question answered from Unrecorded, which
+	// counts there alone. A Biscuit question is a hit only when every id of the token
 	// has a fresh answer.
 	Hits, Misses uint64
 	// Lookups counts the upstream lookups run for the misses: fewer than
@@ -620,6 +670,8 @@ func (c *RevocationCache) Stats() RevocationCacheStats {
 	st.Clears = c.clears.Load()
 	st.Capabilities = countsOf(c.caps.Stats())
 	st.Biscuits = countsOf(c.copies.Stats())
+	unrecorded := c.unrecorded.Stats()
+	st.Unrecorded = RevocationCacheCounts{Hits: unrecorded.Hits, Evictions: unrecorded.Evictions, Entries: unrecorded.Entries}
 	st.NarrowClears = c.narrowClears.Load()
 	st.Synced = c.synced.Load()
 	st.SyncsLost = c.syncsLost.Load()

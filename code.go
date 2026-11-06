@@ -29,6 +29,7 @@ const (
 	CodeExpired                = Code(ReasonExpired)
 	CodeNotYetValid            = Code(ReasonNotYetValid)
 	CodeRevoked                = Code(ReasonRevoked)
+	CodeUnrecorded             = Code(ReasonUnrecorded)
 	CodeAudienceMismatch       = Code(ReasonAudienceMismatch)
 	CodeBiscuitAttenuation     = Code(ReasonBiscuitAttenuation)
 	CodeProofRequired          = Code(ReasonProofRequired)
@@ -143,6 +144,7 @@ var codeRules = []codeRule{
 	{ErrTenantErased, CodeTenantErased, 0, "", CategoryUnauthenticated},
 	{ErrDelegationTooDeep, CodeDelegationTooDeep, 0, "", CategoryUnauthenticated},
 	{ErrRevoked, CodeRevoked, 0, "", CategoryUnauthenticated},
+	{ErrUnrecorded, CodeUnrecorded, 0, "", CategoryUnauthenticated},
 	{ErrAudienceMismatch, CodeAudienceMismatch, 0, "", CategoryUnauthenticated},
 	{ErrUnauthenticated, CodeUnauthenticated, 0, "", CategoryUnauthenticated},
 	{ErrOpNotAllowed, CodeOpNotAllowed, 0, "", CategoryDenied},

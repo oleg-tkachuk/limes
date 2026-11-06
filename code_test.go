@@ -76,7 +76,7 @@ var sentinels = map[string]error{
 	"..ErrTaintedReadNotAllowed": ErrTaintedReadNotAllowed, "..ErrEffectConflict": ErrEffectConflict,
 	"..ErrUnauthenticated": ErrUnauthenticated, "..ErrInvalidToken": ErrInvalidToken,
 	"..ErrProofOfPossession": ErrProofOfPossession, "..ErrExpired": ErrExpired, "..ErrNotYetValid": ErrNotYetValid,
-	"..ErrRevoked": ErrRevoked, "..ErrTenantErased": ErrTenantErased, "..ErrDelegationTooDeep": ErrDelegationTooDeep,
+	"..ErrRevoked": ErrRevoked, "..ErrUnrecorded": ErrUnrecorded, "..ErrTenantErased": ErrTenantErased, "..ErrDelegationTooDeep": ErrDelegationTooDeep,
 	"..ErrAudienceMismatch": ErrAudienceMismatch, "..ErrCaveatViolation": ErrCaveatViolation,
 	"..ErrBudgetExceeded": ErrBudgetExceeded, "..ErrInvalidAmount": ErrInvalidAmount,
 	"..ErrCursorMismatch": ErrCursorMismatch, "..ErrRequestLimitExceeded": ErrRequestLimitExceeded,

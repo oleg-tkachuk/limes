@@ -103,10 +103,10 @@ func TestClearRevokedWithoutLineageClears(t *testing.T) {
 }
 
 // An id not on record is live to the cache, as IsRevoked answers it, and
-// kept by none: RevocationLineage's ErrNotFound is no refusal, and no
-// ancestor's revocation could reach an answer kept for it. memstore names
-// it not found.
-func TestRevocationCacheKeepsNoAnswerForAnIDNotOnRecord(t *testing.T) {
+// kept apart from the answers about records: RevocationLineage's
+// ErrNotFound is no refusal, and the next question about the id is answered
+// from the cache rather than the store. memstore names it not found.
+func TestRevocationCacheKeepsUnrecordedApart(t *testing.T) {
 	ctx := context.Background()
 	s := newExampleStack()
 	unknown := uuid.New()
@@ -119,7 +119,11 @@ func TestRevocationCacheKeepsNoAnswerForAnIDNotOnRecord(t *testing.T) {
 			t.Fatalf("IsRevoked of an id not on record = %v, %v; want live", revoked, err)
 		}
 	}
-	if st := cache.Stats().Capabilities; st.Entries != 0 || st.Hits != 0 || st.Lookups != 2 {
-		t.Errorf("Stats = %+v; want both questions looked up, nothing kept", st)
+	st := cache.Stats()
+	if st.Capabilities.Entries != 0 || st.Capabilities.Hits != 0 || st.Capabilities.Lookups != 1 {
+		t.Errorf("Stats().Capabilities = %+v; want the first question looked up, no answer about a record kept", st.Capabilities)
+	}
+	if st.Unrecorded.Entries != 1 || st.Unrecorded.Hits != 1 {
+		t.Errorf("Stats().Unrecorded = %+v; want the second question answered from the one kept", st.Unrecorded)
 	}
 }

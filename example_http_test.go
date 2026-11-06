@@ -85,7 +85,7 @@ func ExampleReasons() {
 	}
 	fmt.Println(len(limes.Reasons()), missing)
 	// Output:
-	// 22 21
+	// 23 22
 }
 
 func ExampleVerifier_DPoPNonce() {
