@@ -265,7 +265,7 @@ func TestClientRefusalChallengesInTheClientsScheme(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	introspection, err := NewIntrospectionHandler(IntrospectionConfig{Verifier: f.verifier, Authenticate: refusing})
+	introspection, err := NewIntrospectionHandler(IntrospectionConfig{Verifier: f.verifier, Authenticate: refusing, AnyAudience: true})
 	if err != nil {
 		t.Fatal(err)
 	}

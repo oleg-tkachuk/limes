@@ -23,7 +23,7 @@ import (
 func newIntrospection(t *testing.T, v *limes.Verifier) *IntrospectionHandler {
 	t.Helper()
 	h, err := NewIntrospectionHandler(IntrospectionConfig{
-		Verifier: v,
+		Verifier: v, AnyAudience: true,
 		Authenticate: func(r *http.Request) (Client, error) {
 			if r.Header.Get(clientHeader) != mcpServer {
 				return Client{}, errors.New("unknown client")
@@ -186,7 +186,7 @@ func TestIntrospectionTellsAnUnauthorizedClientAndAServerError(t *testing.T) {
 		refusal := tc.err
 		logs := &records{}
 		h, err := NewIntrospectionHandler(IntrospectionConfig{
-			Verifier: f.verifier, Logger: slog.New(logs),
+			Verifier: f.verifier, Logger: slog.New(logs), AnyAudience: true,
 			Authenticate: func(*http.Request) (Client, error) { return Client{}, refusal },
 		})
 		if err != nil {
@@ -231,7 +231,7 @@ func TestIntrospectionRefusals(t *testing.T) {
 	}
 	for name, cfg := range map[string]IntrospectionConfig{
 		"no verifier":      {Authenticate: func(*http.Request) (Client, error) { return client(), nil }},
-		"no authenticator": {Verifier: f.verifier},
+		"no authenticator": {Verifier: f.verifier, AnyAudience: true},
 	} {
 		if _, err := NewIntrospectionHandler(cfg); err == nil {
 			t.Errorf("a handler with %s was built", name)
