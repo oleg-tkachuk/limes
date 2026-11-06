@@ -134,10 +134,7 @@ func remoteFixture(t *testing.T, srv *jwksServer) (*KeySource, *keyClock, *messa
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(remoteKeysWait)
-	for {
-		if !r.lastFetched().IsZero() {
-			break
-		}
+	for r.lastFetched().IsZero() {
 		if time.Now().After(deadline) {
 			t.Fatal("the keys were never fetched")
 		}
