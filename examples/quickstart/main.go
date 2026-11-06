@@ -165,8 +165,11 @@ func main() {
 	_, err = usage.Charge(ctx, meter.ChargeRequest{Subject: verified.MeterSubject(), Amount: limes.MustParseAmount("999"), Op: "search", Actor: "research-orchestrator"}, nil)
 	demo.Refused(log, err, limes.ErrBudgetExceeded, "a charge over the budget")
 
-	// 7. Revoke, cascading to everything the orchestrator delegated.
-	_, err = records.Revoke(ctx, limes.RevokeRequest{
+	// 7. Revoke, cascading to everything the orchestrator delegated, through a
+	//    Revoker: it logs the revocation for the audit and needs no signing key.
+	revoker, err := limes.NewRevoker(limes.RevokerConfig{Store: records, Logger: log})
+	must(err, "revoker")
+	_, err = revoker.Revoke(ctx, limes.RevokeRequest{
 		CapabilityID: parent.ID, Note: "example finished", Actor: "operator", CascadeChildren: true,
 	})
 	must(err, "revoke")

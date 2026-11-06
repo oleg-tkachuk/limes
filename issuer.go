@@ -76,10 +76,10 @@ type IssuerConfig struct {
 	Biscuit TokenForm
 
 	// Logger logs everything the issuer does, naming capabilities by id and
-	// never logging a token or a key: each token minted and each revocation
-	// at INFO, each request refused at WARN, each call that failed for the
-	// server's own reasons — a store or a signer — at ERROR. Nil:
-	// slog.Default().
+	// never logging a token or a key: each token minted at INFO, each
+	// request refused at WARN, each call that failed for the server's own
+	// reasons — a store or a signer — at ERROR. A Revoker logs the
+	// revocations. Nil: slog.Default().
 	Logger *slog.Logger
 
 	// Events are called beside the log, for metrics or an audit sink. The

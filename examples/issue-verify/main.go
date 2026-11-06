@@ -97,7 +97,9 @@ func main() {
 	_, err = verifier.Verify(ctx, limes.VerifyRequest{Token: issued.Token, Audience: "billing-service"})
 	demo.Refused(log, err, limes.ErrAudienceMismatch, "present the token to another service")
 
-	_, err = records.Revoke(ctx, limes.RevokeRequest{CapabilityID: c.ID, Note: "agent finished", Actor: "operator"})
+	revoker, err := limes.NewRevoker(limes.RevokerConfig{Store: records, Logger: log})
+	demo.Must(log, err, "revoker")
+	_, err = revoker.Revoke(ctx, limes.RevokeRequest{CapabilityID: c.ID, Note: "agent finished", Actor: "operator"})
 	demo.Must(log, err, "revoke")
 	log.Info("revoked the capability in the store", "capability", c.ID)
 

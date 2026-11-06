@@ -53,8 +53,8 @@
 // else:
 //
 //   - [Store] — capability records and revocations; an [Issuer] needs only its
-//     [IssuanceStore] half. IsRevoked answers for the
-//     capability's whole delegation chain, at most [MaxDelegationDepth]
+//     [IssuanceStore] half, a [Revoker] only its [RevocationStore] one.
+//     IsRevoked answers for the capability's whole delegation chain, at most [MaxDelegationDepth]
 //     ancestors deep. No transactions required; an
 //     in-memory map is a valid implementation. A store that scopes calls to
 //     a tenant refuses one whose request names another with

@@ -67,6 +67,12 @@ func (m *memStore) RevokeBiscuit(_ context.Context, args RevokeBiscuitRequest) (
 	m.copies[string(args.Copy.RevocationID())] = true
 	return RevokeBiscuitResult{AlreadyRevoked: already}, nil
 }
+func (m *memStore) GetBiscuitRevocation(_ context.Context, copy BiscuitCopy) (BiscuitRevocation, error) {
+	if !m.copies[string(copy.RevocationID())] {
+		return BiscuitRevocation{}, ErrNotFound
+	}
+	return BiscuitRevocation{CapabilityID: copy.CapabilityID(), RevocationID: copy.RevocationID()}, nil
+}
 func (m *memStore) Purge(context.Context, PurgeRequest) (PurgeResult, error) {
 	return PurgeResult{}, nil
 }
