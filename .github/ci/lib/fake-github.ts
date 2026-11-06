@@ -30,6 +30,8 @@ export interface FakeData {
   pullsFrom: Map<string, number>;
   createdPulls: { head: string; base: string; text: PullRequestText }[];
   editedPulls: { number: number; text: PullRequestText }[];
+  // drafted logs each setDraft asked, and sets the pull request's draft.
+  drafted: { number: number; draft: boolean }[];
   dispatched: { eventType: string; payload: Record<string, string> }[];
   // mainRun is the newest finished run on main; open, the open pull
   // requests; prRuns, the pull_request runs of CI by head sha, newest first;
@@ -61,6 +63,7 @@ export function fakeData(): FakeData {
     pullsFrom: new Map(),
     createdPulls: [],
     editedPulls: [],
+    drafted: [],
     dispatched: [],
     mainRun: undefined,
     open: [],
@@ -165,6 +168,14 @@ class FakeGitHub implements GitHub {
 
   async editPullRequest(number: number, text: PullRequestText): Promise<void> {
     this.data.editedPulls.push({ number, text });
+  }
+
+  async setDraft(number: number, draft: boolean): Promise<void> {
+    this.data.drafted.push({ number, draft });
+    const pr = this.data.pulls.get(number);
+    if (pr !== undefined) {
+      this.data.pulls.set(number, { ...pr, draft });
+    }
   }
 
   async finishedRunsOf(workflow: string, branch: string, sha: string): Promise<number[]> {

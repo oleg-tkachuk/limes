@@ -207,4 +207,46 @@ describe("gitHubOver", () => {
     assert.match(sent[0]?.url ?? "", /\/dispatches$/);
     assert.deepEqual(sent[0]?.body, { event_type: "release", client_payload: { sha: "abc", ci_run_id: "1" } });
   });
+
+  // drafting answers a pull request whose draft is now, and records the
+  // GraphQL mutation each call sends, if any.
+  function drafting(now: boolean): { octokit: Octokit; mutations: () => string[] } {
+    const { octokit, sent } = clientAnswering((r) => (r.url.endsWith("/graphql") ? { status: 200, body: { data: {} } } : { status: 200, body: { node_id: "PR_7", draft: now } }));
+    const mutations = () =>
+      sent
+        .filter((r) => r.url.endsWith("/graphql"))
+        .map((r) => {
+          const body = r.body as { query: string; variables: { id: string } };
+          assert.equal(body.variables.id, "PR_7");
+          return /\{ (\w+)\(/.exec(body.query)?.[1] ?? "";
+        });
+    return { octokit, mutations };
+  }
+
+  const drafts = [
+    { name: "makes an open pull request a draft", now: false, draft: true, want: ["convertPullRequestToDraft"] },
+    { name: "makes a draft ready for review", now: true, draft: false, want: ["markPullRequestReadyForReview"] },
+    { name: "leaves a draft a draft", now: true, draft: true, want: [] },
+    { name: "leaves a ready pull request ready", now: false, draft: false, want: [] },
+  ];
+  for (const c of drafts) {
+    test(`setDraft ${c.name}`, async () => {
+      const { octokit, mutations } = drafting(c.now);
+      await gitHubOver(octokit, REPO).setDraft(7, c.draft);
+      assert.deepEqual(mutations(), c.want);
+    });
+    test(`editPullRequest ${c.name}`, async () => {
+      const { octokit, mutations } = drafting(c.now);
+      await gitHubOver(octokit, REPO).editPullRequest(7, { title: "t", body: "b", draft: c.draft });
+      assert.deepEqual(mutations(), c.want);
+    });
+  }
+
+  test("editPullRequest with no draft given leaves it as it is", async () => {
+    for (const now of [false, true]) {
+      const { octokit, mutations } = drafting(now);
+      await gitHubOver(octokit, REPO).editPullRequest(7, { title: "t", body: "b" });
+      assert.deepEqual(mutations(), []);
+    }
+  });
 });

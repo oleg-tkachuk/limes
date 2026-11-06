@@ -1,0 +1,66 @@
+name: Release plan
+
+# On every push to main, the open release pull request is judged against the
+# commit pushed: its plan was made from the commit its one release commit
+# was cut from, and a commit since then that releases a module of the plan,
+# or makes one it leaves out due, means the versions it wrote are not those
+# of the code its merge would tag. Such a pull request is made a draft,
+# which auto-merge.yaml leaves to a person and GitHub refuses to merge, with
+# a comment naming those commits; release.yaml makes the plan again once
+# main's CI passes, and makes it ready unless it cuts a major. See
+# .github/ci/release-stale.ts and docs/adr/0016-one-release-commit.md.
+#
+# main does not require a pull request to be up to date with it (auto-merge
+# relies on that), so nothing else stops a release pull request from merging
+# behind a commit that changed what it releases. release-tag.ts refuses to
+# tag such a merge all the same, should a person make the draft ready.
+#
+# It runs on the push itself, not after CI: the plan is stale the moment the
+# commit lands, and a green release pull request would otherwise be merged
+# by auto-merge.yaml within the CI cycle of main that re-plans it.
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+# Each push judges the pull request against its own commit; a newer push
+# judges a range that holds the older one's, so a run still pending when
+# another joins may be dropped.
+concurrency:
+  group: release-stale
+  cancel-in-progress: false
+
+jobs:
+  stale:
+    name: Hold a stale release pull request
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    # AUTOMERGE_TOKEN lives in this environment, which only main may deploy
+    # to (auto-merge.yaml): the pull request is made a draft and commented on
+    # as release-plan.ts edits it.
+    environment: automerge
+    permissions:
+      contents: read # the checkout; the draft and the comment act through AUTOMERGE_TOKEN
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Every commit and tag: the commits since the plan's base are
+          # counted from each module's last release, and the release
+          # branch's head is read.
+          fetch-depth: 0
+
+      # The release's own analyzer counts the commits, as the plan does. No
+      # dependency cache: this job holds a write token.
+      - name: Set up the CI scripts
+        uses: ./.github/actions/setup-ci
+        with:
+          release-tooling: true
+
+      - name: Make a stale release pull request a draft
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
+        run: node .github/ci/release-stale.ts
