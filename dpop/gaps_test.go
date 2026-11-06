@@ -72,7 +72,7 @@ func TestMemoryReplayCacheBoundsAllKeysTogether(t *testing.T) {
 			t.Fatalf("id %d of %d refused while there was room", i+1, entries)
 		}
 	}
-	if !seen(t, c, "another-key", "a", expires) {
+	if !refusedForRoom(t, c, testHolder, "another-key", "a", expires) {
 		t.Error("a full cache recorded an id of yet another key")
 	}
 }

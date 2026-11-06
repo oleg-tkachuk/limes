@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"math/big"
 	"net/url"
@@ -95,9 +96,9 @@ const (
 
 // The refusals of a proof. A caller that judges what they mean for the
 // request — limes reads each as a refusal of the credentials — wraps them.
-// Verify returns one of them, ErrNonceRequired, an error naming a Request it
-// cannot check (no Holder), or a failure of the replay cache or the nonces,
-// which is not a refusal of the proof.
+// Verify returns one of them, ErrNonceRequired, ErrReplayQuota, an error
+// naming a Request it cannot check (no Holder), or a failure of the replay
+// cache or the nonces, which is not a refusal of the proof.
 var (
 	// ErrRequired — the token is key-bound and no proof came with it.
 	ErrRequired = errors.New("dpop: proof required")
@@ -106,6 +107,13 @@ var (
 	ErrInvalid = errors.New("dpop: invalid proof")
 	// ErrReplayed — a proof's jti was already used inside the window.
 	ErrReplayed = errors.New("dpop: proof replayed")
+	// ErrReplayQuota — the proof may be good, and its holder already has as
+	// many live proof ids as the replay cache keeps for one holder, or the
+	// cache is full: it is refused unrecorded, since an id not recorded could
+	// be replayed. Not a replay and not the proof's fault: the same request,
+	// signed afresh, passes once older ids lapse. RFC 9449 names no code for
+	// it, so ErrorCodeInvalidProof does not answer it.
+	ErrReplayQuota = errors.New("dpop: replay cache quota exhausted")
 )
 
 type proofHeader struct {
@@ -354,10 +362,11 @@ const DefaultMaxProofBytes = 4 << 10
 // ReplayCache remembers proof ids for as long as a proof could be accepted.
 type ReplayCache interface {
 	// Seen records e and reports whether its id was already recorded. A
-	// holder that has used its share of the cache reports true: the proof is
-	// refused rather than accepted unrecorded. A cache that cannot answer —
-	// its store unreachable — returns an error, and Verify refuses the proof
-	// with it.
+	// holder that has used its share of the cache, or a cache with no room
+	// left, returns an error wrapping ErrReplayQuota, and logs it: the proof
+	// is refused rather than accepted unrecorded, and not as a replay. A
+	// cache that cannot answer — its store unreachable — returns another
+	// error, and Verify refuses the proof with it.
 	Seen(ctx context.Context, e ReplayEntry) (bool, error)
 }
 
@@ -666,7 +675,8 @@ func (v *Verifier) checkNonce(ctx context.Context, nonce string) error {
 }
 
 // Record records a proof Check accepted in the replay cache, refusing it
-// with ErrReplayed when its jti was seen before.
+// with ErrReplayed when its jti was seen before, and with the cache's error
+// wrapping ErrReplayQuota when its holder has no room left in it.
 func (v *Verifier) Record(ctx context.Context, p CheckedProof) error {
 	if v == nil || v.cfg.Replay == nil {
 		return errNoReplayCache // a Verifier not made by NewVerifier
@@ -675,6 +685,9 @@ func (v *Verifier) Record(ctx context.Context, p CheckedProof) error {
 		return errNotChecked
 	}
 	seen, err := v.cfg.Replay.Seen(ctx, p.entry)
+	if errors.Is(err, ErrReplayQuota) {
+		return err
+	}
 	if err != nil {
 		return fmt.Errorf("dpop: replay check: %w", err)
 	}
@@ -753,11 +766,17 @@ func decodeSegment(seg string, v any) error {
 // may back any number of proofs until it expires, so they bound how early a
 // proof is signed, not how many are.
 //
+// A holder's share caps its rate: an id is kept for the verifier's window
+// plus ReplayClockSkew, so one holder passes at most EntriesPerHolder proofs
+// over that span — with the defaults 1,000 per 65 s, about 15 a second.
+// Past it Seen returns ErrReplayQuota and logs the holder at WARN.
+//
 // It keys a proof id by the key that signed it (jkt, jti) across holders,
 // where redisreplay keys it within its holder: the same id under one key for
 // two capabilities is refused here and accepted there. Neither is a replay —
 // ath binds a proof to one token, and so to one holder.
 type MemoryReplayCache struct {
+	log          *slog.Logger
 	mu           sync.Mutex
 	seen         map[replayKey]time.Time
 	perHolder    map[string]int // live ids per holder
@@ -789,6 +808,9 @@ type MemoryReplayCacheConfig struct {
 	EntriesPerHolder int
 	// Now is the clock. Nil: time.Now.
 	Now func() time.Time
+	// Logger logs each id refused for want of room, at WARN. Nil:
+	// slog.Default().
+	Logger *slog.Logger
 }
 
 // NewMemoryReplayCache builds a MemoryReplayCache, refusing a negative bound
@@ -809,7 +831,11 @@ func NewMemoryReplayCache(cfg MemoryReplayCacheConfig) (*MemoryReplayCache, erro
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
+	if cfg.Logger == nil {
+		cfg.Logger = slog.Default()
+	}
 	return &MemoryReplayCache{
+		log:  cfg.Logger,
 		seen: map[replayKey]time.Time{}, perHolder: map[string]int{},
 		maxEntries: cfg.MaxEntries, maxPerHolder: cfg.EntriesPerHolder, now: cfg.Now,
 	}, nil
@@ -817,9 +843,9 @@ func NewMemoryReplayCache(cfg MemoryReplayCacheConfig) (*MemoryReplayCache, erro
 
 // Seen implements ReplayCache. Expired ids are dropped as they lapse, soonest
 // first, so a full cache costs a lookup rather than a scan. A holder past its
-// share, or a cache full of live ids, refuses the new id as a replay rather
-// than accept it unrecorded — a full cache errs towards refusing.
-func (c *MemoryReplayCache) Seen(_ context.Context, e ReplayEntry) (bool, error) {
+// share, or a cache full of live ids, refuses the new id with ErrReplayQuota
+// rather than accept it unrecorded — a full cache errs towards refusing.
+func (c *MemoryReplayCache) Seen(ctx context.Context, e ReplayEntry) (bool, error) {
 	jkt, jti, holder, expires := e.JKT, e.JTI, e.Holder, e.ExpiresAt
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -835,14 +861,32 @@ func (c *MemoryReplayCache) Seen(_ context.Context, e ReplayEntry) (bool, error)
 	if _, ok := c.seen[k]; ok {
 		return true, nil
 	}
-	if c.perHolder[holder] >= c.maxPerHolder || len(c.seen) >= c.maxEntries {
-		return true, nil
+	if n := c.perHolder[holder]; n >= c.maxPerHolder {
+		c.log.WarnContext(ctx, "dpop: replay cache refused a proof: its holder is past its share",
+			slog.String(logKeyHolder, holder), slog.Int(logKeyShare, c.maxPerHolder))
+		return false, fmt.Errorf("%w: holder %q has %d live proof ids", ErrReplayQuota, holder, n)
+	}
+	if len(c.seen) >= c.maxEntries {
+		c.log.WarnContext(ctx, "dpop: replay cache refused a proof: the cache is full",
+			slog.String(logKeyHolder, holder), slog.Int(logKeyEntries, c.maxEntries))
+		return false, fmt.Errorf("%w: the cache holds %d live proof ids", ErrReplayQuota, c.maxEntries)
 	}
 	c.seen[k] = expires
 	c.perHolder[holder]++
 	heap.Push(&c.expiries, replayEntry{key: k, holder: holder, expires: expires})
 	return false, nil
 }
+
+// The attributes of MemoryReplayCache's log lines.
+const (
+	// logKeyHolder is the holder whose proof was refused: a capability's id
+	// or a client's, never a secret.
+	logKeyHolder = "holder"
+	// logKeyShare is how many live ids one holder may have.
+	logKeyShare = "share"
+	// logKeyEntries is how many live ids the whole cache may hold.
+	logKeyEntries = "entries"
+)
 
 // replayEntry is one id a MemoryReplayCache holds, whose share it counts
 // against, and when it lapses.

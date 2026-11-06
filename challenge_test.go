@@ -59,6 +59,9 @@ func TestErrorResponse(t *testing.T) {
 		{"caveat", fmt.Errorf("%w: x", ErrResourceNotAllowed), AuthSchemeBearer, http.StatusForbidden,
 			[]string{`Bearer error="insufficient_scope"`}, false},
 		{"budget", ErrBudgetExceeded, AuthSchemeBearer, http.StatusForbidden, nil, false},
+		// Too many proofs inside the window is no fault of the proof: 429,
+		// with no challenge, never invalid_dpop_proof.
+		{"proof quota", proofRefusal(dpop.ErrReplayQuota), AuthSchemeDPoP, http.StatusTooManyRequests, nil, false},
 		{"store outage", errors.New("dial tcp: refused"), AuthSchemeBearer, http.StatusInternalServerError, nil, false},
 		// An issuer's JWKS out of reach is the server's trouble, not a bad
 		// token: the client may retry, and must not discard its token.

@@ -34,6 +34,7 @@ const (
 	ReasonAuthSchemeMismatch     Reason = "auth_scheme_mismatch"
 	ReasonProofInvalid           Reason = "proof_invalid"
 	ReasonProofReplayed          Reason = "proof_replayed"
+	ReasonProofQuotaExceeded     Reason = "proof_quota_exceeded"
 	ReasonOpNotAllowed           Reason = "op_not_allowed"
 	ReasonResourceNotAllowed     Reason = "resource_not_allowed"
 	ReasonSourceIPNotAllowed     Reason = "source_ip_not_allowed"
@@ -73,6 +74,10 @@ var refusalRules = []refusalRule{
 	{dpop.ErrRequired, ReasonProofRequired, false, answerProof},
 	{dpop.ErrInvalid, ReasonProofInvalid, false, answerProof},
 	{dpop.ErrReplayed, ReasonProofReplayed, false, answerProof},
+	// The proof may be good: its holder sent more of them inside the replay
+	// window than the cache keeps room for, and the same request signed
+	// afresh passes once older ids lapse.
+	{dpop.ErrReplayQuota, ReasonProofQuotaExceeded, false, answerProofQuota},
 	{ErrAuthSchemeMismatch, ReasonAuthSchemeMismatch, false, answerToken},
 	{ErrProofOfPossession, "", false, answerProof},
 

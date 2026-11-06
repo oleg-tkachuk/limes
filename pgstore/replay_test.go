@@ -3,6 +3,7 @@ package pgstore
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -185,8 +186,8 @@ func TestReplayCacheWarnsAHolderPastItsShare(t *testing.T) {
 	if buf.Len() != 0 {
 		t.Errorf("a replay was logged: %s", buf.String())
 	}
-	if seen, err := c.Seen(t.Context(), replayEntry(clock, replayHolder, "one-too-many")); !seen || err != nil {
-		t.Fatalf("an id past the share = %v, %v; want refused", seen, err)
+	if seen, err := c.Seen(t.Context(), replayEntry(clock, replayHolder, "one-too-many")); seen || !errors.Is(err, dpop.ErrReplayQuota) {
+		t.Fatalf("an id past the share = %v, %v; want false, dpop.ErrReplayQuota", seen, err)
 	}
 	line := buf.String()
 	for _, want := range []string{"level=WARN", logKeyHolder + "=" + replayHolder, logKeyShare + "=3"} {
@@ -238,6 +239,9 @@ func TestReplayCacheShareHoldsUnderARace(t *testing.T) {
 	for i := range racingProofs {
 		wg.Go(func() {
 			seen, err := c.Seen(context.WithoutCancel(t.Context()), replayEntry(clock, replayHolder, "race-"+strconv.Itoa(i)))
+			if errors.Is(err, dpop.ErrReplayQuota) {
+				return
+			}
 			if err != nil {
 				errs <- err
 				return

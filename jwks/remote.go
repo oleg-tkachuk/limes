@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"net/http"
 	"net/url"
@@ -80,12 +81,20 @@ type RemoteConfig struct {
 	MaxDocumentBytes int
 	// Now is the clock; tests override.
 	Now func() time.Time
+	// Logger logs Block, Unblock and Refresh, and each kid refused for being
+	// blocked. Nil: slog.Default().
+	Logger *slog.Logger
 }
 
 // Remote is a KeyResolver backed by an issuer's JWKS endpoint,
 // for verifiers that run apart from the issuer. It caches the key set,
 // revalidates with ETag, picks up a rotated-in key on first sight of its kid,
 // and keeps serving the last good set through a bounded outage.
+//
+// A key the issuer withdraws stays accepted until the next refresh, and
+// through an outage for up to MaxStale. For an incident — a signing key
+// leaked — Block refuses a kid at once, whatever the held set says, and
+// Refresh fetches the set now rather than at the next interval.
 type Remote struct {
 	cfg RemoteConfig
 	// endpoint is cfg.URL with any password masked, the form an error
@@ -104,6 +113,8 @@ type Remote struct {
 	freshFor    time.Duration // how long after fetchedAt it stays current
 	lastAttempt time.Time
 	lastErr     error
+	// blocked are the kids Block refused, and Unblock not given back.
+	blocked map[string]struct{}
 }
 
 // NewRemote validates the config. It does not fetch: the first
@@ -127,7 +138,7 @@ func NewRemote(cfg RemoteConfig) (*Remote, error) {
 		return nil, errs.Config("jwks: RemoteConfig needs MinRefreshInterval (%s) ≤ RefreshInterval (%s) ≤ MaxStale (%s)",
 			cfg.MinRefreshInterval, cfg.RefreshInterval, cfg.MaxStale)
 	}
-	return &Remote{cfg: cfg, endpoint: u.Redacted(), fetching: make(chan struct{}, 1)}, nil
+	return &Remote{cfg: cfg, endpoint: u.Redacted(), fetching: make(chan struct{}, 1), blocked: map[string]struct{}{}}, nil
 }
 
 // parseRemoteURL reads the JWKS endpoint's URL, refusing one that is not
@@ -162,6 +173,9 @@ func setRemoteDefaults(cfg *RemoteConfig) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
+	if cfg.Logger == nil {
+		cfg.Logger = slog.Default()
+	}
 }
 
 // sameOrigin is a shallow copy of c, so the caller's client is left as it
@@ -192,8 +206,13 @@ func sameOrigin(c *http.Client) *http.Client {
 // freshness but within MaxStale is served at once, its refresh started behind
 // it: a slow endpoint delays no request while the set it holds is still good.
 // A caller waits on the endpoint only for a kid the set does not hold, or a
-// set it cannot serve.
+// set it cannot serve. A kid Block refused is ErrUnknownKID, before the set
+// or the endpoint is consulted.
 func (r *Remote) PublicKey(ctx context.Context, kid string) (ed25519.PublicKey, error) {
+	if r.isBlocked(kid) {
+		r.cfg.Logger.WarnContext(ctx, "jwks: refused a blocked kid", slog.String(logKeyKID, kid), slog.String(logKeyEndpoint, r.endpoint))
+		return nil, fmt.Errorf("%w: kid %q is blocked", ErrUnknownKID, kid)
+	}
 	key, ok, fetchedAt, freshFor := r.lookup(kid)
 	age := r.cfg.Now().Sub(fetchedAt)
 	if ok && age < freshFor {
@@ -233,6 +252,78 @@ func (r *Remote) refreshedKey(kid string) (ed25519.PublicKey, error) {
 		return nil, ErrUnknownKID
 	}
 	return slices.Clone(key), nil
+}
+
+// The attributes of Remote's log lines.
+const (
+	logKeyKID      = "kid"
+	logKeyKIDs     = "kids"
+	logKeyEndpoint = "endpoint"
+	logKeyError    = "error"
+)
+
+// Block refuses kids from now on, as ErrUnknownKID, even while the held set
+// or the endpoint still has them: for a signing key withdrawn, or leaked,
+// that must stop verifying before the next refresh — or, with the endpoint
+// down, before MaxStale. It holds for the life of the Remote, until Unblock.
+func (r *Remote) Block(kids ...string) {
+	r.mu.Lock()
+	for _, kid := range kids {
+		r.blocked[kid] = struct{}{}
+	}
+	r.mu.Unlock()
+	r.cfg.Logger.Warn("jwks: kids blocked", slog.Any(logKeyKIDs, kids), slog.String(logKeyEndpoint, r.endpoint))
+}
+
+// Unblock gives back kids Block refused: each is served again as the key
+// set has it.
+func (r *Remote) Unblock(kids ...string) {
+	r.mu.Lock()
+	for _, kid := range kids {
+		delete(r.blocked, kid)
+	}
+	r.mu.Unlock()
+	r.cfg.Logger.Info("jwks: kids unblocked", slog.Any(logKeyKIDs, kids), slog.String(logKeyEndpoint, r.endpoint))
+}
+
+// isBlocked reports whether Block refused kid.
+func (r *Remote) isBlocked(kid string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	_, ok := r.blocked[kid]
+	return ok
+}
+
+// Refresh fetches the key set now, whenever the last fetch was — an
+// operator's call, which MinRefreshInterval does not hold back — and returns
+// the fetch's error, wrapping ErrUnavailable, or ctx's when the caller gives
+// up first. A key the endpoint no longer serves stops verifying when it
+// returns nil. It waits behind a fetch in flight, then fetches again: the
+// one in flight may have started before the key was withdrawn.
+func (r *Remote) Refresh(ctx context.Context) error {
+	select {
+	case r.fetching <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		r.releaseFetch()
+		return err
+	}
+	select {
+	case <-r.startFetch(ctx, r.cfg.Now()):
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	r.mu.RLock()
+	err := r.lastErr
+	r.mu.RUnlock()
+	if err != nil {
+		r.cfg.Logger.ErrorContext(ctx, "jwks: refresh failed", slog.String(logKeyEndpoint, r.endpoint), slog.Any(logKeyError, err))
+		return errs.Errorf("%w: %s: %w", ErrUnavailable, r.endpoint, err)
+	}
+	r.cfg.Logger.InfoContext(ctx, "jwks: key set refreshed", slog.String(logKeyEndpoint, r.endpoint))
+	return nil
 }
 
 func (r *Remote) lookup(kid string) (ed25519.PublicKey, bool, time.Time, time.Duration) {
@@ -308,12 +399,20 @@ func (r *Remote) fetchHeld(ctx context.Context) <-chan struct{} {
 	now := r.cfg.Now()
 	r.mu.RLock()
 	recent := !r.lastAttempt.IsZero() && now.Sub(r.lastAttempt) < r.cfg.MinRefreshInterval
-	etag := r.etag
 	r.mu.RUnlock()
 	if recent {
 		r.releaseFetch()
 		return nil
 	}
+	return r.startFetch(ctx, now)
+}
+
+// startFetch fetches the set for a caller holding the fetching token, which
+// the fetch gives back when it ends, and returns a channel closed then.
+func (r *Remote) startFetch(ctx context.Context, now time.Time) <-chan struct{} {
+	r.mu.RLock()
+	etag := r.etag
+	r.mu.RUnlock()
 	done := make(chan struct{})
 	go func() {
 		// The token goes back before done closes: a caller woken by done may

@@ -175,7 +175,7 @@ rather than every code:
 |---|---|
 | `unauthenticated` | The credential is missing, unproven or no longer good: present another. A malformed one is `invalid`. |
 | `denied` | The credential is good and does not allow the request. |
-| `exhausted` | A request, budget, copy or lease limit refused it. |
+| `exhausted` | A request, budget, copy or lease limit refused it, or the replay cache's room for one holder's proofs. |
 | `invalid` | The request itself is wrong: sent again unchanged, it fails again. |
 | `not_found` | What the request names is not on record. |
 | `conflict` | The request disagrees with what is on record: read it again, and decide. |
@@ -284,6 +284,7 @@ unauthenticated code, not to its permission-denied one.
 | `request_limit_exceeded` | 403 | `limes.ErrRequestLimitExceeded` | `request_limit_exceeded` (permanent) |  | The token's request or budget limit is exhausted | `exhausted` |
 | `budget_exceeded` | 403 | `limes.ErrBudgetExceeded` | `budget_exceeded` |  | The token's request or budget limit is exhausted | `exhausted` |
 | `tenant_budget_exceeded` | 403 | `limes.ErrTenantBudgetExceeded` | `tenant_budget_exceeded` |  | The token's request or budget limit is exhausted | `exhausted` |
+| `proof_quota_exceeded` | 429 | `dpop.ErrReplayQuota` | `proof_quota_exceeded` |  | Too many DPoP proofs inside the replay window | `exhausted` |
 | `unit_code_mismatch` | 409 | `limes.ErrUnitCodeMismatch` |  |  | The request conflicts with what is on record | `precondition` |
 | `already_exists` | 409 | `limes.ErrAlreadyExists` |  |  | The request conflicts with what is on record | `already_exists` |
 | `conflict` | 409 | `limes.ErrConflict` |  |  | The request conflicts with what is on record | `conflict` |
@@ -372,11 +373,14 @@ and may leave them out of a check of its own mapping
 | `server_error` | 500 | `exchange.ErrServerError` | The server could not decide on the request. | `internal` |
 
 The endpoint answers a refused proof with RFC 9449's codes,
-`dpop.ErrorCodeUseNonce` and `dpop.ErrorCodeInvalidProof`. They are no
-`limes.Code`, and need no mapping of their own: the errors behind them,
+`dpop.ErrorCodeUseNonce` and `dpop.ErrorCodeInvalidProof`, and a client
+past its share of the replay cache with 429 and RFC 6749's
+`temporarily_unavailable`, since RFC 9449 names no code for it. They are
+no `limes.Code`, and need no mapping of their own: the errors behind them,
 `dpop.ErrRequired` and its kin, are limes's proof codes (`proof_required`,
-`proof_invalid`, `proof_replayed`, `nonce_required`), all
-`unauthenticated`, which `limes.Codes()` lists and `limestest` checks. A
+`proof_invalid`, `proof_replayed`, `nonce_required`, all
+`unauthenticated`, and `proof_quota_exceeded`, `exhausted`), which
+`limes.Codes()` lists and `limestest` checks. A
 service that serves the token endpoint itself maps every error by
 `limes.ProblemOf(err).Category`, as any other, and reads
 `exchange.ErrorOf(err)` only for the RFC 6749 body it writes; its tests
@@ -387,6 +391,7 @@ not a second list to map.
 |---|---|---|---|
 | `use_dpop_nonce` | 400 | `dpop.ErrNonceRequired` | The DPoP proof must carry the server's nonce; a fresh one goes in `DPoP-Nonce`. |
 | `invalid_dpop_proof` | 400 | `dpop.ErrRequired`, `dpop.ErrInvalid`, `dpop.ErrReplayed` | The DPoP proof is required, invalid, or used before. |
+| `temporarily_unavailable` | 429 | `dpop.ErrReplayQuota` | The client sent more DPoP proofs inside the replay window than the cache keeps room for; the same request signed afresh passes once older ids lapse. |
 
 ## Problem types
 
@@ -426,6 +431,7 @@ type means the same for the whole of v1.
 | <a id="request_limit_exceeded"></a>`request_limit_exceeded` | 403 | [limes's codes](#limess-codes) |
 | <a id="budget_exceeded"></a>`budget_exceeded` | 403 | [limes's codes](#limess-codes) |
 | <a id="tenant_budget_exceeded"></a>`tenant_budget_exceeded` | 403 | [limes's codes](#limess-codes) |
+| <a id="proof_quota_exceeded"></a>`proof_quota_exceeded` | 429 | [limes's codes](#limess-codes) |
 | <a id="unit_code_mismatch"></a>`unit_code_mismatch` | 409 | [limes's codes](#limess-codes) |
 | <a id="already_exists"></a>`already_exists` | 409 | [limes's codes](#limess-codes) |
 | <a id="conflict"></a>`conflict` | 409 | [limes's codes](#limess-codes) |
@@ -475,6 +481,7 @@ type means the same for the whole of v1.
 | <a id="server_error"></a>`server_error` | 500 | [The exchange's codes](#the-exchanges-codes) |
 | <a id="use_dpop_nonce"></a>`use_dpop_nonce` | 400 | [The exchange's codes](#the-exchanges-codes) |
 | <a id="invalid_dpop_proof"></a>`invalid_dpop_proof` | 400 | [The exchange's codes](#the-exchanges-codes) |
+| <a id="temporarily_unavailable"></a>`temporarily_unavailable` | 429 | [The exchange's codes](#the-exchanges-codes) |
 | <a id="keys-unavailable"></a>`keys-unavailable` | 503 | A refusal with no `reason`: The issuer's keys cannot be fetched |
 | <a id="revocation-unavailable"></a>`revocation-unavailable` | 503 | A refusal with no `reason`: The revocation status cannot be checked |
 | <a id="malformed-authorization"></a>`malformed-authorization` | 400 | A refusal with no `reason`: The Authorization header is malformed |
@@ -484,3 +491,4 @@ type means the same for the whole of v1.
 | <a id="invalid-token"></a>`invalid-token` | 401 | A refusal with no `reason`: The access token is invalid |
 | <a id="insufficient-scope"></a>`insufficient-scope` | 403 | A refusal with no `reason`: The token does not allow this request |
 | <a id="budget-exhausted"></a>`budget-exhausted` | 403 | A refusal with no `reason`: The token's request or budget limit is exhausted |
+| <a id="proof-quota-exceeded"></a>`proof-quota-exceeded` | 429 | A refusal with no `reason`: Too many DPoP proofs inside the replay window |

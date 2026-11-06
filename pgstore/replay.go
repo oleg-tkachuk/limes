@@ -24,11 +24,14 @@ import (
 // no scope.
 //
 // Each holder — the capability whose proofs they are — has a share of the
-// cache: Seen refuses, as a replay, an id of a holder that already has
-// EntriesPerHolder live ids, whatever key signed them. The count and the
-// insert happen under a transaction-scoped advisory lock on the holder, so
-// concurrent proofs of one holder never take it past its share. Such a
-// refusal, unlike a replay, is logged at WARN.
+// cache: Seen refuses, with dpop.ErrReplayQuota, an id of a holder that
+// already has EntriesPerHolder live ids, whatever key signed them. The count
+// and the insert happen under a transaction-scoped advisory lock on the
+// holder, so concurrent proofs of one holder never take it past its share.
+// Such a refusal, unlike a replay, is logged at WARN. The share caps a
+// holder's rate: an id is kept for the verifier's window plus
+// dpop.ReplayClockSkew, so one holder passes at most EntriesPerHolder proofs
+// over that span — with the defaults 1,000 per 65 s, about 15 a second.
 //
 // What is live is decided by Now, the verifier's clock, never the
 // database's. An expired id counts for nothing, and the same id may take
@@ -124,8 +127,8 @@ const (
 	logKeyShare  = "share"
 )
 
-// Seen implements dpop.ReplayCache. A holder past its share is refused as a
-// replay rather than accepted unrecorded, and logged at WARN. A database
+// Seen implements dpop.ReplayCache. A holder past its share is refused with
+// dpop.ErrReplayQuota rather than accepted unrecorded, and logged at WARN. A database
 // that cannot answer returns (true, err): dpop.Verifier.Verify refuses the
 // proof with the error, an outage rather than a replay.
 func (c *ReplayCache) Seen(ctx context.Context, e dpop.ReplayEntry) (bool, error) {
@@ -154,6 +157,7 @@ func (c *ReplayCache) Seen(ctx context.Context, e dpop.ReplayEntry) (bool, error
 	if !recorded && !live {
 		c.log.WarnContext(ctx, "pgstore: replay cache refused a proof: its holder is past its share",
 			slog.String(logKeyHolder, e.Holder), slog.Int(logKeyShare, c.share))
+		return false, fmt.Errorf("%w: pgstore: holder %q has %d live proof ids", dpop.ErrReplayQuota, e.Holder, c.share)
 	}
 	return !recorded, nil
 }

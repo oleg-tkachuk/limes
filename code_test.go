@@ -90,8 +90,8 @@ var sentinels = map[string]error{
 	"..ErrAlreadyExists": ErrAlreadyExists, "..ErrInvalidCaveats": ErrInvalidCaveats,
 	"..ErrInvalidConfig": ErrInvalidConfig, "..ErrInternal": ErrInternal, "..ErrRevocationUnavailable": ErrRevocationUnavailable,
 	"dpop.ErrRequired": dpop.ErrRequired, "dpop.ErrInvalid": dpop.ErrInvalid, "dpop.ErrReplayed": dpop.ErrReplayed,
-	"dpop.ErrNonceRequired": dpop.ErrNonceRequired,
-	"jwks.ErrUnavailable":   jwks.ErrUnavailable, "jwks.ErrUnknownKID": jwks.ErrUnknownKID,
+	"dpop.ErrNonceRequired": dpop.ErrNonceRequired, "dpop.ErrReplayQuota": dpop.ErrReplayQuota,
+	"jwks.ErrUnavailable": jwks.ErrUnavailable, "jwks.ErrUnknownKID": jwks.ErrUnknownKID,
 }
 
 // Every exported sentinel has a code of its own: one its source declares

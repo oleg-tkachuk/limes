@@ -1,5 +1,6 @@
--- Records one DPoP proof id in its holder's sorted set and reports whether it
--- was already there: 1 for a replay or a refusal, 0 for a new id.
+-- Records one DPoP proof id in its holder's sorted set and reports what it
+-- found: 0 for a new id, 1 for a replay, 2 for an id refused because the
+-- holder's share is full.
 --
 -- KEYS[1]  the holder's sorted set
 -- ARGV[1]  the member: the key's thumbprint and the proof's id
@@ -21,7 +22,7 @@ if redis.call('ZSCORE', key, member) then
 	return 1
 end
 if redis.call('ZCARD', key) >= share then
-	return 1
+	return 2
 end
 local ttl = expires - now
 if ttl <= 0 then

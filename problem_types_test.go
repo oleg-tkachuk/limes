@@ -29,7 +29,7 @@ func TestEveryProblemTypeIsAnAnchorOfTheErrorsDoc(t *testing.T) {
 	for _, r := range Reasons() {
 		types[string(r)] = true
 	}
-	for _, r := range []refusal{answerKeysUnavailable, answerRevocationUnavailable, answerMalformed, answerNoCredentials, answerNonce, answerProof, answerToken, answerScope, answerExhausted, answerConflict, internalError} {
+	for _, r := range []refusal{answerKeysUnavailable, answerRevocationUnavailable, answerMalformed, answerNoCredentials, answerNonce, answerProof, answerToken, answerScope, answerExhausted, answerProofQuota, answerConflict, internalError} {
 		types[r.slug] = true
 	}
 	for typ := range types {

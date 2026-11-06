@@ -85,6 +85,12 @@ const (
 	codeInvalidDPoPProof            = dpop.ErrorCodeInvalidProof
 	codeUseDPoPNonce                = dpop.ErrorCodeUseNonce
 	codeServerError                 = string(limes.CodeServerError)
+	// codeTemporarilyUnavailable answers a client past its share of the
+	// replay cache, with 429: RFC 9449 names no code for it. The code is RFC
+	// 6749 §4.1.2.1's, defined for the authorization endpoint and borrowed
+	// here for a refusal that lifts by itself; RFC 8628's slow_down, the one
+	// token endpoint code about rate, means a device flow's polling.
+	codeTemporarilyUnavailable = "temporarily_unavailable"
 )
 
 // HandlerConfig configures a Handler.
@@ -451,6 +457,7 @@ var refusals = []struct {
 	{dpop.ErrRequired, http.StatusBadRequest, codeInvalidDPoPProof, "A DPoP proof is required."},
 	{dpop.ErrInvalid, http.StatusBadRequest, codeInvalidDPoPProof, "The DPoP proof is invalid."},
 	{dpop.ErrReplayed, http.StatusBadRequest, codeInvalidDPoPProof, "The DPoP proof was used before."},
+	{dpop.ErrReplayQuota, http.StatusTooManyRequests, codeTemporarilyUnavailable, "Too many DPoP proofs from this client; retry later."},
 	{ErrUnauthorizedClient, http.StatusBadRequest, codeUnauthorizedClient, "The client may not exchange tokens."},
 	// The status challengeClient answers with, when it has a challenge.
 	{ErrInvalidClient, http.StatusUnauthorized, codeInvalidClient, descriptionInvalidClient},
