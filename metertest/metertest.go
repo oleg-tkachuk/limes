@@ -15,7 +15,7 @@
 // The checks cover what a charge does at its ceilings and when it arrives
 // again: rejection that moves nothing — by a Biscuit copy's, the capability's,
 // an ancestor's or the tenant's ceiling, by a failed onCharged, under
-// concurrent charges — idempotency on ExternalRef and on a settled
+// concurrent charges, siblings' and grandchildren's among them — idempotency on ExternalRef and on a settled
 // reservation, also once the capability is gone (Env.DeleteCapability), on
 // a ReservationID and on a RefundID, which goes with its charge, ChargeByRef,
 // OverrunPolicyRecord past every ceiling, refunds, holds, their listing and their expiry, request
@@ -464,6 +464,10 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{Name: "ASettleWritesNoRowForARemovedAncestor", Run: checkSettleAfterRemovedAncestor},
 		{Name: "ASettleCountsOnAnAncestorWhoseRowWasDropped", Run: checkSettleAfterAncestorDropped},
 		{Name: "ConcurrentChargesKeepTheCeiling", Run: checkConcurrentCeiling},
+		{Name: "SiblingsChargingAtOnceKeepTheirRootsCeiling", Run: checkSiblingCharges},
+		{Name: "SiblingsHoldingAtOnceKeepTheirRootsCeiling", Run: checkSiblingHolds},
+		{Name: "CapabilitiesChargingAtOnceKeepTheTenantCeiling", Run: checkSiblingTenantCharges},
+		{Name: "GrandchildrenChargingAtOnceKeepEveryCeilingAbove", Run: checkGrandchildCharges},
 		{Name: "AnAncestorCeilingBoundsItsChildren", Run: checkAncestorCeiling},
 		{Name: "TheTenantCeilingBoundsEveryCapability", Run: checkTenantCeiling},
 		{Name: "AFailedCallbackMovesNothing", Run: checkCallbackRollback},
