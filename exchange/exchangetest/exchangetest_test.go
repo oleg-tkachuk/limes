@@ -185,13 +185,13 @@ func TestOnePerTokenOverMemstore(t *testing.T) {
 	tenant := uuid.New()
 	ex, err := exchange.NewExchanger(exchange.Config{
 		Issuer: iss, Subjects: subjects, Exchanges: store, Now: clock, Logger: slog.New(slog.DiscardHandler),
-		Policy: func(_ context.Context, g exchange.Grant) (limes.IssueRequest, error) {
-			return limes.IssueRequest{
+		Policy: func(_ context.Context, g exchange.Grant) (exchange.Decision, error) {
+			return exchange.Decision{Issue: limes.IssueRequest{
 				IssuedBy: limes.Principal{Type: limes.PrincipalTypeService, Subject: audience},
 				Subject:  limes.Principal{Type: limes.PrincipalTypeUser, TenantID: tenant, Subject: g.Subject.Subject},
 				Caveats:  limes.Caveats{Requests: limes.RequestCeiling{Max: 1}, Ops: []limes.Op{limes.OpGet}},
 				TTL:      shortTTL,
-			}, nil
+			}}, nil
 		},
 	})
 	if err != nil {

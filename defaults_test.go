@@ -46,6 +46,34 @@ func TestConfigDefaults(t *testing.T) {
 
 }
 
+// Issuer.DefaultTTL is the lifetime Issue gives a request naming none: the
+// configured one, or DefaultIssueTTL.
+func TestIssuerDefaultTTL(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := NewSigner(SignerConfig{KeyID: testKID, Key: SealKey(priv)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const configured = time.Hour
+	for name, tc := range map[string]struct {
+		configured, want time.Duration
+	}{
+		"unset":      {0, DefaultIssueTTL},
+		"configured": {configured, configured},
+	} {
+		iss, err := NewIssuer(IssuerConfig{Biscuit: fakeForm{}, Signer: signer, Store: newMemStore(), IssuerName: goldenIssuer, DefaultTTL: tc.configured})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := iss.DefaultTTL(); got != tc.want {
+			t.Errorf("%s: DefaultTTL() = %s, want %s", name, got, tc.want)
+		}
+	}
+}
+
 // A negative duration or size is refused, not taken as given: a negative
 // default TTL mints capabilities already expired, a negative leeway narrows
 // the validity window, and a negative size refuses every token.

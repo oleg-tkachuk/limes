@@ -38,6 +38,35 @@ func TestIntrospectionHoldsTheClientToItsAudiences(t *testing.T) {
 	}
 }
 
+// An introspection endpoint is closed by default (RFC 7662 §4): one that
+// names neither the audiences each client may learn about nor that any
+// client may learn about any token is not built, nor one naming both.
+// AnyAudience opens it to every authenticated client.
+func TestIntrospectionIsClosedByDefault(t *testing.T) {
+	f := newFixture(t, fixtureConfig{})
+	auth := func(*http.Request) (Client, error) { return client(), nil }
+	served := func(Client) []string { return []string{toolResource} }
+	for name, cfg := range map[string]IntrospectionConfig{
+		"neither": {Verifier: f.verifier, Authenticate: auth},
+		"both":    {Verifier: f.verifier, Authenticate: auth, Audiences: served, AnyAudience: true},
+	} {
+		if _, err := NewIntrospectionHandler(cfg); !errors.Is(err, limes.ErrInvalidConfig) {
+			t.Errorf("%s: err = %v, want ErrInvalidConfig", name, err)
+		}
+	}
+	res, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, typeAccessToken, accessClaims())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := NewIntrospectionHandler(IntrospectionConfig{Verifier: f.verifier, Authenticate: auth, AnyAudience: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, body := introspect(t, h, url.Values{paramToken: {res.Token}}); body["active"] != true {
+		t.Errorf("AnyAudience: %v, want active", body)
+	}
+}
+
 // A narrowing endpoint needs its URL to check a bound parent's proof, and
 // one with no DPoP verifier of its own, asked for a nonce no verifier
 // issues, answers the server's failure: a use_dpop_nonce with no nonce is
@@ -112,10 +141,11 @@ func TestHandlerAnswersAFailingNonceStoreAsTheServers(t *testing.T) {
 // client a capability every meter refuses.
 func TestExchangeAnswersAPolicyGrantingNoRequestAsTheServers(t *testing.T) {
 	var f *fixture
-	f = newFixture(t, fixtureConfig{policy: func(ctx context.Context, g Grant) (limes.IssueRequest, error) {
-		req, err := f.readPolicy(ctx, g)
+	f = newFixture(t, fixtureConfig{policy: func(ctx context.Context, g Grant) (Decision, error) {
+		decision, err := f.readPolicy(ctx, g)
+		req := &decision.Issue
 		req.Caveats.Requests = limes.RequestCeiling{}
-		return req, err
+		return decision, err
 	}})
 	logs := &records{}
 	f.ex.cfg.Logger = slog.New(logs)

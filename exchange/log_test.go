@@ -6,8 +6,6 @@ import (
 	"log/slog"
 	"sync"
 	"testing"
-
-	"github.com/oleg-tkachuk/limes"
 )
 
 // records is a slog.Handler keeping what it is given.
@@ -61,8 +59,8 @@ func TestExchangeLogsEveryOutcome(t *testing.T) {
 	logs := &records{}
 	f.ex.cfg.Logger = slog.New(logs)
 	token := f.idp.sign(t, typeAccessToken, accessClaims())
-	failing := func(context.Context, Grant) (limes.IssueRequest, error) {
-		return limes.IssueRequest{}, errors.New("down")
+	failing := func(context.Context, Grant) (Decision, error) {
+		return Decision{}, errors.New("down")
 	}
 	for name, tc := range map[string]struct {
 		policy Policy

@@ -116,7 +116,7 @@ func (keysOutOfReach) VerifySubject(context.Context, string) (Subject, error) {
 // there the class of status agrees, the client's.
 func TestTheEndpointAndProblemOfAgree(t *testing.T) {
 	refuse := func(err error) Policy {
-		return func(context.Context, Grant) (limes.IssueRequest, error) { return limes.IssueRequest{}, err }
+		return func(context.Context, Grant) (Decision, error) { return Decision{}, err }
 	}
 	for name, tc := range map[string]struct {
 		change func(*fixture)
@@ -136,20 +136,22 @@ func TestTheEndpointAndProblemOfAgree(t *testing.T) {
 		},
 		"an issue refused": {
 			change: func(f *fixture) {
-				f.ex.cfg.Policy = func(ctx context.Context, g Grant) (limes.IssueRequest, error) {
-					issue, err := f.readPolicy(ctx, g)
+				f.ex.cfg.Policy = func(ctx context.Context, g Grant) (Decision, error) {
+					decision, err := f.readPolicy(ctx, g)
+					issue := &decision.Issue
 					issue.Caveats.Requests = limes.RequestCeiling{}
-					return issue, err
+					return decision, err
 				}
 			},
 			cause: limes.ErrInvalidCaveats,
 		},
 		"the policy reaching past the request": {
 			change: func(f *fixture) {
-				f.ex.cfg.Policy = func(ctx context.Context, g Grant) (limes.IssueRequest, error) {
-					issue, err := f.readPolicy(ctx, g)
+				f.ex.cfg.Policy = func(ctx context.Context, g Grant) (Decision, error) {
+					decision, err := f.readPolicy(ctx, g)
+					issue := &decision.Issue
 					issue.Audience = []string{"https://elsewhere.example.com"}
-					return issue, err
+					return decision, err
 				}
 			},
 			cause: errPolicy,

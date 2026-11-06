@@ -9,12 +9,10 @@ package jwtverify
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"slices"
 	"strings"
 	"time"
 
-	"github.com/lestrrat-go/httprc/v3"
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/lestrrat-go/jwx/v3/jws"
@@ -88,8 +86,14 @@ type Config struct {
 	ClientIDClaim string
 	// Algorithms are the JWS algorithms accepted. Empty: DefaultAlgorithms.
 	Algorithms []string
-	// ClockSkew is how far exp, nbf and iat may be off the clock.
+	// ClockSkew is how far exp, nbf and iat may be off the clock: the
+	// identity provider's clock is not the verifier's. Zero:
+	// limes.DefaultLeeway, the skew a limes verifier allows a capability's
+	// times; negative is refused.
 	ClockSkew time.Duration
+	// NoClockSkew holds exp, nbf and iat to the clock exactly, for an
+	// identity provider that shares it. It excludes a ClockSkew.
+	NoClockSkew bool
 	// Now is the clock. Nil: time.Now.
 	Now func() time.Time
 }
@@ -102,6 +106,9 @@ type Config struct {
 // without changing this package's API.
 type KeySource struct {
 	keys func(ctx context.Context) (jwk.Set, error)
+	// refetch is the set fetched again, for a token whose kid keys does
+	// not hold; nil for a fixed set, which refuses such a token at once.
+	refetch func(ctx context.Context) (jwk.Set, error)
 }
 
 // StaticKeys is a KeySource of the fixed key set jwks, a JWK Set document
@@ -113,35 +120,6 @@ func StaticKeys(jwks []byte) (*KeySource, error) {
 		return nil, errs.Errorf("%w: jwtverify: StaticKeys: %w", limes.ErrInvalidConfig, err)
 	}
 	return &KeySource{keys: func(context.Context) (jwk.Set, error) { return set, nil }}, nil
-}
-
-// RemoteKeys is a KeySource of the JWK Set at url, fetched in the
-// background and kept fresh until ctx is done. client fetches it; nil: a
-// default client with a request timeout. It does not wait
-// for the first fetch: until one succeeds, the keys are an error (the
-// server's); a set fetched once is served while url is out of reach.
-func RemoteKeys(ctx context.Context, url string, client *http.Client) (*KeySource, error) {
-	if url == "" {
-		return nil, fmt.Errorf("%w: jwtverify: RemoteKeys: url required", limes.ErrInvalidConfig)
-	}
-	cache, err := jwk.NewCache(ctx, httprc.NewClient())
-	if err != nil {
-		return nil, fmt.Errorf("jwtverify: RemoteKeys: %w", err)
-	}
-	opts := []jwk.RegisterOption{jwk.WithWaitReady(false)}
-	if client != nil {
-		opts = append(opts, jwk.WithHTTPClient(client))
-	}
-	if err := cache.Register(ctx, url, opts...); err != nil {
-		return nil, errs.Errorf("%w: jwtverify: RemoteKeys %s: %w", limes.ErrInvalidConfig, url, err)
-	}
-	return &KeySource{keys: func(ctx context.Context) (jwk.Set, error) {
-		set, err := cache.Lookup(ctx, url)
-		if err != nil {
-			return nil, fmt.Errorf("jwtverify: the identity provider's keys at %s: %w", url, err)
-		}
-		return set, nil
-	}}, nil
 }
 
 // Verifier is the exchange.SubjectVerifier for JWT access tokens (RFC 9068),
@@ -174,11 +152,30 @@ func New(cfg Config) (*Verifier, error) {
 			return nil, fmt.Errorf("%w: jwtverify: Config.Algorithms names %q, which is not one of %q", limes.ErrInvalidConfig, alg, DefaultAlgorithms)
 		}
 	}
+	if err := setClockSkew(&cfg); err != nil {
+		return nil, err
+	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
 	cfg.Types, cfg.Algorithms = slices.Clone(cfg.Types), slices.Clone(cfg.Algorithms)
 	return &Verifier{cfg: cfg}, nil
+}
+
+// setClockSkew refuses a negative skew or one beside NoClockSkew, and gives
+// an unset one limes.DefaultLeeway.
+func setClockSkew(cfg *Config) error {
+	switch {
+	case cfg.ClockSkew < 0:
+		return fmt.Errorf("%w: jwtverify: Config.ClockSkew %s is negative", limes.ErrInvalidConfig, cfg.ClockSkew)
+	case cfg.NoClockSkew && cfg.ClockSkew != 0:
+		return fmt.Errorf("%w: jwtverify: Config.ClockSkew %s beside NoClockSkew", limes.ErrInvalidConfig, cfg.ClockSkew)
+	case cfg.NoClockSkew:
+		// ClockSkew stays 0: the times are held to the clock exactly.
+	case cfg.ClockSkew == 0:
+		cfg.ClockSkew = limes.DefaultLeeway
+	}
+	return nil
 }
 
 // VerifySubject verifies token as an RFC 9068 access token of the
@@ -205,6 +202,15 @@ func (v *Verifier) VerifySubject(ctx context.Context, token string) (exchange.Su
 		return exchange.Subject{}, err
 	}
 	kid, _ := headers.KeyID()
+	if kid != "" && v.cfg.Keys.refetch != nil {
+		if _, held := keys.LookupKeyID(kid); !held {
+			// A kid not yet held may be a key the identity provider
+			// rotated in since the set was fetched.
+			if keys, err = v.cfg.Keys.refetch(ctx); err != nil {
+				return exchange.Subject{}, err
+			}
+		}
+	}
 	key, err := keyFor(keys, kid, alg)
 	if err != nil {
 		return exchange.Subject{}, err

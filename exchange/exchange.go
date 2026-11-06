@@ -158,16 +158,28 @@ type Grant struct {
 	AuthorizationDetails json.RawMessage
 }
 
-// Policy turns a grant into the capability to issue, or refuses it with
-// ErrInvalidGrant, ErrInvalidTarget, ErrInvalidScope or
-// ErrInvalidAuthorizationDetails. A grant it does not refuse grants every
-// scope asked, which the token endpoint answers as granted (RFC 8693
-// §2.2.1); it refuses authorization_details of a type it does not
-// understand (RFC 9396 §5). Its IssueRequest's
+// Decision is what a Policy grants: the capability to issue, and the scopes
+// granted.
+type Decision struct {
+	// Issue is the capability to issue, held to the grant as Policy says.
+	Issue limes.IssueRequest
+	// Scopes are the scopes granted, each one the grant asked for: the
+	// token response states them as its scope (RFC 6749 §5.1, RFC 8693
+	// §2.2.1). Empty grants every scope asked. A scope not asked for is
+	// the policy's fault, answered as the server's failure; a policy that
+	// grants none of the scopes asked refuses with ErrInvalidScope.
+	Scopes []string
+}
+
+// Policy turns a grant into the capability to issue and the scopes granted,
+// or refuses it with ErrInvalidGrant, ErrInvalidTarget, ErrInvalidScope or
+// ErrInvalidAuthorizationDetails. It refuses authorization_details of a
+// type it does not understand (RFC 9396 §5). Its Decision.Issue's
 // Audience must be drawn from the grant's resources and audiences, or be
 // empty to take them all; its ConfirmationJKT must be empty, the Exchanger
-// setting it from the proof; its TTL is capped at the subject token's
-// remaining lifetime. Nothing is granted that the policy did not choose:
+// setting it from the proof; its TTL, the Issuer's default when zero
+// (limes.Issuer.DefaultTTL), is capped at the subject token's remaining
+// lifetime. Nothing is granted that the policy did not choose:
 // there is no default policy. A subject token may be exchanged again and
 // again until it expires, each exchange issuing a capability of its own,
 // with ceilings of its own, unless Config.Exchanges issues one capability
@@ -176,12 +188,17 @@ type Grant struct {
 // Caveats.Requests to a Max or Unlimited, since Issue refuses a capability
 // no request can use and the exchange answers that as the server's
 // failure; Caveats.Budget to what it may spend, the zero budget being none.
-type Policy func(ctx context.Context, g Grant) (limes.IssueRequest, error)
+type Policy func(ctx context.Context, g Grant) (Decision, error)
 
 // Result is an exchange's capability.
 type Result struct {
 	Capability limes.Capability
 	Token      string
+	// Scopes are the scopes the policy granted (Decision.Scopes), every one
+	// asked when it named none: the token response's scope. Under
+	// Config.Exchanges they are this exchange's policy's answer, a
+	// reissued capability's among them.
+	Scopes []string
 	// TokenType is how the capability is presented: TokenTypeDPoP when bound
 	// to a key, else TokenTypeBearer (RFC 9449 §5, RFC 6750).
 	TokenType string
@@ -198,10 +215,6 @@ const (
 	// capability (RFC 8693 §3): a URI of this module's own.
 	IssuedTokenTypeCapability = "https://github.com/oleg-tkachuk/limes/exchange#capability" //nolint:gosec // G101: a token type URI, not a credential
 )
-
-// DefaultTTL is a capability's lifetime when the policy names none, still
-// capped at the subject token's.
-const DefaultTTL = 15 * time.Minute
 
 // minTTL is the shortest lifetime an issued capability may have: Issue
 // counts lifetimes in whole seconds.
@@ -240,8 +253,8 @@ type Config struct {
 	// a proof by another key than the capability is bound to, or none for a
 	// bound one, or one for a bearer one, is refused; one asking for other
 	// targets than the capability's audience is refused; and a policy that
-	// names no TTL gets the subject token's remaining lifetime, not
-	// DefaultTTL. The policy still runs on every exchange: it names the
+	// names no TTL gets the subject token's remaining lifetime, not the
+	// Issuer's default. The policy still runs on every exchange: it names the
 	// tenant. Nil: every exchange issues a capability of its own. The
 	// Issuer's store must read records back (limes.RecordReader), as every
 	// limes.Store does.
@@ -324,10 +337,22 @@ func (e *Exchanger) exchange(ctx context.Context, req Request) (Result, Subject,
 	if err != nil {
 		return Result{}, subject, err
 	}
-	issue, err := e.grant(ctx, req, subject, remaining)
+	issue, scopes, err := e.grant(ctx, req, subject, remaining)
 	if err != nil {
 		return Result{}, subject, err
 	}
+	res, err := e.mint(ctx, subject, checked, bound, issue)
+	if err != nil {
+		return Result{}, subject, err
+	}
+	res.Scopes = scopes
+	return res, subject, nil
+}
+
+// mint issues the capability issue asks for, or under Config.Exchanges
+// hands back the one an earlier exchange of the subject token issued, bound
+// to checked's key when bound.
+func (e *Exchanger) mint(ctx context.Context, subject Subject, checked dpop.CheckedProof, bound bool, issue limes.IssueRequest) (Result, error) {
 	if bound {
 		issue.ConfirmationJKT = checked.JKT()
 	}
@@ -338,25 +363,24 @@ func (e *Exchanger) exchange(ctx context.Context, req Request) (Result, Subject,
 			if err == nil && bound {
 				err = e.cfg.DPoP.Record(ctx, checked)
 			}
-			return res, subject, err
+			return res, err
 		}
 	}
 	if bound {
 		// Recorded only now, once everything else passed, and before the
 		// capability exists: a replayed proof never mints one.
 		if err := e.cfg.DPoP.Record(ctx, checked); err != nil {
-			return Result{}, subject, err
+			return Result{}, err
 		}
 	}
 	minted, err := e.cfg.Issuer.Issue(ctx, issue)
 	if err != nil {
-		return Result{}, subject, fmt.Errorf("exchange: issue: %w", err)
+		return Result{}, fmt.Errorf("exchange: issue: %w", err)
 	}
 	if e.cfg.Exchanges == nil {
-		return resultOf(minted), subject, nil
+		return resultOf(minted), nil
 	}
-	res, err := e.claim(ctx, key, subject.ExpiresAt, issue, minted)
-	return res, subject, err
+	return e.claim(ctx, key, subject.ExpiresAt, issue, minted)
 }
 
 // exchangedBefore is the capability an earlier exchange of the subject
@@ -465,17 +489,47 @@ func (e *Exchanger) verifySubject(ctx context.Context, req Request) (Subject, ti
 	return subject, remaining, nil
 }
 
-// grant is the issue request the policy makes of req, held to the
-// exchange: its targets, the subject token's client and subject, and a
-// lifetime within the subject token's remaining.
-func (e *Exchanger) grant(ctx context.Context, req Request, subject Subject, remaining time.Duration) (limes.IssueRequest, error) {
-	issue, err := e.cfg.Policy(ctx, Grant{
+// grant is the issue request the policy makes of req, and the scopes it
+// grants, held to the exchange: its targets and scopes, the subject token's
+// client and subject, and a lifetime within the subject token's remaining.
+func (e *Exchanger) grant(ctx context.Context, req Request, subject Subject, remaining time.Duration) (limes.IssueRequest, []string, error) {
+	decision, err := e.cfg.Policy(ctx, Grant{
 		Subject: subject, Client: req.Client, Resources: slices.Clone(req.Resources), Audiences: slices.Clone(req.Audiences),
 		Scopes: slices.Clone(req.Scopes), AuthorizationDetails: slices.Clone(req.AuthorizationDetails),
 	})
 	if err != nil {
-		return limes.IssueRequest{}, err
+		return limes.IssueRequest{}, nil, err
 	}
+	scopes, err := holdScopes(decision.Scopes, req.Scopes)
+	if err != nil {
+		return limes.IssueRequest{}, nil, err
+	}
+	issue, err := e.holdIssue(decision.Issue, req, subject, remaining)
+	if err != nil {
+		return limes.IssueRequest{}, nil, err
+	}
+	return issue, scopes, nil
+}
+
+// holdScopes is the scopes a policy granted, every one asked when it named
+// none, refused when it grants a scope not asked for.
+func holdScopes(granted, asked []string) ([]string, error) {
+	if len(granted) == 0 {
+		return slices.Clone(asked), nil
+	}
+	for _, scope := range granted {
+		if !slices.Contains(asked, scope) {
+			return nil, fmt.Errorf("%w: scope %q was not asked for", errPolicy, scope)
+		}
+	}
+	return slices.Clone(granted), nil
+}
+
+// holdIssue is issue, a policy's, held to the exchange: its targets, the
+// subject token's client and subject, and a lifetime within the subject
+// token's remaining.
+func (e *Exchanger) holdIssue(issue limes.IssueRequest, req Request, subject Subject, remaining time.Duration) (limes.IssueRequest, error) {
+	var err error
 	if issue.Audience, err = holdPolicy(issue.Audience, issue.ConfirmationJKT, targetsOf(req.Resources, req.Audiences)); err != nil {
 		return limes.IssueRequest{}, err
 	}
@@ -507,7 +561,9 @@ func (e *Exchanger) grant(ctx context.Context, req Request, subject Subject, rem
 		return limes.IssueRequest{}, fmt.Errorf("%w: it acts on behalf of %q, not the subject token's %q", errPolicy, issue.OnBehalfOf.Subject, subject.Subject)
 	}
 	if issue.TTL == 0 {
-		issue.TTL = DefaultTTL
+		// The issuer's default, named here so it is capped below as a
+		// policy's own lifetime is.
+		issue.TTL = e.cfg.Issuer.DefaultTTL()
 		if e.cfg.Exchanges != nil {
 			// One capability per subject token: one shorter than the token
 			// would leave the rest of its life refused.

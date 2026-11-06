@@ -163,7 +163,7 @@ func TestHandlerRefusals(t *testing.T) {
 }
 
 // A response states what was granted when the request asked: the scope as
-// asked, since a policy that does not refuse it grants it all (RFC 8693
+// asked, since a policy naming no scopes grants every one asked (RFC 8693
 // §2.2.1), and the capability's caveats as the authorization_details
 // granted (RFC 9396 §7). A request that asked for neither gets neither.
 func TestHandlerAnswersWhatWasGranted(t *testing.T) {
@@ -216,8 +216,8 @@ func jsonEqual(t *testing.T, a, b json.RawMessage) bool {
 // ErrInvalidAuthorizationDetails, answered invalid_authorization_details
 // (RFC 9396 §5) and logged as the client's refusal, at WARN.
 func TestHandlerAnswersAPolicyRefusingTheDetails(t *testing.T) {
-	refusing := func(context.Context, Grant) (limes.IssueRequest, error) {
-		return limes.IssueRequest{}, fmt.Errorf("type %q unknown: %w", "x", ErrInvalidAuthorizationDetails)
+	refusing := func(context.Context, Grant) (Decision, error) {
+		return Decision{}, fmt.Errorf("type %q unknown: %w", "x", ErrInvalidAuthorizationDetails)
 	}
 	f := newFixture(t, fixtureConfig{policy: refusing})
 	logs := &records{}
@@ -265,7 +265,7 @@ func TestClientRefusalChallengesInTheClientsScheme(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	introspection, err := NewIntrospectionHandler(IntrospectionConfig{Verifier: f.verifier, Authenticate: refusing})
+	introspection, err := NewIntrospectionHandler(IntrospectionConfig{Verifier: f.verifier, Authenticate: refusing, AnyAudience: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -394,8 +394,8 @@ func TestHandlerAsksForTheNonce(t *testing.T) {
 // A failure that is not the client's is a 500 telling nothing.
 func TestHandlerHidesTheServersFailure(t *testing.T) {
 	f := newFixture(t, fixtureConfig{})
-	f.ex.cfg.Policy = func(context.Context, Grant) (limes.IssueRequest, error) {
-		return limes.IssueRequest{}, errors.New("policy store down")
+	f.ex.cfg.Policy = func(context.Context, Grant) (Decision, error) {
+		return Decision{}, errors.New("policy store down")
 	}
 	w := post(t, newHandler(t, f), exchangeForm(f.idp.sign(t, typeAccessToken, accessClaims())), nil)
 	if w.Code != http.StatusInternalServerError || strings.Contains(w.Body.String(), "down") {

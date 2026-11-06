@@ -42,8 +42,13 @@ type IntrospectionConfig struct {
 	// Audiences are the audiences of the tokens a client may learn about
 	// (RFC 7662 §4): a token whose aud names none of them is answered
 	// inactive, so one resource server learns nothing of tokens meant for
-	// another. Nil: any authenticated client learns about any token.
+	// another. Required, unless AnyAudience.
 	Audiences func(Client) []string
+	// AnyAudience lets any authenticated client learn about any token, its
+	// caveats among it: for an endpoint only one resource server, or
+	// gateways trusted with every audience, can reach. It excludes
+	// Audiences.
+	AnyAudience bool
 	// MaxBodyBytes bounds the request body. Zero: DefaultMaxBodyBytes.
 	MaxBodyBytes int64
 	// Logger logs every answer: active at INFO, inactive at WARN with the
@@ -59,13 +64,18 @@ type IntrospectionHandler struct {
 }
 
 // NewIntrospectionHandler builds an IntrospectionHandler, refusing a config
-// without a verifier or a client authenticator.
+// without a verifier or a client authenticator, or that names neither the
+// audiences each client may learn about nor AnyAudience, or both.
 func NewIntrospectionHandler(cfg IntrospectionConfig) (*IntrospectionHandler, error) {
 	switch {
 	case cfg.Verifier == nil:
 		return nil, fmt.Errorf("%w: exchange: IntrospectionConfig.Verifier required", limes.ErrInvalidConfig)
 	case cfg.Authenticate == nil:
 		return nil, fmt.Errorf("%w: exchange: IntrospectionConfig.Authenticate required", limes.ErrInvalidConfig)
+	case cfg.Audiences == nil && !cfg.AnyAudience:
+		return nil, fmt.Errorf("%w: exchange: IntrospectionConfig.Audiences required, or AnyAudience", limes.ErrInvalidConfig)
+	case cfg.Audiences != nil && cfg.AnyAudience:
+		return nil, fmt.Errorf("%w: exchange: IntrospectionConfig.Audiences beside AnyAudience", limes.ErrInvalidConfig)
 	case cfg.MaxBodyBytes < 0:
 		return nil, fmt.Errorf("%w: exchange: IntrospectionConfig.MaxBodyBytes is negative", limes.ErrInvalidConfig)
 	}
@@ -172,9 +182,9 @@ func (h *IntrospectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 }
 
 // mayAsk reports whether client may learn about a token of audience: any
-// client, when Audiences is nil, or one serving an audience the token names.
+// client, under AnyAudience, or one serving an audience the token names.
 func (h *IntrospectionHandler) mayAsk(client Client, audience []string) bool {
-	if h.cfg.Audiences == nil {
+	if h.cfg.AnyAudience {
 		return true
 	}
 	served := h.cfg.Audiences(client)

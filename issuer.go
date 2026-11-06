@@ -126,6 +126,12 @@ func NewIssuer(cfg IssuerConfig) (*Issuer, error) {
 	}, nil
 }
 
+// DefaultTTL is the lifetime Issue gives a request naming none: the
+// IssuerConfig.DefaultTTL it was built with, or DefaultIssueTTL. A caller
+// that caps a lifetime of its own, as an exchange caps it at the subject
+// token's, caps this one.
+func (i *Issuer) DefaultTTL() time.Duration { return i.defaultTTL }
+
 // fits refuses a token longer than MaxTokenBytes: one a verifier refuses
 // unread is a capability nobody can use.
 func (i *Issuer) fits(token string) error {

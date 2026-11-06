@@ -14,12 +14,13 @@ func TestTheSubjectIssuerIsRecorded(t *testing.T) {
 	for name, policySets := range map[string]bool{"the policy names none": false, "the policy names the same": true} {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture(t, fixtureConfig{noDPoP: true})
-			f.ex.cfg.Policy = func(ctx context.Context, g Grant) (limes.IssueRequest, error) {
-				issue, err := f.readPolicy(ctx, g)
+			f.ex.cfg.Policy = func(ctx context.Context, g Grant) (Decision, error) {
+				decision, err := f.readPolicy(ctx, g)
+				issue := &decision.Issue
 				if policySets {
 					issue.SubjectIssuer = g.Subject.Issuer
 				}
-				return issue, err
+				return decision, err
 			}
 			res, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, typeAccessToken, with(accessClaims(), map[string]any{claimSessionID: idpSession}))))
 			if err != nil {

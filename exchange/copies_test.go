@@ -38,10 +38,11 @@ func biscuitVerifier(t *testing.T, f *fixture, meter bool) *limes.Verifier {
 // exchanged with no request limit.
 func limitedCopy(t *testing.T, f *fixture) string {
 	t.Helper()
-	f.ex.cfg.Policy = func(ctx context.Context, g Grant) (limes.IssueRequest, error) {
-		issue, err := f.readPolicy(ctx, g)
+	f.ex.cfg.Policy = func(ctx context.Context, g Grant) (Decision, error) {
+		decision, err := f.readPolicy(ctx, g)
+		issue := &decision.Issue
 		issue.Caveats.Requests = limes.RequestCeiling{Unlimited: true}
-		return issue, err
+		return decision, err
 	}
 	res, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, typeAccessToken, accessClaims())))
 	if err != nil {

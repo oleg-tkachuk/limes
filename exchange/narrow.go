@@ -46,15 +46,27 @@ type Narrowing struct {
 	AuthorizationDetails json.RawMessage
 }
 
-// NarrowPolicy turns a narrowing into the child to delegate, or refuses it
-// with ErrInvalidTarget, ErrInvalidScope or ErrInvalidAuthorizationDetails,
-// as a Policy does. Its DelegateRequest's Parent is
+// NarrowDecision is what a NarrowPolicy grants: the child to delegate, and
+// the scopes granted.
+type NarrowDecision struct {
+	// Delegate is the child to delegate, held to the narrowing as
+	// NarrowPolicy says.
+	Delegate limes.DelegateRequest
+	// Scopes are the scopes granted, as Decision.Scopes: each one asked
+	// for, every one asked when empty.
+	Scopes []string
+}
+
+// NarrowPolicy turns a narrowing into the child to delegate and the scopes
+// granted, or refuses it with ErrInvalidTarget, ErrInvalidScope or
+// ErrInvalidAuthorizationDetails, as a Policy does. Its DelegateRequest's
+// Parent is
 // set by the Exchanger; its Audience must be drawn from the narrowing's
 // resources and audiences, or be empty to take them all; its
 // ConfirmationJKT must be empty. Issuer.Delegate holds the child to the
 // parent: narrower caveats, an audience within the parent's, an end no
 // later.
-type NarrowPolicy func(ctx context.Context, n Narrowing) (limes.DelegateRequest, error)
+type NarrowPolicy func(ctx context.Context, n Narrowing) (NarrowDecision, error)
 
 // errNoNarrowing is an Exchanger configured to exchange no capabilities.
 var errNoNarrowing = fmt.Errorf("%w: this exchange narrows no capabilities", ErrInvalidRequest)
@@ -113,7 +125,7 @@ func (e *Exchanger) narrow(ctx context.Context, req NarrowRequest) (Result, lime
 	if err != nil {
 		return Result{}, parent, err
 	}
-	child, err := e.child(ctx, req, verified, targets)
+	child, scopes, err := e.child(ctx, req, verified, targets)
 	if err != nil {
 		return Result{}, parent, err
 	}
@@ -128,7 +140,9 @@ func (e *Exchanger) narrow(ctx context.Context, req NarrowRequest) (Result, lime
 	if err != nil {
 		return Result{}, parent, delegateError(err)
 	}
-	return resultOf(minted), parent, nil
+	res := resultOf(minted)
+	res.Scopes = scopes
+	return res, parent, nil
 }
 
 // checkNarrowRequest refuses a narrowing this exchanger does not do, or one
@@ -187,21 +201,26 @@ func (e *Exchanger) checkRebind(ctx context.Context, req NarrowRequest, parent l
 	return checked, true, nil
 }
 
-// child is the delegation the narrowing policy asks of verified, held to
-// the request's targets.
-func (e *Exchanger) child(ctx context.Context, req NarrowRequest, verified limes.VerifiedCapability, targets []string) (limes.DelegateRequest, error) {
-	child, err := e.cfg.NarrowPolicy(ctx, Narrowing{
+// child is the delegation the narrowing policy asks of verified, and the
+// scopes it grants, held to the request's targets and scopes.
+func (e *Exchanger) child(ctx context.Context, req NarrowRequest, verified limes.VerifiedCapability, targets []string) (limes.DelegateRequest, []string, error) {
+	decision, err := e.cfg.NarrowPolicy(ctx, Narrowing{
 		Parent: verified, Client: req.Client, Resources: slices.Clone(req.Resources), Audiences: slices.Clone(req.Audiences),
 		Scopes: slices.Clone(req.Scopes), AuthorizationDetails: slices.Clone(req.AuthorizationDetails),
 	})
 	if err != nil {
-		return limes.DelegateRequest{}, err
+		return limes.DelegateRequest{}, nil, err
 	}
+	scopes, err := holdScopes(decision.Scopes, req.Scopes)
+	if err != nil {
+		return limes.DelegateRequest{}, nil, err
+	}
+	child := decision.Delegate
 	if child.Audience, err = holdPolicy(child.Audience, child.ConfirmationJKT, targets); err != nil {
-		return limes.DelegateRequest{}, err
+		return limes.DelegateRequest{}, nil, err
 	}
 	child.Parent = verified
-	return child, nil
+	return child, scopes, nil
 }
 
 // delegateError is a Delegate failure as the exchange answers it: a parent

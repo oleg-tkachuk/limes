@@ -156,8 +156,9 @@ func NewHandler(cfg HandlerConfig) (*Handler, error) {
 
 // tokenResponse is a successful response (RFC 8693 §2.2.1). Scope and
 // AuthorizationDetails state what was granted, when the request asked for
-// either: the scope as asked, which a policy that does not refuse it grants
-// in full, and the capability's caveats as one entry of
+// either: the scopes the policy granted (Result.Scopes), which RFC 6749
+// §5.1 requires where they differ from those asked, and the capability's
+// caveats as one entry of
 // AuthorizationDetailsTypeCaveats (RFC 9396 §7), as introspection states
 // them.
 type tokenResponse struct {
@@ -250,7 +251,7 @@ func (h *Handler) response(req Request, res Result) (tokenResponse, error) {
 	resp := tokenResponse{
 		AccessToken: res.Token, IssuedTokenType: IssuedTokenTypeCapability, TokenType: res.TokenType,
 		ExpiresIn: int64(res.Capability.ExpiresAt.Sub(h.cfg.Exchanger.cfg.Now()).Round(time.Second) / time.Second),
-		Scope:     strings.Join(req.Scopes, " "),
+		Scope:     strings.Join(res.Scopes, " "),
 	}
 	if len(req.AuthorizationDetails) > 0 {
 		detail, err := caveatsDetail(res.Capability.Caveats)
