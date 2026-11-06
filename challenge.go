@@ -116,6 +116,10 @@ var (
 	answerConflict        = refusal{http.StatusConflict, "", false, false, "conflict", "The request conflicts with what is on record"}
 )
 
+// answerRevocationUnavailable answers a revocation lookup that failed: 503,
+// as the issuer's keys out of reach are.
+var answerRevocationUnavailable = refusal{http.StatusServiceUnavailable, "", false, false, "revocation-unavailable", "The revocation status cannot be checked"}
+
 // internalError answers any other error: the server's fault, said without
 // its text.
 var internalError = refusal{status: http.StatusInternalServerError, slug: "internal", title: "The request could not be authorised"}

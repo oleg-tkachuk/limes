@@ -70,6 +70,47 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## exchange/v0.18.0
+
+- An error `Exchanger.Exchange` or `Narrow` returns that is no refusal of
+  the client's — the issuer refusing the policy's request, a store or the
+  subject verifier failing, the policy erring — wraps
+  `exchange.ErrServerError`, its cause kept in the chain. `limes.ProblemOf`
+  answers it `server_error`, 500, as the token endpoint does, where it
+  answered the limes error it wrapped: an issue refused for
+  `invalid_caveats` was 400, the identity provider's keys out of reach
+  503. `errors.Is` still finds the cause; branch on `ErrServerError` for
+  the server's failure.
+- The exchange's sentinels carry their status, title and category, and
+  register them with limes, which no longer holds a table of them: this
+  release needs limes `v0.167.0` or later, and limes `v0.167.0` needs this
+  release to answer the exchange's codes.
+
+## v0.167.0
+
+- A revocation lookup that fails — its store or upstream unreachable — is
+  `revocation_unavailable`, 503, category `unavailable`, where it was
+  `internal`, 500: the verifier and the issuer wrap the lookup's error in
+  the new `limes.ErrRevocationUnavailable`, and `ErrorResponse` answers it
+  503, as it answers `keys_unavailable`. A client or load balancer retries
+  it. `limes.ReasonRevocationUnavailable` is its reason, not permanent. A
+  lookup's error that is a code already — `delegation_too_deep`,
+  `internal` — keeps it.
+- `proof_unsupported`, `leasing_disabled` and `feature_disabled` are
+  category `internal`, where they were `precondition`; their status stays
+  500. A category now spans one class of status: `precondition` is always
+  a 4xx. A mapping that answered `precondition` as the client's fault no
+  longer sees the server's configuration there.
+- limes holds no table of the exchange's codes: each exchange sentinel
+  carries its status, title and category, and the exchange registers them
+  as it initialises. `limes.Codes()`, `ProblemOfCode` and `CategoryOfCode`
+  answer the exchange's codes only in a binary that links module exchange
+  in, and a release of the exchange before `exchange/v0.18.0`, whose
+  sentinels carry a code alone, is answered by no rule: upgrade
+  `github.com/oleg-tkachuk/limes/exchange` with limes. A consumer's
+  `limestest` check without the exchange linked in no longer needs
+  `limestest.WithoutExchange`.
+
 ## pgstore/v0.67.0
 
 - `pgstore.Acquirer` is gone, for `pgstore.ConnLender`: a `Config.DB` of

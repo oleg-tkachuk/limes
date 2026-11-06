@@ -535,7 +535,7 @@ func (v *Verifier) checkRevoked(ctx context.Context, cap *grant, biscuitIDs [][]
 		return fmt.Errorf("%w: %s", ErrUnrecorded, cap.ID)
 	}
 	if err != nil {
-		return errs.Errorf("limes: revocation lookup: %w", err)
+		return revocationLookupFailed("revocation lookup", err)
 	}
 	if revoked {
 		return ErrRevoked
@@ -543,7 +543,7 @@ func (v *Verifier) checkRevoked(ctx context.Context, cap *grant, biscuitIDs [][]
 	if biscuitIDs != nil {
 		revoked, err := v.cfg.Biscuit.Revocations.IsBiscuitRevoked(ctx, biscuitIDs)
 		if err != nil {
-			return errs.Errorf("limes: biscuit revocation lookup: %w", err)
+			return revocationLookupFailed("biscuit revocation lookup", err)
 		}
 		if revoked {
 			return ErrRevoked
@@ -565,6 +565,16 @@ func (v *Verifier) isRevoked(ctx context.Context, id uuid.UUID) (bool, error) {
 	// NewVerifier refused any other lookup under RequireRecord.
 	a, err := v.cfg.Revocations.(RevocationLineageLookup).RevocationLineage(ctx, id)
 	return a.Revoked, err
+}
+
+// revocationLookupFailed is err, the failure of the revocation lookup what
+// names, as limes returns it: a code of limes's kept, any other failure an
+// ErrRevocationUnavailable wrapping it.
+func revocationLookupFailed(what string, err error) error {
+	if _, coded := CodeOf(err); coded {
+		return errs.Errorf("limes: %s: %w", what, err)
+	}
+	return errs.Errorf("%w: %s: %w", ErrRevocationUnavailable, what, err)
 }
 
 // Introspection is what Introspect says of an active token.

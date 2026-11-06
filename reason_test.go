@@ -1,6 +1,7 @@
 package limes
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -19,6 +20,7 @@ func TestReasonOf(t *testing.T) {
 		{"forged", fmt.Errorf("%w: bad", ErrInvalidToken), ReasonInvalidToken, true},
 		{"unknown kid stays a bad signature", fmt.Errorf("%w: kid %q: %w", ErrInvalidToken, testKID, jwks.ErrUnknownKID), ReasonInvalidToken, true},
 		{"keys unreachable", fmt.Errorf("limes: resolve kid %q: %w", testKID, jwks.ErrUnavailable), ReasonKeysUnavailable, false},
+		{"revocations unreachable", fmt.Errorf("%w: revocation lookup: %w", ErrRevocationUnavailable, context.DeadlineExceeded), ReasonRevocationUnavailable, false},
 		{"expired", ErrExpired, ReasonExpired, true},
 		{"not yet valid", ErrNotYetValid, ReasonNotYetValid, false},
 		{"revoked", fmt.Errorf("wrapped: %w", ErrRevoked), ReasonRevoked, true},

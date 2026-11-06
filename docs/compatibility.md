@@ -95,3 +95,12 @@ of v1; it goes only with v2, under a new module path. A signature does not
 change on v1 either: a new form of a function is a new function beside
 it. An error code keeps
 its status, category and reason for the whole of v1.
+
+A released nested module builds against every later limes of its major:
+a v1.0 of the exchange beside a v1.N of limes. The nested modules import
+three of limes's internal packages — `internal/errs`, `internal/errcode`
+and `internal/jose` — so those keep every name and signature for the
+whole of v1, as an exported API does. CI builds each nested module's
+newest release, and once it is at v1 every release of its major, against
+limes as it is (`task verify:nested-internals`), and names the internal
+symbol a change broke.

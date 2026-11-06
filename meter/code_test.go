@@ -218,13 +218,17 @@ func TestMeterReasonOfCode(t *testing.T) {
 	}
 }
 
-// A request well formed whose state is not there — a counter with no room,
-// a lease above, leasing turned off — is a precondition, apart from a limit
-// refusing it and from a bad request.
+// A request well formed whose state is not on record — a counter with no
+// room, a lease above — is a precondition, apart from a limit refusing it
+// and from a bad request; a feature the store's configuration turned off is
+// the server's to fix, internal, as its 500 says.
 func TestMeterPreconditions(t *testing.T) {
-	for _, err := range []error{ErrCounterOverflow, ErrRefundExceedsCharge, ErrLeaseNested, ErrLeasingDisabled, ErrFeatureDisabled} {
-		if got, ok := limes.CategoryOf(err); !ok || got != limes.CategoryPrecondition {
-			t.Errorf("CategoryOf(%v) = %q, %v; want precondition", err, got, ok)
+	for err, want := range map[error]limes.Category{
+		ErrCounterOverflow: limes.CategoryPrecondition, ErrRefundExceedsCharge: limes.CategoryPrecondition,
+		ErrLeaseNested: limes.CategoryPrecondition, ErrLeasingDisabled: limes.CategoryInternal, ErrFeatureDisabled: limes.CategoryInternal,
+	} {
+		if got, ok := limes.CategoryOf(err); !ok || got != want {
+			t.Errorf("CategoryOf(%v) = %q, %v; want %q", err, got, ok, want)
 		}
 	}
 }

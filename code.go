@@ -26,6 +26,7 @@ const (
 	CodeMalformedAuthorization = Code(ReasonMalformedAuthorization)
 	CodeInvalidToken           = Code(ReasonInvalidToken)
 	CodeKeysUnavailable        = Code(ReasonKeysUnavailable)
+	CodeRevocationUnavailable  = Code(ReasonRevocationUnavailable)
 	CodeExpired                = Code(ReasonExpired)
 	CodeNotYetValid            = Code(ReasonNotYetValid)
 	CodeRevoked                = Code(ReasonRevoked)
@@ -98,10 +99,13 @@ const (
 	CodeFeatureDisabled             Code = "feature_disabled"
 )
 
-// The codes of package exchange's sentinels, which this package answers as
-// its own (docs/errors.md, "The exchange's codes"): the names RFC 6749
-// §5.2, RFC 8707 and RFC 9396 give them, which the token endpoint answers
-// with. exchange.ErrInvalidRequest is CodeInvalidRequest.
+// The codes of module exchange's sentinels (docs/errors.md, "The
+// exchange's codes"): the names RFC 6749 §5.2, RFC 8707 and RFC 9396 give
+// them, which the token endpoint answers with. exchange.ErrInvalidRequest
+// is CodeInvalidRequest. Each sentinel carries its own status, title and
+// category, and the exchange registers them (internal/errcode): this
+// package answers them from the sentinels, not from a table of its own, so
+// the exchange adds a code without a release of limes.
 const (
 	CodeInvalidClient               Code = "invalid_client"
 	CodeUnauthorizedClient          Code = "unauthorized_client"
@@ -131,6 +135,7 @@ var codeRules = []codeRule{
 	{ErrMalformedAuthorization, CodeMalformedAuthorization, 0, "", CategoryInvalid},
 	{ErrNoCredentials, CodeNoCredentials, 0, "", CategoryUnauthenticated},
 	{jwks.ErrUnavailable, CodeKeysUnavailable, 0, "", CategoryUnavailable},
+	{ErrRevocationUnavailable, CodeRevocationUnavailable, 0, "", CategoryUnavailable},
 	{dpop.ErrNonceRequired, CodeNonceRequired, 0, "", CategoryUnauthenticated},
 	{dpop.ErrRequired, CodeProofRequired, 0, "", CategoryUnauthenticated},
 	{dpop.ErrInvalid, CodeProofInvalid, 0, "", CategoryUnauthenticated},
@@ -176,7 +181,7 @@ var codeRules = []codeRule{
 	{ErrScopeMismatch, CodeScopeMismatch, http.StatusInternalServerError, "The call is scoped to another tenant than its request names", CategoryInternal},
 
 	// The server's configuration or its upstream: its own to fix.
-	{ErrProofUnsupported, CodeProofUnsupported, http.StatusInternalServerError, "The capability is bound to a key and no proof is checked", CategoryPrecondition},
+	{ErrProofUnsupported, CodeProofUnsupported, http.StatusInternalServerError, "The capability is bound to a key and no proof is checked", CategoryInternal},
 	{ErrNoRevocationLineage, CodeNoRevocationLineage, http.StatusBadGateway, "The revocation upstream names no lineage", CategoryUnavailable},
 	{ErrCopyCountersNotMetered, CodeCopyCountersNotMetered, http.StatusInternalServerError, "Copy limits need a verifier that meters copies", CategoryInternal},
 	{ErrCursorRepeated, CodeCursorRepeated, http.StatusBadGateway, "The store returned a cursor already fetched", CategoryUnavailable},
@@ -203,27 +208,54 @@ var meterCodeRules = []codeRule{
 	{ErrRequestLimitExceeded, CodeLeaseRequestsExhausted, 0, "", CategoryExhausted},
 	{nil, CodeLeaseNotFound, http.StatusNotFound, "The capability holds no lease", CategoryNotFound},
 	{nil, CodeLeaseNested, http.StatusConflict, "An ancestor of the capability holds a lease", CategoryPrecondition},
-	{nil, CodeLeasingDisabled, http.StatusInternalServerError, "Leasing is not enabled on the store", CategoryPrecondition},
-	{nil, CodeFeatureDisabled, http.StatusInternalServerError, "A feature is disabled by the store's configuration", CategoryPrecondition},
+	{nil, CodeLeasingDisabled, http.StatusInternalServerError, "Leasing is not enabled on the store", CategoryInternal},
+	{nil, CodeFeatureDisabled, http.StatusInternalServerError, "A feature is disabled by the store's configuration", CategoryInternal},
 }
 
-// exchangeCodeRules answer the exchange's sentinels, which name their own
-// code as the meter's do, each with the status the token endpoint answers
-// it with.
-var exchangeCodeRules = []codeRule{
-	{nil, CodeInvalidClient, http.StatusUnauthorized, "The client is not authenticated", CategoryUnauthenticated},
-	{nil, CodeUnauthorizedClient, http.StatusBadRequest, "The client may not exchange tokens", CategoryDenied},
-	{nil, CodeUnsupportedGrantType, http.StatusBadRequest, "The grant type is not supported", CategoryInvalid},
-	{nil, CodeInvalidGrant, http.StatusBadRequest, "The subject token was refused", CategoryUnauthenticated},
-	{nil, CodeInvalidTarget, http.StatusBadRequest, "The resource or audience was refused", CategoryDenied},
-	{nil, CodeInvalidScope, http.StatusBadRequest, "The scope was refused", CategoryDenied},
-	{nil, CodeInvalidAuthorizationDetails, http.StatusBadRequest, "The authorization details were refused", CategoryDenied},
-	{nil, CodeServerError, http.StatusInternalServerError, "The server could not decide on the request", CategoryInternal},
+// ownCodeRules is every code's rule this package holds, limes's then the
+// meter's.
+var ownCodeRules = slices.Concat(codeRules, meterCodeRules)
+
+// registrations are the errors components registered (errcode.Register);
+// a variable so a test can stand others in.
+var registrations = errcode.Registered
+
+// registeredRules are the rules of the codes components registered, each
+// once, but those this package's own rules answer: the codes of component,
+// or of every component when it is empty.
+func registeredRules(component string) []codeRule {
+	var out []codeRule
+	for _, r := range registrations() {
+		if component != "" && r.Component != component {
+			continue
+		}
+		code := Code(r.Err.LimesErrorCode())
+		if ownRuleOf(code) >= 0 || slices.ContainsFunc(out, func(rule codeRule) bool { return rule.code == code }) {
+			continue
+		}
+		out = append(out, answeredRule(r.Err))
+	}
+	return out
 }
 
-// allCodeRules is every code's rule, limes's, the exchange's, then the
-// meter's: what a code alone is looked up in.
-var allCodeRules = slices.Concat(codeRules, exchangeCodeRules, meterCodeRules)
+// ownRuleOf is the index of code's rule in ownCodeRules, -1 for none.
+func ownRuleOf(code Code) int {
+	return slices.IndexFunc(ownCodeRules, func(r codeRule) bool { return r.code == code })
+}
+
+// answeredRule is the rule of an error that carries its own answer.
+func answeredRule(err errcode.Answered) codeRule {
+	return codeRule{
+		code: Code(err.LimesErrorCode()), status: err.LimesErrorStatus(), title: err.LimesErrorTitle(),
+		category: Category(err.LimesErrorCategory()),
+	}
+}
+
+// allCodeRules is every code's rule: limes's, the meter's, then those
+// components registered. What a code alone is looked up in.
+func allCodeRules() []codeRule {
+	return slices.Concat(ownCodeRules, registeredRules(""))
+}
 
 // namesOf are the codes of rules, each once, as strings.
 func namesOf(rules []codeRule) []string {
@@ -238,7 +270,7 @@ func namesOf(rules []codeRule) []string {
 // component a code comes from matters only to a check of a consumer's
 // mapping, never to the mapping itself.
 func init() {
-	link.ExchangeCodes = func() []string { return namesOf(exchangeCodeRules) }
+	link.ExchangeCodes = func() []string { return namesOf(registeredRules(errcode.ComponentExchange)) }
 	link.MeterCodes = func() []string { return namesOf(meterCodeRules) }
 }
 
@@ -255,7 +287,7 @@ func codesIn(rules []codeRule) []Code {
 
 // codeRuleOf is code's rule.
 func codeRuleOf(code Code) (codeRule, bool) {
-	for _, r := range allCodeRules {
+	for _, r := range allCodeRules() {
 		if r.code == code {
 			return r, true
 		}
@@ -263,15 +295,24 @@ func codeRuleOf(code Code) (codeRule, bool) {
 	return codeRule{}, false
 }
 
-// codeRuleFor is the rule of the code err names itself, a meter sentinel's,
-// or else the first code rule err matches.
+// codeRuleFor is the rule of the code err names itself — from this
+// package's table when it holds the code, as it does a meter sentinel's,
+// else from the answer err carries, as an exchange sentinel does — or else
+// the first code rule err matches.
 func codeRuleFor(err error) (codeRule, bool) {
 	if err == nil {
 		return codeRule{}, false
 	}
 	var coded errcode.Coded
 	if errors.As(err, &coded) {
-		if r, ok := codeRuleOf(Code(coded.LimesErrorCode())); ok {
+		code := Code(coded.LimesErrorCode())
+		if i := ownRuleOf(code); i >= 0 {
+			return ownCodeRules[i], true
+		}
+		if answered, ok := coded.(errcode.Answered); ok {
+			return answeredRule(answered), true
+		}
+		if r, ok := codeRuleOf(code); ok {
 			return r, true
 		}
 	}
@@ -291,12 +332,12 @@ func CodeOf(err error) (Code, bool) {
 	return r.code, ok
 }
 
-// Codes returns every code this package answers, the exchange's and the
-// meter's among them, each once, so a consumer can prove its own mapping
+// Codes returns every code this package answers, the meter's among them
+// and, once module exchange is linked in, the exchange's, each once, so a consumer can prove its own mapping
 // covers them all. The order is fixed within a release, and no contract:
 // it may change in any release.
 func Codes() []Code {
-	return codesIn(allCodeRules)
+	return codesIn(allCodeRules())
 }
 
 // ProblemTypeURI is the RFC 9457 type URI of the problem a code, or a

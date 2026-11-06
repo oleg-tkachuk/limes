@@ -3,7 +3,10 @@ package limes
 // Category is what a caller does about an error, coarser than its Code:
 // every code belongs to exactly one, so a consumer maps the categories onto
 // its transport rather than every code (docs/errors.md, "Categories").
-// Categories are never renamed; new ones may be added.
+// Every code of a category is answered within one class of HTTP status,
+// the client's (4xx) or the server's (5xx), so whose fault an error is
+// follows from its category. Categories are never renamed; new ones may be
+// added.
 type Category string
 
 // The categories.
@@ -30,15 +33,17 @@ const (
 	// already: read it rather than create it again.
 	CategoryAlreadyExists Category = "already_exists"
 	// CategoryPrecondition — the request is well formed, and the state it
-	// needs is not there: the store's configuration, the ledger or another
-	// capability's lease. Sent again it fails again until that state
-	// changes, which is no retry's to change.
+	// needs is not on record: the ledger's room, the charge it refunds, or
+	// another capability's lease. Sent again it fails again until that state
+	// changes, which is no retry's to change. Always a 4xx: a server's own
+	// configuration is CategoryInternal.
 	CategoryPrecondition Category = "precondition"
 	// CategoryUnavailable — a dependency failed on this request — did not
 	// answer, or answered a page it had already given: retry later.
 	CategoryUnavailable Category = "unavailable"
 	// CategoryInternal — the server's configuration or a store failed: the
-	// server's to fix.
+	// server's to fix. A feature the server does not run — leasing, a
+	// proof checker — is its configuration too.
 	CategoryInternal Category = "internal"
 )
 

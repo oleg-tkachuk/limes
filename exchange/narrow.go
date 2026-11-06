@@ -74,6 +74,7 @@ var errNoNarrowing = fmt.Errorf("%w: this exchange narrows no capabilities", Err
 // grant began with, unless the policy names another.
 func (e *Exchanger) Narrow(ctx context.Context, req NarrowRequest) (Result, error) {
 	res, parent, err := e.narrow(ctx, req)
+	err = serverError(err)
 	log := e.cfg.Logger.With(slog.String("client", req.Client.ID))
 	if parent.ID != uuid.Nil() {
 		log = log.With(slog.String("parent", parent.ID.String()))

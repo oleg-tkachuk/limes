@@ -339,3 +339,8 @@ tasks:
       - node .github/release/release-notes.test.mjs
       - node .github/release/major-guard.test.mjs
       - node .github/release/module-commits.test.mjs
+
+  verify:nested-internals:
+    desc: "Build each nested module's newest release — every release of its major from v1 on — against this checkout's limes, its tests left out: the root's internal packages it imports must still hold what it uses (.github/ci/nested-internals.ts) — needs the release tags"
+    cmds:
+      - node .github/ci/nested-internals.ts

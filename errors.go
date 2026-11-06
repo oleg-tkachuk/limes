@@ -144,6 +144,17 @@ var (
 	// It is the deployment's fault, not the request's, so it matches no
 	// ErrUnauthenticated sentinel and ErrorResponse invites no retry.
 	ErrProofUnsupported = errors.New("limes: key-bound capability, and this verifier checks no proof")
+	// ErrRevocationUnavailable is a revocation lookup that failed — the
+	// store or the upstream that answers it unreachable, or failing — so
+	// whether the capability is revoked is unknown. The verifier and the
+	// issuer refuse with it, wrapping the lookup's own error, as the
+	// verifier refuses a token whose issuer's keys cannot be fetched
+	// (jwks.ErrUnavailable): a dependency failed, not the token, so it
+	// matches no ErrUnauthenticated sentinel, and is answered 503, to retry.
+	// A lookup's error that is a code of limes's already — a lineage too
+	// deep (ErrDelegationTooDeep), a store's broken invariant
+	// (ErrInternal) — keeps that code.
+	ErrRevocationUnavailable = errors.New("limes: revocation status unavailable")
 )
 
 // familyError is a sentinel with a name of its own that also matches the

@@ -22,6 +22,7 @@ const (
 	ReasonMalformedAuthorization Reason = "malformed_authorization"
 	ReasonInvalidToken           Reason = "invalid_token"
 	ReasonKeysUnavailable        Reason = "keys_unavailable"
+	ReasonRevocationUnavailable  Reason = "revocation_unavailable"
 	ReasonExpired                Reason = "expired"
 	ReasonNotYetValid            Reason = "not_yet_valid"
 	ReasonRevoked                Reason = "revoked"
@@ -63,6 +64,7 @@ var refusalRules = []refusalRule{
 	{ErrMalformedAuthorization, ReasonMalformedAuthorization, true, answerMalformed},
 	{ErrNoCredentials, ReasonNoCredentials, false, answerNoCredentials},
 	{jwks.ErrUnavailable, ReasonKeysUnavailable, false, answerKeysUnavailable},
+	{ErrRevocationUnavailable, ReasonRevocationUnavailable, false, answerRevocationUnavailable},
 
 	// A nonce challenge asks for a proof signed afresh, and a token under the
 	// wrong scheme for the same token sent under DPoP; neither stands. RFC
@@ -147,8 +149,9 @@ func ReasonOfCode(code Code) (Reason, bool) {
 // A refusal that something else can lift is not permanent: a budget frees as
 // holds lapse or charges are refunded, a tenant ceiling is raised by an
 // operator, a taint flag is cleared, a not-yet-valid capability becomes
-// valid, a proof is signed afresh, the verifier fetches its keys again, and
-// an idempotency key can be added to the request.
+// valid, a proof is signed afresh, the verifier fetches its keys again or
+// reaches its revocations, and an idempotency key can be added to the
+// request.
 func (r Reason) Permanent() bool {
 	for _, rule := range refusalRules {
 		if rule.reason == r {
