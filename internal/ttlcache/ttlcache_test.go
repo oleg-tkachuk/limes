@@ -3,6 +3,7 @@ package ttlcache
 import (
 	"context"
 	"errors"
+	"runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -431,23 +432,31 @@ func TestForgetDropsTheAnswersAKeyOutdates(t *testing.T) {
 	}
 }
 
-// A lookup in flight when Forget runs may have read what the revocation
-// changed, about a key it does not name: its answer is served to whoever
-// asked, cached for nobody, and shared with no caller who asks after.
-func TestForgetDetachesALookupInFlight(t *testing.T) {
-	c, _ := newCache(10)
-	entered, release := make(chan struct{}), make(chan struct{})
-	done := make(chan bool)
+// blockedLookup starts a GetTagged of key in the background whose lookup
+// answers live with tags once released, and returns once the lookup runs:
+// release lets it answer, and done carries what its caller got.
+func blockedLookup(t *testing.T, c *Cache[string], key string, tags ...string) (release chan<- struct{}, done <-chan bool) {
+	t.Helper()
+	entered, rel, out := make(chan struct{}), make(chan struct{}), make(chan bool, 1)
 	go func() {
-		revoked, _, _ := c.GetTagged(t.Context(), "child", func(context.Context) (bool, []string, error) {
+		revoked, _, _ := c.GetTagged(t.Context(), key, func(context.Context) (bool, []string, error) {
 			close(entered)
-			<-release
-			return false, []string{"parent"}, nil
+			<-rel
+			return false, tags, nil
 		})
-		done <- revoked
+		out <- revoked
 	}()
 	<-entered
-	c.Forget([]string{"unrelated"})
+	return rel, out
+}
+
+// A Forget of the key a lookup in flight asks about detaches it: a caller
+// after the Forget runs a lookup of its own at once, and the detached
+// answer, served to its own caller, replaces nothing.
+func TestForgetDetachesTheLookupOfAKeyItNames(t *testing.T) {
+	c, _ := newCache(10)
+	release, done := blockedLookup(t, c, "child")
+	c.Forget([]string{"child"})
 	var calls atomic.Int32
 	// Bounded: joined to the detached lookup, it would wait on it for good.
 	ctx, cancel := context.WithTimeout(t.Context(), detachWait)
@@ -461,6 +470,189 @@ func TestForgetDetachesALookupInFlight(t *testing.T) {
 	}
 	if revoked, _, _ := c.GetTagged(t.Context(), "child", tagged(false, &calls)); !revoked {
 		t.Error("the detached lookup's answer replaced the one asked after Forget")
+	}
+}
+
+// A lookup in flight when a Forget names a key its answer turns out to be
+// tagged with may have read the state that revocation changed: its answer
+// is served to its caller, cached for nobody, and a caller that joined it
+// after the Forget asks again.
+func TestForgetOfATagKeepsALookupInFlightOut(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c, _ := newCache(10)
+		release, done := blockedLookup(t, c, "child", "parent")
+		c.Forget([]string{"parent"})
+		var calls atomic.Int32
+		joined := make(chan bool, 1)
+		go func() {
+			revoked, _, _ := c.GetTagged(t.Context(), "child", tagged(true, &calls))
+			joined <- revoked
+		}()
+		// Blocked on the lookup in flight: it joined it.
+		synctest.Wait()
+		close(release)
+		if <-done {
+			t.Error("the lookup's own caller got another's answer")
+		}
+		if !<-joined || calls.Load() != 1 {
+			t.Errorf("the caller that joined after Forget: %d lookups; want one of its own, read after the Forget", calls.Load())
+		}
+		if revoked, _, _ := c.GetTagged(t.Context(), "child", tagged(false, &calls)); !revoked {
+			t.Error("the answer read before the Forget was cached")
+		}
+	})
+}
+
+// A Forget that names nothing a lookup in flight answers about leaves it
+// be: its answer is cached, as though no Forget had happened, and a caller
+// that joins it after shares it.
+func TestForgetLeavesAnUnrelatedLookupInFlight(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c, _ := newCache(10)
+		release, done := blockedLookup(t, c, "child", "parent")
+		c.Forget([]string{"unrelated"})
+		var calls atomic.Int32
+		joined := make(chan error, 1)
+		go func() {
+			_, _, err := c.GetTagged(t.Context(), "child", tagged(true, &calls))
+			joined <- err
+		}()
+		// Blocked on the lookup in flight: it joined it.
+		synctest.Wait()
+		close(release)
+		<-done
+		if err := <-joined; err != nil || calls.Load() != 0 {
+			t.Errorf("the caller that joined after Forget: %d lookups, %v; want the lookup in flight shared", calls.Load(), err)
+		}
+		if _, _, err := c.GetTagged(t.Context(), "child", tagged(true, &calls)); err != nil || calls.Load() != 0 {
+			t.Errorf("after the lookup: %d lookups, %v; want its answer cached", calls.Load(), err)
+		}
+	})
+}
+
+// raceRounds is how many times the revocation race runs, each on a cache of
+// its own; raceCallers how many callers ask about the child in each.
+const (
+	raceRounds  = 200
+	raceCallers = 8
+)
+
+// However a revocation of an ancestor falls against the lookups of a child
+// in flight, once Forget has returned no caller is answered live from an
+// answer read before the revocation: the child's every caller after it, and
+// the cache from then on, says revoked.
+func TestARevocationRacingALookupIsNeverUndone(t *testing.T) {
+	for round := range raceRounds {
+		c, _ := newCache(10)
+		var parentRevoked atomic.Bool
+		lookup := func(context.Context) (bool, []string, error) {
+			runtime.Gosched()
+			revoked := parentRevoked.Load()
+			runtime.Gosched()
+			return revoked, []string{"parent"}, nil
+		}
+		var wg sync.WaitGroup
+		for range raceCallers {
+			wg.Go(func() {
+				for range round%raceCallers + 1 {
+					_, _, _ = c.GetTagged(t.Context(), "child", lookup)
+					runtime.Gosched()
+				}
+			})
+		}
+		for range round % raceCallers {
+			runtime.Gosched()
+		}
+		parentRevoked.Store(true)
+		c.Forget([]string{"parent"})
+		for range raceCallers {
+			if revoked, _, err := c.GetTagged(t.Context(), "child", lookup); err != nil || !revoked {
+				t.Fatalf("round %d: a check after the Forget = %v, %v; want revoked", round, revoked, err)
+			}
+		}
+		wg.Wait()
+		if revoked, _, err := c.GetTagged(t.Context(), "child", lookup); err != nil || !revoked {
+			t.Fatalf("round %d: once every lookup ended = %v, %v; want revoked", round, revoked, err)
+		}
+	}
+}
+
+// When, against a lookup of the child, an ancestor's revocation and its
+// Forget fall.
+const (
+	revokeBeforeRead = iota
+	revokeAfterRead
+	revokeAfterFinish
+)
+
+// The same promise as TestARevocationRacingALookupIsNeverUndone, with the
+// revocation placed at each point of a lookup of the child, and callers
+// joining the lookup after the Forget: each of them, and the cache once
+// the lookup ends, says revoked.
+func TestARevocationAtEachPointOfALookupIsNeverUndone(t *testing.T) {
+	for name, when := range map[string]int{"before the read": revokeBeforeRead, "after the read": revokeAfterRead, "after the lookup": revokeAfterFinish} {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				c, _ := newCache(10)
+				var parentRevoked atomic.Bool
+				entered, read, proceed := make(chan struct{}), make(chan struct{}), make(chan struct{})
+				var first atomic.Bool
+				lookup := func(context.Context) (bool, []string, error) {
+					if first.CompareAndSwap(false, true) {
+						close(entered)
+						<-read
+						revoked := parentRevoked.Load()
+						<-proceed
+						return revoked, []string{"parent"}, nil
+					}
+					return parentRevoked.Load(), []string{"parent"}, nil
+				}
+				leader := make(chan struct{})
+				go func() {
+					defer close(leader)
+					_, _, _ = c.GetTagged(t.Context(), "child", lookup)
+				}()
+				<-entered
+				revoke := func() {
+					parentRevoked.Store(true)
+					c.Forget([]string{"parent"})
+				}
+				switch when {
+				case revokeBeforeRead:
+					revoke()
+					close(read)
+				case revokeAfterRead:
+					close(read)
+					synctest.Wait()
+					revoke()
+				case revokeAfterFinish:
+					close(read)
+					close(proceed)
+					<-leader
+					revoke()
+				}
+				answers := make(chan bool, raceCallers)
+				for range raceCallers {
+					go func() {
+						revoked, _, _ := c.GetTagged(t.Context(), "child", lookup)
+						answers <- revoked
+					}()
+				}
+				synctest.Wait()
+				if when != revokeAfterFinish {
+					close(proceed)
+				}
+				for range raceCallers {
+					if !<-answers {
+						t.Error("a caller after the Forget was answered live")
+					}
+				}
+				<-leader
+				if revoked, _, _ := c.GetTagged(t.Context(), "child", lookup); !revoked {
+					t.Error("the cache answers live after the Forget")
+				}
+			})
+		})
 	}
 }
 
