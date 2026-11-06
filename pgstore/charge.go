@@ -388,11 +388,14 @@ func (s *UsageStore) commitCharge(ctx context.Context, tx pgx.Tx, c *counters, s
 }
 
 // writeCharged writes c and then, the charge of receipt, and runs the
-// caller's onCharged, if any, once they are sent: the call's locks are held
-// for no round trip of onCharged's own. Without onCharged the writes carry
-// COMMIT when last (writeLast). With it they go without, marked as the
-// transaction's (sqlMarkCharge); COMMIT goes after onCharged, in one batch
-// with the check that onCharged left the transaction open (endCharged).
+// caller's onCharged, if any, once they are sent, so that what onCharged
+// writes — an outbox row with a foreign key to the ledger — sees the
+// charge's row. Without onCharged the writes carry COMMIT when last
+// (writeLast). With it they go without, marked as the transaction's
+// (sqlMarkCharge); COMMIT goes after onCharged, in one batch with the check
+// that onCharged left the transaction open (endCharged): one round trip
+// more. The order shortens no lock: the counters and the tenant's aggregate
+// are locked before the writes and held to COMMIT either way.
 func (c *counters) writeCharged(ctx context.Context, tx pgx.Tx, now time.Time, writeTenant, last bool, receipt meter.ChargeReceipt, onCharged func(context.Context, meter.Charged) error, then ...heldStmt) error {
 	if onCharged == nil {
 		return c.writeBatch(ctx, tx, now, writeTenant, last, then)

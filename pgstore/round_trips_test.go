@@ -33,8 +33,9 @@ const (
 )
 
 // chargeWithCallbackRoundTrips is a Charge whose onCharged runs: the write
-// batch goes before it without COMMIT, and COMMIT after it, with the check
-// that onCharged left the transaction open.
+// batch goes before it without COMMIT, so that onCharged's writes see the
+// charge's row, and COMMIT after it, with the check that onCharged left the
+// transaction open. The locks are held to COMMIT with or without it.
 const chargeWithCallbackRoundTrips = chargeRoundTrips + 1
 
 // The calls that end what another made, each with COMMIT in its write
