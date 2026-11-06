@@ -150,6 +150,12 @@ reason.
   signed afresh, an idempotency key can be added.
 - **A 409** is a request that disagrees with what is on record: read it
   again, and decide.
+- **`outcome_unknown`** is a meter call whose commit left and whose answer
+  was lost: it may have committed. Send it again unchanged only when it is
+  keyed — `Charge` with an `ExternalRef`, `Reserve` with a `ReservationID`,
+  `Refund` with a `RefundID`, or `Settle` — and a repeat of one that
+  committed is answered as a replay. An unkeyed call sent again may count
+  twice (docs/guide.md, "Retrying a lost answer").
 
 `limes.Codes()` lists every code, the meter's among them and, in a
 binary that links the exchange in, the exchange's, so a consumer's test can prove its own mapping covers them all
@@ -237,7 +243,9 @@ lookups (`revocation_unavailable`), a store whose pages handed back a cursor alr
 fetched (`cursor_repeated`), which a walk begun again can get past once
 whatever moved its listing settles, and a revocation upstream that names
 no lineage (`no_revocation_lineage`), which `NewRevocationCache` refuses
-at startup until the upstream it is given does. Every `unauthenticated` code is
+at startup until the upstream it is given does; and a store whose answer to
+a commit was lost (`outcome_unknown`), which a keyed call sent again
+settles. Every `unauthenticated` code is
 a credential no longer good or never proven — expired, revoked, a bad
 proof — which another credential may pass; a transport whose codes keep
 those apart from a lack of permission maps them to its own
@@ -317,6 +325,9 @@ them, and may leave them out of a check of its own mapping
 | `tenant_budget_version_mismatch` | 409 | `meter.ErrTenantBudgetVersionMismatch` |  |  | The tenant budget changed since it was read | `conflict` |
 | `external_ref_conflict` | 409 | `meter.ErrExternalRefConflict` |  |  | The external reference names another charge | `conflict` |
 | `settle_conflict` | 409 | `meter.ErrSettleConflict` |  |  | The reservation was settled for another amount | `conflict` |
+| `reserve_conflict` | 409 | `meter.ErrReserveConflict` |  |  | The reservation id names another hold | `conflict` |
+| `refund_conflict` | 409 | `meter.ErrRefundConflict` |  |  | The refund id names another refund | `conflict` |
+| `outcome_unknown` | 503 | `meter.ErrOutcomeUnknown` |  |  | The store lost the answer to the call's commit | `unavailable` |
 | `lease_exhausted` | 403 | `meter.ErrLeaseExhausted` | `budget_exceeded` (permanent) |  | The token's request or budget limit is exhausted | `exhausted` |
 | `lease_requests_exhausted` | 403 | `meter.ErrLeaseRequestsExhausted` | `request_limit_exceeded` (permanent) |  | The token's request or budget limit is exhausted | `exhausted` |
 | `lease_not_found` | 404 | `meter.ErrLeaseNotFound` |  |  | The capability holds no lease | `not_found` |
@@ -445,6 +456,9 @@ type means the same for the whole of v1.
 | <a id="tenant_budget_version_mismatch"></a>`tenant_budget_version_mismatch` | 409 | [The meter's codes](#the-meters-codes) |
 | <a id="external_ref_conflict"></a>`external_ref_conflict` | 409 | [The meter's codes](#the-meters-codes) |
 | <a id="settle_conflict"></a>`settle_conflict` | 409 | [The meter's codes](#the-meters-codes) |
+| <a id="reserve_conflict"></a>`reserve_conflict` | 409 | [The meter's codes](#the-meters-codes) |
+| <a id="refund_conflict"></a>`refund_conflict` | 409 | [The meter's codes](#the-meters-codes) |
+| <a id="outcome_unknown"></a>`outcome_unknown` | 503 | [The meter's codes](#the-meters-codes) |
 | <a id="lease_exhausted"></a>`lease_exhausted` | 403 | [The meter's codes](#the-meters-codes) |
 | <a id="lease_requests_exhausted"></a>`lease_requests_exhausted` | 403 | [The meter's codes](#the-meters-codes) |
 | <a id="lease_not_found"></a>`lease_not_found` | 404 | [The meter's codes](#the-meters-codes) |

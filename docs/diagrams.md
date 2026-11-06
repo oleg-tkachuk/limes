@@ -898,7 +898,13 @@ Holds and housekeeping, in `memstore` and `pgstore` as the contract has them:
   at its `ExpiresAt` — `DefaultReservationTTL`, five minutes, by default, and
   never later than its capability's expiry — but keeps counting until
   `ReleaseExpired` runs, which errs towards refusing spend. A revoked
-  capability's hold stays settleable until then.
+  capability's hold stays settleable until then. Under a `ReservationID`
+  already held for the same request it returns that hold, `Replayed`, and
+  holds nothing more; for another request, or once settled, it is
+  `ErrReserveConflict`.
+- `Refund` under a `RefundID` already on record for the same charge and
+  amount returns the first receipt, `Replayed`; for another charge or
+  amount it is `ErrRefundConflict`. The id goes with its charge.
 - `DeleteUsage` releases the capability's holds before it drops its counters
   and its copies', and `PurgeOrphans` releases the holds of every capability
   no longer on record, a batch of `Limit` at a time: nothing could settle or

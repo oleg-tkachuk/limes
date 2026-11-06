@@ -69,6 +69,29 @@ var ErrExternalRefConflict error = &familyError{"limes: external ref already nam
 // ErrExternalRefConflict does.
 var ErrSettleConflict error = &familyError{"limes: reservation already settled for a different amount", limes.ErrConflict, CodeSettleConflict}
 
+// ErrReserveConflict — Reserve named a ReservationID already on record for
+// another hold: one of another capability, tenant, Biscuit copies, amount,
+// unit, op or actor, or one already settled. One id names one hold;
+// replaying the first would report the second as held. Matches ErrConflict,
+// as ErrExternalRefConflict does.
+var ErrReserveConflict error = &familyError{"limes: reservation id already names a different hold", limes.ErrConflict, CodeReserveConflict}
+
+// ErrRefundConflict — Refund named a RefundID already on record for a
+// refund of another charge, or of another amount. One id names one refund;
+// replaying the first receipt would report the second as returned. Matches
+// ErrConflict, as ErrExternalRefConflict does.
+var ErrRefundConflict error = &familyError{"limes: refund id already names a different refund", limes.ErrConflict, CodeRefundConflict}
+
+// ErrOutcomeUnknown — a store sent the call's commit and lost the answer: the
+// connection failed, or the context ended, after the commit left and before
+// the database replied. The call may have committed or not. The error wraps
+// the cause beside it, so errors.Is matches both. Only a call keyed to its
+// cost can be sent again safely: Charge with an ExternalRef, Reserve with a
+// ReservationID, Refund with a RefundID, and Settle; a repeat of one that
+// committed replays it. Matches no family: it is no refusal, and the call is
+// neither wrong nor known to have failed.
+var ErrOutcomeUnknown error = &familyError{"limes: the store lost the answer to the call's commit", nil, CodeOutcomeUnknown}
+
 // ErrLeaseExhausted — a Charge under a lease would take it past what it
 // holds. The caller leases more (Leaser.Lease) and charges again. Matches
 // ErrBudgetExceeded: the budget the capability may spend now is used.
