@@ -562,7 +562,8 @@ checks the token is genuine — but not its expiry, audience or revocation, so a
 copy can be revoked in any state — and returns the copy: its capability and
 the revocation id of its last block, which only it pairs, so a caller cannot
 name another tenant's copy under its own capability. Passing it to
-`BiscuitRevocationStore.RevokeBiscuit` (`RevokeBiscuitRequest{Copy: …}`) stops
+`Revoker.RevokeBiscuit` (`RevokeBiscuitRequest{Copy: …}`), which a
+`BiscuitRevocationStore` carries out ([Revoke](#revoke)), stops
 that copy and every copy attenuated from it, and leaves the copy it came from,
 its siblings and the capability's JWT working. It is idempotent and returns a
 `RevokeBiscuitResult`: `AlreadyRevoked` when the copy had an entry before the
@@ -902,18 +903,18 @@ A replayed charge or settle moved nothing and is not counted.
 with `WithTenantAttribute`, every measurement — a refused charge or settle
 included — carries the subject's tenant.
 
-## Observing the issuer and verifier
+## Observing the issuer, verifier and revoker
 
-The issuer and the verifier log through `log/slog` (`IssuerConfig.Logger`,
-`VerifierConfig.Logger`; nil logs to `slog.Default()`). A capability is
-named by its id, issuer, kid, subject and tenant; no line holds a token, a
-key or a proof.
+The issuer, the verifier and the revoker log through `log/slog`
+(`IssuerConfig.Logger`, `VerifierConfig.Logger`, `RevokerConfig.Logger`; nil
+logs to `slog.Default()`). A capability is named by its id, issuer, kid,
+subject and tenant; no line holds a token, a key or a proof.
 
 | Event | Level |
 |---|---|
 | `Issue`, `Delegate`, `Reissue`, `Biscuit` minted a token | INFO |
-| `Revoke`, `RevokeMatching`, `RevokeBiscuit` revoked | INFO |
-| The issuer refused a request (a `Code` of limes's) | WARN |
+| The revoker's `Revoke`, `RevokeMatching`, `RevokeBiscuit` carried out, a repeat that wrote nothing among them | INFO |
+| The issuer or the revoker's store refused a request (a `Code` of limes's) | WARN |
 | A token accepted | DEBUG |
 | A token refused after its signature verified: expired, revoked, unrecorded, another audience, no proof, outside its caveats | WARN |
 | A token refused before: absent, malformed, forged, an unknown kid | DEBUG |
@@ -924,14 +925,18 @@ one. Garbage costs anyone nothing to send, so it stays at DEBUG, where a
 flood of it fills no log. Each line carries `op`, and a refusal its `code`,
 `reason` and `error`.
 
-The issuer's `Revoke`, `RevokeMatching` and `RevokeBiscuit` are the store's
-own methods (`Store.Revoke`, `BulkRevoker`, `BiscuitRevocationStore`), logged
-beside what the issuer mints, so one log is the audit trail of both. A store
-without the method is `ErrInvalidRequest`.
+A revocation's line names the capability, or a bulk revoke's tenant and
+selectors, with the request's `actor` and `note`, and what the store
+answered: `already_revoked` and the `prior` disposition, or how many it
+`revoked`, in which `tenants`, and whether there is `more`. A Biscuit copy is
+named by its capability alone. A `Revoker` built without the store a method
+needs (`RevokerConfig.Bulk`, `RevokerConfig.Biscuits`) fails that method
+with `ErrInvalidConfig`, logged at ERROR.
 
-`IssuerConfig.Events` and `VerifierConfig.Events` call back beside the log,
-for metrics or an audit sink: `OnIssued`, `OnRevoked`, `OnRefused` and
-`OnFailed`; `OnVerified`, `OnRefused` and `OnFailed`. Every callback is
+`IssuerConfig.Events`, `VerifierConfig.Events` and `RevokerConfig.Events`
+call back beside the log, for metrics or an audit sink: `OnIssued`,
+`OnRefused` and `OnFailed`; `OnVerified`, `OnRefused` and `OnFailed`;
+`OnRevoked`, `OnRefused` and `OnFailed`. Every callback is
 optional and takes one event struct, so a field added later breaks none.
 They run on the caller's goroutine before the method returns: a callback
 must not block, and must not panic.
@@ -1027,12 +1032,33 @@ and forward it, or a caller checking for it finds it gone.
 
 ## Revoke
 
+Revoke through a `Revoker`, the admin plane's component beside the issuer
+and the verifier. It holds no signing key: a service that revokes needs
+the store and nothing more. Each method carries the request to the store
+and returns its answer unchanged, and logs it — revocation is the audit
+event that matters most — with an event for metrics or an audit sink.
+
 ```go
-result, err := records.Revoke(ctx, limes.RevokeRequest{
+revoker, err := limes.NewRevoker(limes.RevokerConfig{
+    Store:    records,          // a RevocationStore: any Store is one
+    Bulk:     records,          // optional: RevokeMatching
+    Biscuits: records,          // optional: RevokeBiscuit
+    Cache:    cache,            // optional: this process's RevocationCache
+    Logger:   logger,
+})
+result, err := revoker.Revoke(ctx, limes.RevokeRequest{
     CapabilityID: cap.ID, Note: "agent looping", Actor: "operator@example.com",
     CascadeChildren: true,   // also records each sub-agent's revocation, for the audit
 })
 ```
+
+Given a `Cache`, the revoker drops what each revocation outdates from it as
+soon as the store has carried it out: `ClearRevoked` of the capability
+after `Revoke`, which reaches every descendant the cache holds an answer
+for, and `Clear` after `RevokeMatching`, whose result names no capability,
+and after `RevokeBiscuit`. That is this process's cache alone: a verifier
+in another process learns of the revocation through
+`pgstore.RevocationWatcher`, or once its cache's TTL runs out.
 
 Idempotent: a repeat keeps the first entry, and `result.AlreadyRevoked`
 says the capability had one before this call; `result.Revocation` is the
@@ -1275,13 +1301,16 @@ either `TenantID` or `AllTenants` ([ADR-0013](adr/0013-bulk-revocation.md)).
 ```go
 req := limes.RevokeMatchingRequest{TenantID: tenant, Session: sid, Note: "IdP logout", Actor: "backchannel-logout"}
 for {
-	res, err := records.RevokeMatching(ctx, req) // pgstore: under pgstore.WithTenant(ctx, tenant)
+	res, err := revoker.RevokeMatching(ctx, req) // pgstore: under pgstore.WithTenant(ctx, tenant)
 	if err != nil || !res.More {
 		break
 	}
 }
 ```
 
+- **A `Revoker` built with `RevokerConfig.Bulk` carries each call** to
+  the store's `BulkRevoker` ([Revoke](#revoke)), logs it, and clears its
+  cache when given one.
 - **Each call writes an entry for at most `Limit` capabilities** (default
   `DefaultHousekeepingLimit`) that have none, in order of tenant and id. It
   reports the entries written (`Revoked`), the tenants it wrote in
@@ -1335,7 +1364,7 @@ every tenant ([ADR-0014](adr/0014-bulk-revocation-across-tenants.md)):
 
 ```go
 for {
-	res, err := store.RevokeMatching(pgstore.WithAllTenants(ctx), limes.RevokeMatchingRequest{
+	res, err := revoker.RevokeMatching(pgstore.WithAllTenants(ctx), limes.RevokeMatchingRequest{
 		AllTenants: true, ClientID: id, Note: "client deleted", Actor: operator,
 	})
 	if err != nil {

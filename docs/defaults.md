@@ -32,6 +32,12 @@ or be marked breaking by hand.
 | `limes.IssuerConfig` | `Biscuit` | refused | `Issuer.Biscuit` refuses: the issuer mints JWTs alone. |
 | `limes.IssuerConfig` | `Logger` | `slog.Default()` |  |
 | `limes.IssuerConfig` | `Events` | none | No callback is made. |
+| `limes.RevokerConfig` | `Store` | required |  |
+| `limes.RevokerConfig` | `Bulk` | refused | `Revoker.RevokeMatching` fails with `ErrInvalidConfig`. |
+| `limes.RevokerConfig` | `Biscuits` | refused | `Revoker.RevokeBiscuit` fails with `ErrInvalidConfig`. |
+| `limes.RevokerConfig` | `Cache` | none | No cache is cleared: a revocation reaches a cached answer through a signal or the cache's TTL. |
+| `limes.RevokerConfig` | `Logger` | `slog.Default()` |  |
+| `limes.RevokerConfig` | `Events` | none | No callback is made. |
 | `limes.RevocationCacheConfig` | `Capabilities` | required |  |
 | `limes.RevocationCacheConfig` | `RequireLineage` | off | A lookup with no lineage is taken, and the cache clears whole on every `ClearRevoked`. |
 | `limes.RevocationCacheConfig` | `Biscuits` | refused | Every Biscuit question is refused. |

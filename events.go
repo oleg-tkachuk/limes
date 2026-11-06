@@ -7,8 +7,8 @@ import (
 	"uuid"
 )
 
-// The keys of the attributes the issuer and the verifier log, each spelled
-// here once. No token, no key and no proof is ever logged: a capability is
+// The keys of the attributes the issuer, the verifier and the revoker log,
+// each spelled here once. No token, no key and no proof is ever logged: a capability is
 // named by its id.
 const (
 	logKeyOperation  = "op"
@@ -26,6 +26,22 @@ const (
 	logKeyError      = "error"
 	logKeyKind       = "kind"
 	logKeyAge        = "age"
+
+	// The revoker's: who revoked and why, what a revoke found and wrote,
+	// and the selectors of a bulk revoke.
+	logKeyActor          = "actor"
+	logKeyNote           = "note"
+	logKeyCascade        = "cascade"
+	logKeyAlreadyRevoked = "already_revoked"
+	logKeyPrior          = "prior"
+	logKeyRevoked        = "revoked"
+	logKeyTenants        = "tenants"
+	logKeyMore           = "more"
+	logKeyAllTenants     = "all_tenants"
+	logKeyOnBehalfOf     = "on_behalf_of"
+	logKeySession        = "session"
+	logKeyRun            = "run"
+	logKeySubjectIssuer  = "subject_issuer"
 )
 
 // IssuerOperation names what an Issuer was asked to do, in its log lines
@@ -52,6 +68,18 @@ const (
 	VerifierOperationAuthorize   VerifierOperation = "authorize"
 	VerifierOperationIntrospect  VerifierOperation = "introspect"
 	VerifierOperationBiscuitCopy VerifierOperation = "biscuit_copy"
+)
+
+// RevokerOperation names what a Revoker was asked to do, in its log lines
+// and its events (RevokerEvents). The values are never renamed; new ones may
+// be added.
+type RevokerOperation string
+
+// The revoker's operations, each its method.
+const (
+	RevokerOperationRevoke         RevokerOperation = "revoke"
+	RevokerOperationRevokeMatching RevokerOperation = "revoke_matching"
+	RevokerOperationRevokeBiscuit  RevokerOperation = "revoke_biscuit"
 )
 
 // IssuerEvents are the callbacks an Issuer makes as it works
@@ -147,6 +175,65 @@ type VerifierErrorEvent struct {
 	CapabilityID  uuid.UUID
 	Issuer        string
 	TenantID      uuid.UUID
+	// Err is the error the call returned.
+	Err error
+}
+
+// RevokerEvents are the callbacks a Revoker makes as it revokes
+// (RevokerConfig.Events), for metrics or an audit sink beside its log. Each
+// is optional. They run synchronously, on the caller's goroutine, after the
+// outcome is logged and before the method returns: a callback must not
+// block, and must not panic — the revoker does not recover one.
+type RevokerEvents struct {
+	// OnRevoked is called for every call the store carried out: by Revoke,
+	// RevokeMatching and RevokeBiscuit, which RevokedEvent.Operation tells
+	// apart — a repeat that wrote nothing among them.
+	OnRevoked func(context.Context, RevokedEvent)
+	// OnRefused is called for every request the store refused: one
+	// malformed, or naming what is not on record or not visible.
+	OnRefused func(context.Context, RevokerErrorEvent)
+	// OnFailed is called for every call that failed for the server's own
+	// reasons: a store that failed, or a feature not configured.
+	OnFailed func(context.Context, RevokerErrorEvent)
+}
+
+// RevokedEvent is one call a Revoker carried out.
+type RevokedEvent struct {
+	// Operation is the method called.
+	Operation RevokerOperation
+	// CapabilityID is the capability Revoke revoked, or whose Biscuit copy
+	// RevokeBiscuit revoked; uuid.Nil() for RevokeMatching.
+	CapabilityID uuid.UUID
+	// TenantID is the tenant RevokeMatching was scoped to; uuid.Nil() for
+	// one across every tenant, and for the other operations.
+	TenantID uuid.UUID
+	// Actor and Note are the request's, as stored for audit.
+	Actor, Note string
+	// AlreadyRevoked reports, for Revoke and RevokeBiscuit, that the
+	// capability or the copy had an entry before the call, which wrote none.
+	AlreadyRevoked bool
+	// PriorDisposition is Revoke's RevokeResult.PriorDisposition.
+	PriorDisposition RecordDisposition
+	// Revoked, Tenants and More are RevokeMatching's RevokeMatchingResult:
+	// the entries it wrote, the tenants it wrote them in — a copy, the
+	// callback's own — and whether more may match.
+	Revoked int64
+	Tenants []uuid.UUID
+	More    bool
+}
+
+// RevokerErrorEvent is one call a Revoker's store refused, or that failed.
+type RevokerErrorEvent struct {
+	// Operation is the method called.
+	Operation RevokerOperation
+	// CapabilityID is the capability the call named; uuid.Nil() for
+	// RevokeMatching.
+	CapabilityID uuid.UUID
+	// TenantID is the tenant RevokeMatching named; uuid.Nil() otherwise.
+	TenantID uuid.UUID
+	// Code is the error's code (CodeOf); empty for an error that is none of
+	// limes's, such as a store's own failure.
+	Code Code
 	// Err is the error the call returned.
 	Err error
 }

@@ -499,10 +499,17 @@ func TestLogsHoldNoToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.RevokeBiscuit(ctx, RevokeBiscuitRequest{Copy: copy}); err != nil {
+	revoker, err := NewRevoker(RevokerConfig{Store: store, Biscuits: store, Logger: logs.logger()})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Revoke(ctx, RevokeRequest{CapabilityID: root.Capability.ID}); err != nil {
+	if _, err := revoker.RevokeBiscuit(ctx, RevokeBiscuitRequest{Copy: copy, Actor: "op"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := revoker.RevokeMatching(ctx, RevokeMatchingRequest{TenantID: root.Capability.Subject.TenantID, Subject: "agent"}); err == nil {
+		t.Fatal("revoked matching capabilities without a BulkRevoker")
+	}
+	if _, err := revoker.Revoke(ctx, RevokeRequest{CapabilityID: root.Capability.ID, Actor: "op"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, token := range tokens[:4] {

@@ -101,18 +101,9 @@ func (r InsertRequest) Validate() error {
 	return nil
 }
 
-// Store persists capability records and revocation entries. Consumers supply
-// the implementation: memstore ships an in-memory one, and the module
-// github.com/oleg-tkachuk/limes/pgstore one over PostgreSQL.
-//
-// Records are append-mostly: capabilities aren't mutated after issuance
-// except via Revoke. Revocations are checked by the verifier on every
-// request; put a RevocationCache in front to keep the per-call
-// cost flat.
-type Store interface {
-	IssuanceStore
-	RecordReader
-
+// RevocationStore revokes one capability. Store implements it; a Revoker,
+// which an admin plane revokes through, asks for no more.
+type RevocationStore interface {
 	// Revoke adds an entry to the revocation list, and says whether the
 	// capability had one already. Idempotent: a duplicate revoke writes
 	// nothing for the capability, keeps the first entry, and reports it
@@ -135,6 +126,20 @@ type Store interface {
 	// revoke commits — so a revoke's cost can grow with the subtree below
 	// the capability, flag or not.
 	Revoke(ctx context.Context, req RevokeRequest) (RevokeResult, error)
+}
+
+// Store persists capability records and revocation entries. Consumers supply
+// the implementation: memstore ships an in-memory one, and the module
+// github.com/oleg-tkachuk/limes/pgstore one over PostgreSQL.
+//
+// Records are append-mostly: capabilities aren't mutated after issuance
+// except via Revoke. Revocations are checked by the verifier on every
+// request; put a RevocationCache in front to keep the per-call
+// cost flat.
+type Store interface {
+	IssuanceStore
+	RecordReader
+	RevocationStore
 
 	// Purge removes the capabilities expired for longer than the request's
 	// retention (PurgeRequest.Retention) — their records, their revocation
