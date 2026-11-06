@@ -4,9 +4,12 @@
 //
 // The keys are spread over shards, each with a lock of its own, so callers
 // asking about different keys do not queue on one lock: a verifier asks on
-// every request, from every processor at once. Clears are counted once for
-// the whole cache, so an answer read before one is never cached in any
-// shard after it.
+// every request, from every processor at once. Clears and Forgets are
+// counted once for the whole cache, each Forget remembering the keys it
+// outdated, so an answer read before one is never cached in any shard after
+// it — a Clear's no answer, a Forget's no live answer about a key it named
+// or tagged with one — while every other lookup in flight still caches its
+// answer and still shares it with the callers that join it.
 package ttlcache
 
 import (
@@ -15,6 +18,7 @@ import (
 	"github.com/oleg-tkachuk/limes/internal/errs"
 	"hash/maphash"
 	"math/rand/v2"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -48,7 +52,8 @@ type stripe struct {
 // Config is what a Cache runs on. Every field is required: the caller
 // resolves its defaults.
 type Config struct {
-	// TTL is how long an answer is served, until SetTTL changes it.
+	// TTL is how long an answer is served, but for one an Extension
+	// covers.
 	TTL time.Duration
 	// MaxEntries bounds the cache: past it, an entry makes room — the
 	// oldest of its shard's, which in a cache big enough to have several
@@ -78,12 +83,23 @@ type Cache[K comparable] struct {
 	cfg    Config
 	seed   maphash.Seed
 	shards []*shard[K]
-	// ttl is how long an answer is served, in nanoseconds: Config.TTL until
-	// SetTTL. Each answer is judged by the one in force when it is read.
-	ttl atomic.Int64
-	// epoch counts clears. A lookup that started before one may have read
-	// the state it invalidated, so its answer is not cached.
-	epoch atomic.Uint64
+	// ext is the Extension in force, nil for none. Each answer is judged
+	// by the one in force when it is read.
+	ext atomic.Pointer[Extension]
+	// seq counts Clears and Forgets, each of which takes the next number;
+	// a lookup, or a seed, starts in the one current when it began. Written
+	// under forgetMu.
+	seq atomic.Uint64
+	// forgetMu orders the changes of seq, floor and recent, so an answer is
+	// judged against a Forget whole or not at all.
+	forgetMu sync.RWMutex
+	// floor is the first seq an answer may have been read in to be cached:
+	// a Clear moves it to its own, as does a Forget that overflows recent.
+	floor uint64
+	// recent holds, for each key a Forget named since floor, the seq of
+	// the latest: a live answer read before it about the key, or tagged
+	// with it, is not cached. At most maxRecentForgets keys.
+	recent map[K]uint64
 	// hits counts the questions answered from the cache, on a stripe each
 	// caller picks at random.
 	hits [hitStripes]stripe
@@ -125,13 +141,17 @@ type shard[K comparable] struct {
 	maxEntries int
 	entries    map[K]cacheEntry[K]
 	inflight   map[K]*lookupCall[K]
-	// order holds the entries in the order they were cached, which every
-	// entry being judged by one TTL makes the order they expire in, but for
-	// an id seeded from a set's answer, which expires with that answer: sweeping
-	// stops at the first place not yet expired, so such an id is dropped a
-	// little late, and never served past its expiry. A key Forget dropped
-	// can be cached again before its old place expires: that place then
-	// names an entry no longer its own, and dropping it leaves the new one.
+	// order holds the entries' places sorted by when each answer was read,
+	// oldest first, which is the order they expire in: every entry is
+	// judged by one TTL, or a later one by an Extension's, never shorter
+	// (Extension). Sweeping stops at the first place not yet
+	// expired, and making room takes the head, so neither walks the
+	// entries. An answer is read when its lookup began, so one that ran
+	// long, or an id seeded from a set's answer, is placed behind the later
+	// places already queued (enqueueLocked): no further back than the
+	// answers cached while it ran. A key Forget dropped can be cached again
+	// before its old place expires: that place then names an entry no
+	// longer its own, and dropping it leaves the new one.
 	order []queued[K]
 	// misses and lookups count the shard's questions not answered from
 	// it and the upstream lookups run for them; evictions the live entries
@@ -145,9 +165,11 @@ type shard[K comparable] struct {
 
 type cacheEntry[K comparable] struct {
 	revoked bool
-	// at is when the answer was cached — when its lookup finished, or, for
-	// an id seeded from a set's answer, when that set's lookup began:
-	// fresh until the TTL in force has passed since.
+	// at is when the answer was read — when its lookup began, or, for an
+	// id seeded from a set's answer, when that set's lookup began: fresh
+	// until the TTL in force has passed since. Counted from the start, an
+	// answer is never served longer than the TTL after the upstream was
+	// asked, however long it took to answer.
 	at time.Time
 	// tags are the keys a "not revoked" answer also covers, which Forget
 	// drops it with (GetTagged).
@@ -165,8 +187,13 @@ type lookupCall[K comparable] struct {
 	revoked bool
 	tags    []K
 	err     error
-	// at is when the lookup started, no later than the entry finish caches:
-	// its answer is fresh until the TTL in force has passed since.
+	// seq is the one the lookup started in, and discarded reports that
+	// finish did not cache its answer as a Clear or Forget since outdates
+	// it: a caller that joined after one asks again (get).
+	seq       uint64
+	discarded bool
+	// at is when the lookup started, the time finish caches its answer at:
+	// it is fresh until the TTL in force has passed since.
 	at time.Time
 }
 
@@ -178,8 +205,7 @@ var errLookupAbandoned = errs.Broken("revocation lookup ended without an answer"
 // shards, so together they never hold more.
 func New[K comparable](cfg Config) *Cache[K] {
 	n := min(maxShards, max(cfg.MaxEntries/minShardEntries, 1))
-	c := &Cache[K]{cfg: cfg, seed: maphash.MakeSeed(), shards: make([]*shard[K], n)}
-	c.ttl.Store(int64(cfg.TTL))
+	c := &Cache[K]{cfg: cfg, seed: maphash.MakeSeed(), shards: make([]*shard[K], n), recent: make(map[K]uint64)}
 	for i := range c.shards {
 		share := cfg.MaxEntries / n
 		if i < cfg.MaxEntries%n {
@@ -193,20 +219,56 @@ func New[K comparable](cfg Config) *Cache[K] {
 // Now is the time by the cache's clock.
 func (c *Cache[K]) Now() time.Time { return c.cfg.Now() }
 
-// TTL is how long an answer is served now.
-func (c *Cache[K]) TTL() time.Duration { return time.Duration(c.ttl.Load()) }
+// Extension serves the answers read after Since for TTL in place of the
+// cache's own: a revocation signal that listens vouches for them, as it
+// cannot for one read before it began to, which may have missed a
+// revocation made while nothing listened. One read at Since itself cannot
+// be told from one read before, and is not covered. It holds while the
+// clock is before Until, the lease the signals vouch for: past it, every
+// answer is judged by the cache's TTL, as with none. TTL is no shorter than the
+// cache's, so an answer read later never expires sooner, and the expiry
+// order stays the order the answers were read in.
+type Extension struct {
+	TTL          time.Duration
+	Since, Until time.Time
+}
 
-// SetTTL changes how long an answer is served, every answer cached already
-// among them: a shorter TTL makes an answer read longer ago than it stale
-// at once.
-func (c *Cache[K]) SetTTL(ttl time.Duration) { c.ttl.Store(int64(ttl)) }
+// Extend puts ext in force, every answer cached already judged by it; nil
+// ends the one in force, which makes every answer older than the cache's
+// own TTL stale at once.
+func (c *Cache[K]) Extend(ext *Extension) { c.ext.Store(ext) }
+
+// judge is how the cache judges an answer's age at one moment.
+type judge struct {
+	now           time.Time
+	ttl, maxStale time.Duration
+	ext           *Extension
+}
+
+// judge is the cache's judge at now.
+func (c *Cache[K]) judge(now time.Time) judge {
+	return judge{now: now, ttl: c.cfg.TTL, maxStale: c.cfg.MaxStale, ext: c.ext.Load()}
+}
+
+// ttlOf is how long an answer read at at is served.
+func (j judge) ttlOf(at time.Time) time.Duration {
+	if j.ext != nil && j.now.Before(j.ext.Until) && at.After(j.ext.Since) {
+		return j.ext.TTL
+	}
+	return j.ttl
+}
+
+// fresh reports whether an answer read at at may be served.
+func (j judge) fresh(at time.Time) bool { return j.now.Before(at.Add(j.ttlOf(at))) }
+
+// kept reports whether an answer read at at is kept: for its TTL, and
+// MaxStale past it to stand in for a failed lookup.
+func (j judge) kept(at time.Time) bool {
+	return j.now.Before(at.Add(j.ttlOf(at) + j.maxStale))
+}
 
 // fresh reports whether an answer read at at may be served at now.
-func (c *Cache[K]) fresh(at, now time.Time) bool { return now.Before(at.Add(c.TTL())) }
-
-// keep is how long an answer is kept: the TTL in force, and MaxStale past
-// it to stand in for a failed lookup.
-func (c *Cache[K]) keep() time.Duration { return c.TTL() + c.cfg.MaxStale }
+func (c *Cache[K]) fresh(at, now time.Time) bool { return c.judge(now).fresh(at) }
 
 // shardOf is the shard key belongs to.
 func (c *Cache[K]) shardOf(key K) *shard[K] {
@@ -255,7 +317,7 @@ func (c *Cache[K]) staleOr(ctx context.Context, s *shard[K], key K, revoked bool
 	e, ok := s.entries[key]
 	s.mu.RUnlock()
 	now := c.cfg.Now()
-	if !ok || !now.Before(e.at.Add(c.keep())) {
+	if !ok || !c.judge(now).kept(e.at) {
 		return revoked, at, err
 	}
 	// A live answer covers its tags; with a revocation let go to make room,
@@ -286,6 +348,7 @@ func (c *Cache[K]) get(ctx context.Context, s *shard[K], key K, lookup func(cont
 		return e.revoked, e.at, nil
 	}
 	if call, ok := s.inflight[key]; ok {
+		joined := c.seq.Load()
 		s.mu.Unlock()
 		select {
 		case <-call.done:
@@ -296,20 +359,26 @@ func (c *Cache[K]) get(ctx context.Context, s *shard[K], key K, lookup func(cont
 			if call.err != nil && isContextErr(call.err) && ctx.Err() == nil {
 				return c.get(ctx, s, key, lookup)
 			}
+			// A Clear or Forget outdated the answer, and happened before
+			// this caller joined: it asked after the revocation was heard,
+			// so it is owed an answer read after it, as a caller that
+			// started a lookup of its own then would have been.
+			if call.discarded && joined > call.seq && ctx.Err() == nil {
+				return c.get(ctx, s, key, lookup)
+			}
 			return call.revoked, call.at, call.err
 		case <-ctx.Done():
 			return false, time.Time{}, ctx.Err()
 		}
 	}
-	call := &lookupCall[K]{done: make(chan struct{}), err: errLookupAbandoned, at: c.cfg.Now()}
+	call := &lookupCall[K]{done: make(chan struct{}), err: errLookupAbandoned, at: c.cfg.Now(), seq: c.seq.Load()}
 	s.inflight[key] = call
-	epoch := c.epoch.Load()
 	s.mu.Unlock()
 	s.lookups.Add(1)
 
 	// Deferred so that a lookup that panics still releases its waiters and
 	// the key.
-	defer c.finish(s, key, call, epoch)
+	defer c.finish(s, key, call)
 	call.revoked, call.tags, call.err = lookup(ctx)
 	return call.revoked, call.at, call.err
 }
@@ -318,9 +387,9 @@ func (c *Cache[K]) get(ctx context.Context, s *shard[K], key K, lookup func(cont
 // the keys with none, and the epoch a lookup of those starts in. Answered
 // in full, it counts a hit; otherwise the Get of the missing keys counts.
 func (c *Cache[K]) Cached(keys []K) (revoked bool, missing []K, epoch uint64) {
-	// Read first: a clear while the keys are read makes this epoch stale,
-	// and SeedLive then seeds nothing.
-	epoch = c.epoch.Load()
+	// Read first: a Clear while the keys are read makes this epoch stale,
+	// and SeedLive then seeds nothing; a Forget, nothing it named.
+	epoch = c.seq.Load()
 	now := c.cfg.Now()
 	for _, k := range keys {
 		s := c.shardOf(k)
@@ -346,13 +415,13 @@ func (c *Cache[K]) Cached(keys []K) (revoked bool, missing []K, epoch uint64) {
 // a stale live answer about a question that spans one of them must not
 // stand for it.
 func (c *Cache[K]) HeldRevoked(keys []K) bool {
-	now, keep := c.cfg.Now(), c.keep()
+	j := c.judge(c.cfg.Now())
 	for _, k := range keys {
 		s := c.shardOf(k)
 		s.mu.RLock()
 		e, ok := s.entries[k]
 		s.mu.RUnlock()
-		if ok && e.revoked && now.Before(e.at.Add(keep)) {
+		if ok && e.revoked && j.kept(e.at) {
 			return true
 		}
 	}
@@ -365,56 +434,56 @@ func (c *Cache[K]) countHit() {
 }
 
 // SeedRevoked caches key as revoked, as an answer about a question that
-// spans it, read now, in epoch, said; nothing when a clear has happened
-// since. A revoked answer is never undone, so it replaces whatever key held.
+// spans it, read now, in epoch, said; nothing when a Clear has happened
+// since. A revoked answer is never undone, so it replaces whatever key held,
+// and a Forget, which drops no revoked answer, does not keep it out.
 func (c *Cache[K]) SeedRevoked(key K, epoch uint64) {
 	s := c.shardOf(key)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// Checked under the shard's lock: a clear empties the shard under it,
+	// Checked under the shard's lock: a Clear empties the shard under it,
 	// after counting itself.
-	if c.epoch.Load() != epoch {
+	if !c.mayCacheLocked(epoch, true, key, nil) {
 		return
 	}
 	now := c.cfg.Now()
-	c.noteLost(s.makeRoomLocked(now, c.TTL(), c.keep()))
+	c.noteLost(s.makeRoomLocked(c.judge(now)))
 	s.entries[key] = cacheEntry[K]{revoked: true, at: now}
-	s.order = append(s.order, queued[K]{key: key, at: now})
+	s.enqueueLocked(key, now)
 }
 
 // SeedLive caches keys as not revoked, as an answer about them all read at
-// at, in epoch, said; nothing when a clear has happened since or the answer
-// is no longer fresh. Seeded as read now, keys would outlive an answer
-// served from the cache near its end. A key that has a fresh answer or a
-// lookup of its own in flight keeps that.
+// at, in epoch, said; nothing when a Clear has happened since or the answer
+// is no longer fresh, and no key a Forget since named. Seeded as read now,
+// keys would outlive an answer served from the cache near its end. A key
+// that has a fresh answer or a lookup of its own in flight keeps that.
 func (c *Cache[K]) SeedLive(keys []K, epoch uint64, at time.Time) {
-	now := c.cfg.Now()
-	if !c.fresh(at, now) {
+	j := c.judge(c.cfg.Now())
+	if !j.fresh(at) {
 		return
 	}
-	ttl, keep := c.TTL(), c.keep()
 	for _, k := range keys {
 		s := c.shardOf(k)
 		s.mu.Lock()
-		// Checked under each shard's lock: a clear empties the shard under
-		// it, after counting itself.
-		if c.epoch.Load() != epoch {
+		// Checked under each shard's lock: a Clear or Forget drops what it
+		// outdates from the shard under it, after counting itself.
+		if !c.mayCacheLocked(epoch, false, k, nil) {
 			s.mu.Unlock()
-			return
+			continue
 		}
 		_, inflight := s.inflight[k]
-		if e, ok := s.entries[k]; !inflight && (!ok || !c.fresh(e.at, now)) {
-			c.noteLost(s.makeRoomLocked(now, ttl, keep))
+		if e, ok := s.entries[k]; !inflight && (!ok || !j.fresh(e.at)) {
+			c.noteLost(s.makeRoomLocked(j))
 			s.entries[k] = cacheEntry[K]{at: at}
-			s.order = append(s.order, queued[K]{key: k, at: at})
+			s.enqueueLocked(k, at)
 		}
 		s.mu.Unlock()
 	}
 }
 
 // finish publishes call's answer to its waiters and caches it in s, unless
-// it failed or a clear happened while it ran.
-func (c *Cache[K]) finish(s *shard[K], key K, call *lookupCall[K], epoch uint64) {
+// it failed or a Clear or Forget that outdates it happened while it ran.
+func (c *Cache[K]) finish(s *shard[K], key K, call *lookupCall[K]) {
 	s.mu.Lock()
 	if s.inflight[key] == call {
 		delete(s.inflight, key)
@@ -423,11 +492,11 @@ func (c *Cache[K]) finish(s *shard[K], key K, call *lookupCall[K], epoch uint64)
 	// lookup ran does not replace it: no revocation is undone.
 	held, ok := s.entries[key]
 	undoes := ok && held.revoked && !call.revoked && !held.at.Before(call.at)
-	if call.err == nil && c.epoch.Load() == epoch && !undoes {
-		now := c.cfg.Now()
-		c.noteLost(s.makeRoomLocked(now, c.TTL(), c.keep()))
-		s.entries[key] = cacheEntry[K]{revoked: call.revoked, at: now, tags: call.tags}
-		s.order = append(s.order, queued[K]{key: key, at: now})
+	call.discarded = call.err == nil && !c.mayCacheLocked(call.seq, call.revoked, key, call.tags)
+	if call.err == nil && !call.discarded && !undoes {
+		c.noteLost(s.makeRoomLocked(c.judge(c.cfg.Now())))
+		s.entries[key] = cacheEntry[K]{revoked: call.revoked, at: call.at, tags: call.tags}
+		s.enqueueLocked(key, call.at)
 	}
 	s.mu.Unlock()
 	close(call.done)
@@ -439,23 +508,16 @@ func (c *Cache[K]) finish(s *shard[K], key K, call *lookupCall[K], epoch uint64)
 const orderSlack = 2
 
 // makeRoomLocked keeps the shard under its share of MaxEntries: entries
-// past keep go first, those the expiry order reaches; then every one past
-// ttl, stale ones kept to stand in for a failed lookup among them, wherever
-// its place, such as an id seeded behind a later answer; and, if that frees
-// nothing, the oldest live one does. It returns until when the latest
-// revoked answer it dropped would still have been kept, zero for none.
-func (s *shard[K]) makeRoomLocked(now time.Time, ttl, keep time.Duration) time.Time {
+// past keep go first; then the oldest, which the order holds at its head —
+// one past ttl, a stale one kept to stand in for a failed lookup, before
+// any live one, which is counted an eviction. Each step takes the head of
+// the order, so making room costs no walk of the entries. It returns until
+// when the latest revoked answer it dropped would still have been kept,
+// zero for none.
+func (s *shard[K]) makeRoomLocked(j judge) time.Time {
 	var lost time.Time
-	drop := func(e cacheEntry[K]) {
-		if until := e.at.Add(keep); e.revoked && now.Before(until) && until.After(lost) {
-			lost = until
-		}
-	}
 	s.compactLocked()
-	s.sweepLocked(now, keep)
-	if len(s.entries) >= s.maxEntries {
-		s.dropExpiredLocked(now, ttl, drop)
-	}
+	s.sweepLocked(j)
 	for len(s.entries) >= s.maxEntries {
 		if len(s.order) == 0 {
 			return lost
@@ -463,28 +525,29 @@ func (s *shard[K]) makeRoomLocked(now time.Time, ttl, keep time.Duration) time.T
 		q := s.order[0]
 		e, ok := s.entries[q.key]
 		s.popLocked()
-		if ok && e.at.Equal(q.at) {
-			drop(e)
+		if !ok || !e.at.Equal(q.at) {
+			continue
+		}
+		if until := e.at.Add(j.ttlOf(e.at) + j.maxStale); e.revoked && j.now.Before(until) && until.After(lost) {
+			lost = until
+		}
+		if j.fresh(e.at) {
 			s.evictions++
 		}
 	}
 	return lost
 }
 
-// dropExpiredLocked drops every expired entry, wherever its place in the
-// order: one seeded with an older answer's time sits behind later places,
-// where sweepLocked does not reach it. Each one it drops is handed to
-// dropping first; it returns how many.
-func (s *shard[K]) dropExpiredLocked(now time.Time, ttl time.Duration, dropping func(cacheEntry[K])) int {
-	dropped := 0
-	for key, e := range s.entries {
-		if !now.Before(e.at.Add(ttl)) {
-			dropping(e)
-			delete(s.entries, key)
-			dropped++
-		}
+// enqueueLocked places key, read at at, in the order: behind every place
+// read no later, ahead of those read after it. A lookup's answer is read
+// when it began, so it goes behind no more places than were queued while
+// it ran; most go at the tail.
+func (s *shard[K]) enqueueLocked(key K, at time.Time) {
+	i := len(s.order)
+	for i > 0 && s.order[i-1].at.After(at) {
+		i--
 	}
-	return dropped
+	s.order = slices.Insert(s.order, i, queued[K]{key: key, at: at})
 }
 
 // compactLocked drops the places of the expiry order no entry owns, once
@@ -519,17 +582,68 @@ func (s *shard[K]) popLocked() bool {
 	return true
 }
 
-// sweepLocked drops every expired entry of the shard, oldest first, and
-// returns how many it dropped. It stops at the first place not yet expired:
-// every place after it expires later.
-func (s *shard[K]) sweepLocked(now time.Time, ttl time.Duration) int {
+// sweepLocked drops every entry of the shard past its TTL and MaxStale,
+// oldest first, and returns how many it dropped. It stops at the first
+// place still kept: every place after it was read later, and an Extension
+// serves no later answer for less, so it is kept too.
+func (s *shard[K]) sweepLocked(j judge) int {
 	dropped := 0
-	for len(s.order) > 0 && !now.Before(s.order[0].at.Add(ttl)) {
+	for len(s.order) > 0 && !j.kept(s.order[0].at) {
 		before := len(s.entries)
 		s.popLocked()
 		dropped += before - len(s.entries)
 	}
 	return dropped
+}
+
+// maxRecentForgets bounds the keys the cache remembers Forgets of. Past
+// it, it forgets them all and moves the floor instead, as a Clear does: a
+// flood of revocations keeps every answer read before it out of the cache,
+// as every Forget once did, rather than grow the memory without bound.
+const maxRecentForgets = 1 << 12
+
+// mayCacheLocked reports whether an answer about key read in seq, revoked
+// or live with tags, may be cached: no Clear has happened since, and, for a
+// live one, no Forget since named key or any of tags. A revoked answer
+// passes any Forget, which drops none. The caller holds key's shard lock:
+// a Clear or Forget counted after this read drops what it outdates from
+// the shard only once that lock is released.
+func (c *Cache[K]) mayCacheLocked(seq uint64, revoked bool, key K, tags []K) bool {
+	c.forgetMu.RLock()
+	defer c.forgetMu.RUnlock()
+	if seq < c.floor {
+		return false
+	}
+	if revoked || seq == c.seq.Load() {
+		return true
+	}
+	if c.recent[key] > seq {
+		return false
+	}
+	for _, t := range tags {
+		if c.recent[t] > seq {
+			return false
+		}
+	}
+	return true
+}
+
+// count takes the next seq for a Clear (all) or a Forget of gone, and
+// records what it outdates: gone's keys in recent, or, for a Clear or a
+// Forget recent has no room for, the floor.
+func (c *Cache[K]) count(all bool, gone map[K]struct{}) {
+	c.forgetMu.Lock()
+	defer c.forgetMu.Unlock()
+	n := c.seq.Load() + 1
+	c.seq.Store(n)
+	if all || len(c.recent)+len(gone) > maxRecentForgets {
+		c.floor = n
+		clear(c.recent)
+		return
+	}
+	for k := range gone {
+		c.recent[k] = n
+	}
 }
 
 // Clear drops every entry and detaches every lookup in flight, so the next
@@ -539,7 +653,7 @@ func (s *shard[K]) sweepLocked(now time.Time, ttl time.Duration) int {
 // shard is emptied, so a lookup that finishes in a shard not yet emptied
 // caches nothing the emptying would miss.
 func (c *Cache[K]) Clear() {
-	c.epoch.Add(1)
+	c.count(true, nil)
 	for _, s := range c.shards {
 		s.mu.Lock()
 		clear(s.entries)
@@ -550,12 +664,15 @@ func (c *Cache[K]) Clear() {
 }
 
 // Forget drops the "not revoked" answers keys outdate — each key's own, and
-// every one tagged with a key — and detaches every lookup in flight, so the
-// next check of those asks upstream. It is counted as a clear is, so a
-// lookup that started before it caches nothing: it may have read the state
-// a revocation of keys changed, about a key it does not name yet. A
-// "revoked" answer stays: no revocation is undone. It returns how many
-// answers it dropped.
+// every one tagged with a key — and detaches the lookups in flight of keys,
+// so the next check of those asks upstream. A lookup of another key that
+// started before it may have read the state a revocation of keys changed,
+// about an ancestor it names only once it answers: Forget remembers keys,
+// and such a lookup's live answer, tagged with one, is served to the
+// callers that joined before and cached for nobody, while one that joined
+// after asks again. Every other answer is cached as though no Forget had
+// happened. A "revoked" answer stays: no revocation is undone. It returns
+// how many answers it dropped.
 func (c *Cache[K]) Forget(keys []K) int {
 	gone := make(map[K]struct{}, len(keys))
 	for _, k := range keys {
@@ -575,11 +692,16 @@ func (c *Cache[K]) Forget(keys []K) int {
 		}
 		return false
 	}
-	c.epoch.Add(1)
+	// Counted before any shard is walked, as a Clear is: a lookup finishing
+	// in a shard not yet walked either sees the count or is dropped by the
+	// walk.
+	c.count(false, gone)
 	dropped := 0
 	for _, s := range c.shards {
 		s.mu.Lock()
-		clear(s.inflight)
+		for k := range gone {
+			delete(s.inflight, k)
+		}
 		for key, e := range s.entries {
 			if outdated(key, e) {
 				delete(s.entries, key)
@@ -595,11 +717,11 @@ func (c *Cache[K]) Forget(keys []K) int {
 // Sweep drops every entry past the TTL and MaxStale, and returns how many
 // it dropped.
 func (c *Cache[K]) Sweep() int {
-	now, ttl := c.cfg.Now(), c.keep()
+	j := c.judge(c.cfg.Now())
 	dropped := 0
 	for _, s := range c.shards {
 		s.mu.Lock()
-		dropped += s.sweepLocked(now, ttl)
+		dropped += s.sweepLocked(j)
 		s.mu.Unlock()
 	}
 	return dropped

@@ -2,8 +2,8 @@ package limes
 
 import (
 	"context"
-	"strconv"
-	"strings"
+	"crypto/sha256"
+	"encoding/binary"
 )
 
 // errNoBiscuitLookup is the answer of a RevocationCache built without
@@ -55,14 +55,10 @@ func (c *RevocationCache) IsBiscuitRevoked(ctx context.Context, revocationIDs []
 // heldRevokedCopy reports whether the cache holds a revoked answer about
 // this copy, or a copy it was attenuated from: their ids, authority first,
 // are a prefix of its. No revocation the cache learned is undone by a live
-// answer about the ids it asked since, fresh or stale.
+// answer about the ids it asked since, fresh or stale. Every prefix's key
+// comes of one pass over the ids (prefixKeys).
 func (c *RevocationCache) heldRevokedCopy(revocationIDs [][]byte) bool {
-	for n := len(revocationIDs); n > 1; n-- {
-		if c.copies.HeldRevoked([]string{setKey(revocationIDs[:n])}) {
-			return true
-		}
-	}
-	return false
+	return len(revocationIDs) > 1 && c.copies.HeldRevoked(prefixKeys(revocationIDs))
 }
 
 // lookupBiscuitMisses asks the upstream about the revocation ids the cache
@@ -98,22 +94,63 @@ func (c *RevocationCache) lookupBiscuitMisses(ctx context.Context, missing []str
 }
 
 // The cache holds one revocation id under idKeyPrefix and a set of them,
-// asked about together, under setKeyPrefix, each id of a set preceded by its
-// length: no id's key spells a set's, and no two sets spell one key.
+// asked about together, under setKeyPrefix and the set's digest: no id's
+// key spells a set's, and two sets spell one key only where SHA-256
+// collides. The digest is a chain, each id hashed with its length onto the
+// digest of the ids before it, so a key is the same size however many ids
+// its set holds, and the keys of every prefix of a copy's ids come of one
+// pass over them.
 const (
 	idKeyPrefix  = "i"
 	setKeyPrefix = "s"
+	// setKeySize is the length of a set's key: its prefix and digest.
+	setKeySize = len(setKeyPrefix) + sha256.Size
+	// lengthSize is how many bytes an id's length is hashed as.
+	lengthSize = 8
 )
 
 func idKey(id []byte) string { return idKeyPrefix + string(id) }
 
+// setKey is the key of the set ids.
 func setKey(ids [][]byte) string {
-	var b strings.Builder
-	b.WriteString(setKeyPrefix)
+	var digest [sha256.Size]byte
 	for _, id := range ids {
-		b.WriteString(strconv.Itoa(len(id)))
-		b.WriteByte(':')
-		b.Write(id)
+		digest = chainDigest(digest, id)
 	}
-	return b.String()
+	return setKeyPrefix + string(digest[:])
+}
+
+// prefixKeys is the key of every prefix of ids two ids long or more, the
+// shortest first, laid out in one string they share.
+func prefixKeys(ids [][]byte) []string {
+	if len(ids) < 2 {
+		return nil
+	}
+	buf := make([]byte, 0, (len(ids)-1)*setKeySize)
+	digest := chainDigest([sha256.Size]byte{}, ids[0])
+	for _, id := range ids[1:] {
+		digest = chainDigest(digest, id)
+		buf = append(buf, setKeyPrefix...)
+		buf = append(buf, digest[:]...)
+	}
+	all := string(buf)
+	keys := make([]string, len(ids)-1)
+	for i := range keys {
+		keys[i] = all[i*setKeySize : (i+1)*setKeySize]
+	}
+	return keys
+}
+
+// chainDigest is the digest of a set of ids whose ids before id have the
+// digest prev.
+func chainDigest(prev [sha256.Size]byte, id []byte) [sha256.Size]byte {
+	var length [lengthSize]byte
+	binary.BigEndian.PutUint64(length[:], uint64(len(id)))
+	h := sha256.New()
+	_, _ = h.Write(prev[:])
+	_, _ = h.Write(length[:])
+	_, _ = h.Write(id)
+	var digest [sha256.Size]byte
+	h.Sum(digest[:0])
+	return digest
 }

@@ -212,7 +212,7 @@ func TestRevocationCacheKeepsUnrecordedForItsTTL(t *testing.T) {
 	})
 	signal := cache.NewSignal()
 	defer signal.Close()
-	signal.Listening()
+	signal.Listening(testSignalLease)
 	v := f.verifier(t, cache, true)
 	askedAfter := func(what string, want int64) {
 		t.Helper()

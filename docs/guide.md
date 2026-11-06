@@ -1072,7 +1072,12 @@ an upstream without it (`ErrNoRevocationLineage`), and read
 counts the `ClearRevoked` calls that cleared whole for want of it, apart from
 a `Clear` asked for, though both count in `Clears`.
 A consumer that revokes often keeps every answer it did not touch, where
-`Clear` would make the next check of each id ask the store again.
+`Clear` would make the next check of each id ask the store again, and the
+lookups in flight when it runs: only one about a revoked id, or whose
+answer names one among its ancestors, is kept out of the cache, so the
+notifications of a bulk revocation do not stop every other concurrent
+check from being cached or shared. An answer is fresh for the TTL from
+when the store was asked, however long the store took to answer.
 
 Choose the TTL from how often one token is verified, not from a request
 burst. The two-second default serves the requests of one HTTP exchange; an
@@ -1094,12 +1099,25 @@ A connection that dies without a word — a host gone, a network cut — is
 found by the watcher's heartbeat: it pings a quiet connection every
 `RevocationWatcher.Heartbeat` (30 seconds by default) and drops one that
 does not answer within as long again, so a dead connection vouches for
-the caches for at most twice the heartbeat. `NotListening` cuts short the
-answers cached under `SyncedTTL` at once, and `Listening` clears the cache
-before raising the bound, as does closing the one signal that kept it on
-`TTL`. `SyncedTTL` is at most `MaxRevocationCacheSyncedTTL`, a day: a
-signal that listens and still carries nothing cannot keep an answer past
-it. `Stats().Synced` says which bound is in force,
+the caches for at most twice the heartbeat. A signal vouches for a lease
+at a time: `Listening(lease)` grants the first, and `Renew` extends it
+each time the signal knows itself still listening — the watcher renews on
+every notification and every heartbeat answered, for three heartbeats at
+a time. A signal that stops without `NotListening`, its goroutine stuck
+or gone, lets the lease lapse and the cache falls back to `TTL` then,
+counted in `Stats().SyncsLost`. `NotListening` cuts short the answers
+cached under `SyncedTTL` at once. `Listening` drops nothing: an answer
+read before it may have missed a revocation made while nothing listened,
+so it stays on `TTL` from when it was read — as long as it could be
+served with no signal at all — and only an answer read after it is
+served for `SyncedTTL`. A connection that flaps thus leaves every
+verifier's answers in place rather than send them all to the store as it
+recovers, and a revocation made in the gap shows within `TTL` of the
+answer it outdates. Closing the one signal that kept the cache on `TTL`
+counts as a `Listening` of the others. `SyncedTTL` is at most
+`MaxRevocationCacheSyncedTTL`, a day: a signal that listens and still
+carries nothing cannot keep an answer past it. `Stats().Synced` says
+which bound is in force,
 the other fields count the watchers' connections, their losses and the
 notifications they passed on (see `RevocationCacheStats`). A cache no signal is open on serves for `TTL` alone,
 as before. A cache fed by more than one watcher — one per database, say —

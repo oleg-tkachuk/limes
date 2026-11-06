@@ -185,7 +185,7 @@ func TestRevocationWatcherKeepsUnrelatedAnswers(t *testing.T) {
 			time.Sleep(watchQuiet / 10)
 		}
 	}
-	await(func(st limes.RevocationCacheStats) bool { return st.Clears == 1 }, "the clear once listening")
+	await(func(st limes.RevocationCacheStats) bool { return st.Synced }, "listening")
 	ids := f.tree(t, root, 0, root)
 	for _, id := range ids {
 		if revoked, err := cache.IsRevoked(t.Context(), id); err != nil || revoked {
@@ -208,8 +208,8 @@ func TestRevocationWatcherKeepsUnrelatedAnswers(t *testing.T) {
 		t.Errorf("after the revocation: %d hits, %d lookups; want the unrelated one a hit and the child looked up",
 			after.Hits-before.Hits, after.Lookups-before.Lookups)
 	}
-	if st := cache.Stats(); st.Clears != 1 {
-		t.Errorf("%d clears; want only the one once listening", st.Clears)
+	if st := cache.Stats(); st.Clears != 0 {
+		t.Errorf("%d clears; want none", st.Clears)
 	}
 }
 
@@ -425,7 +425,7 @@ func TestRevocationWatcherKeepsAnswersThroughABulkRevocation(t *testing.T) {
 			time.Sleep(watchQuiet / 10)
 		}
 	}
-	await(func(st limes.RevocationCacheStats) bool { return st.Clears == 1 }, "the clear once listening")
+	await(func(st limes.RevocationCacheStats) bool { return st.Synced }, "listening")
 	client := "client-" + uuid.New().String()
 	tenantCtx := WithTenant(t.Context(), f.mine)
 	for range bulkBatch {
@@ -452,7 +452,7 @@ func TestRevocationWatcherKeepsAnswersThroughABulkRevocation(t *testing.T) {
 	if after := cache.Stats().Capabilities; after.Hits-before.Hits != 1 {
 		t.Errorf("the unrelated capability was looked up again: the bulk revocation cleared its answer")
 	}
-	if st := cache.Stats(); st.Clears != 1 || st.SignalsWhole != 0 {
-		t.Errorf("%d clears, %d signals clearing whole; want only the clear once listening", st.Clears, st.SignalsWhole)
+	if st := cache.Stats(); st.Clears != 0 || st.SignalsWhole != 0 {
+		t.Errorf("%d clears, %d signals clearing whole; want none", st.Clears, st.SignalsWhole)
 	}
 }

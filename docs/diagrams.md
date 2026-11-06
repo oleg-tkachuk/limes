@@ -977,7 +977,7 @@ flowchart LR
     cache --> v2
     store -. "pgstore: statement trigger on an INSERT<br/>that adds a row to limes.revocations → pg_notify" .-> notify
     blist -. "pgstore: statement trigger on an INSERT<br/>that adds a row to limes.biscuit_revocations → pg_notify" .-> notify
-    notify -. "RevocationSignal: Listening clears, at each connection;<br/>Revoked(ids) or RevokedAll on each notification;<br/>NotListening when the connection or heartbeat fails" .-> cache
+    notify -. "RevocationSignal: Listening at each connection, Renew on each heartbeat;<br/>Revoked(ids) or RevokedAll on each notification;<br/>NotListening when the connection or heartbeat fails" .-> cache
     bop --> blist --> cache
 
     classDef client fill:#E0F2FE,stroke:#0284C7,color:#0C4A6E
@@ -1004,14 +1004,17 @@ revocation, a statement past that bound, or one revoking a capability the writer
 row-level security hides names none, and a statement whose capabilities'
 parents were all revoked before notifies nothing. Its `RevocationWatcher`
 passes them to each cache's `RevocationSignal` on each notification —
-`Revoked(ids)`, or `RevokedAll` when it names none — says `Listening`, which
-clears the cache, after each reconnect, and `NotListening` when the
-connection or its heartbeat fails, which puts the cache back on its `TTL`.
+`Revoked(ids)`, or `RevokedAll` when it names none — says `Listening` after
+each reconnect, which leaves every answer read before it on `TTL`, renews
+its lease on each notification and heartbeat, and says `NotListening` when
+the connection or its heartbeat fails, which puts the cache back on its
+`TTL`, as a lease that lapses unrenewed does.
 An answer cached for a descendant is also an answer about the revoked
 ancestor: over a store that names each answer's ancestors, `ClearRevoked`
 drops the revoked ids' answers and every one naming them among its
-ancestors, and over any other it drops the cache whole. Either detaches any lookup in flight, whose answer may
-predate the revocation, so it is neither cached nor shared with later checks.
+ancestors, and over any other it drops the cache whole. A lookup in flight whose answer
+may predate the revocation — of a revoked id, or naming one among its
+ancestors — is neither cached nor shared with later checks; every other is.
 Revoked Biscuit copies travel the same way, on their own list but through the
 same cache, which keeps each kind of answer apart; one `Clear` drops both.
 `Stats` counts each kind's hits, misses, upstream lookups, evictions and

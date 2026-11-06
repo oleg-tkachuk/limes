@@ -29,6 +29,11 @@ const (
 	// connection before it checks the connection is alive
 	// (RevocationWatcher.Heartbeat).
 	DefaultWatchHeartbeat = 30 * time.Second
+	// watchLeaseBeats is how many heartbeats a signalled cache's lease
+	// runs for (limes.RevocationSignal.Listening): a quiet connection
+	// renews it at most a heartbeat's wait and a heartbeat's ping apart,
+	// so it lapses only when the watcher itself has stopped.
+	watchLeaseBeats = 3
 )
 
 // The bounds of the ids a statement's revocations are notified with
@@ -72,9 +77,11 @@ type RevokedClearer interface {
 // limes.RevocationSignalTarget is told instead, through a
 // limes.RevocationSignal Run opens on it and closes when it returns —
 // Listening once it listens, Revoked or RevokedAll on each notification,
-// and NotListening when the connection is lost — so it serves its TTL
-// alone while no notification can reach it. Between connections, that TTL
-// bounds how long a revocation may go unseen.
+// Renew on each notification and each heartbeat answered, and
+// NotListening when the connection is lost — so it serves its TTL alone
+// while no notification can reach it, and when the watcher stops renewing
+// without a word. Between connections, that TTL bounds how long a
+// revocation may go unseen.
 //
 // Connect reaches the primary: PostgreSQL notifies only the sessions of the
 // server a revocation committed on, and a hot standby refuses LISTEN, so a
@@ -159,9 +166,9 @@ func (w RevocationWatcher) listen(ctx context.Context, signals []*limes.Revocati
 	}
 	// Listening now, so whatever was revoked before is in the store: what
 	// the caches hold from before may be stale.
-	w.listening(signals)
-	defer notListening(signals)
 	beat := w.heartbeat()
+	w.listening(signals, watchLeaseBeats*beat)
+	defer notListening(signals)
 	for {
 		n, err := waitForNotification(ctx, conn, beat)
 		switch {
@@ -174,6 +181,8 @@ func (w RevocationWatcher) listen(ctx context.Context, signals []*limes.Revocati
 		default:
 			w.signal(signals, revokedIDs(n.Payload))
 		}
+		// The connection answered: a notification, or the ping.
+		renew(signals)
 	}
 }
 
@@ -221,15 +230,24 @@ func closeSignals(signals []*limes.RevocationSignal) {
 	}
 }
 
-// listening tells each signalled cache the watcher listens, which clears
-// it, and clears every other cache.
-func (w RevocationWatcher) listening(signals []*limes.RevocationSignal) {
+// listening tells each signalled cache the watcher listens, for lease,
+// and clears every other cache.
+func (w RevocationWatcher) listening(signals []*limes.RevocationSignal, lease time.Duration) {
 	for i, c := range w.Caches {
 		if s := signals[i]; s != nil {
-			s.Listening()
+			s.Listening(lease)
 			continue
 		}
 		c.Clear()
+	}
+}
+
+// renew tells each signalled cache the watcher still listens.
+func renew(signals []*limes.RevocationSignal) {
+	for _, s := range signals {
+		if s != nil {
+			s.Renew()
+		}
 	}
 }
 

@@ -149,6 +149,10 @@ func TestInstrumentRevocationCacheReportsItsCounts(t *testing.T) {
 	}
 }
 
+// signalLease is the lease the tests' signals listen with: longer than any
+// of them runs.
+const signalLease = time.Hour
+
 // The revocation signal's state and the causes of a whole clear reach the
 // provider, each a single point; the time of the last loss only once there
 // was one.
@@ -158,7 +162,7 @@ func TestInstrumentRevocationCacheReportsTheSignal(t *testing.T) {
 		t.Errorf("%s before any loss = %+v, want no point", metricLastSyncLoss, got[metricLastSyncLoss])
 	}
 	signal := cache.NewSignal()
-	signal.Listening()
+	signal.Listening(signalLease)
 	signal.Revoked(uuid.New())
 	signal.RevokedAll()
 	before := time.Now().Unix()
@@ -180,7 +184,7 @@ func TestInstrumentRevocationCacheReportsTheSignal(t *testing.T) {
 	if ps := got[metricLastSyncLoss]; len(ps) != 1 || ps[0].value < float64(before) {
 		t.Errorf("%s = %+v, want one point at or after %d", metricLastSyncLoss, ps, before)
 	}
-	signal.Listening()
+	signal.Listening(signalLease)
 	if ps := collected(t, reader)[metricSynced]; len(ps) != 1 || ps[0].value != 1 {
 		t.Errorf("%s while listening = %+v, want 1", metricSynced, ps)
 	}
@@ -210,7 +214,7 @@ func TestInstrumentRevocationCacheRefusesNoCache(t *testing.T) {
 func TestInstrumentRevocationCacheUnits(t *testing.T) {
 	cache, reader, _, _ := instrumentedCache(t)
 	signal := cache.NewSignal()
-	signal.Listening()
+	signal.Listening(signalLease)
 	signal.NotListening() // a loss, so its time is reported
 	var rm metricdata.ResourceMetrics
 	if err := reader.Collect(context.Background(), &rm); err != nil {
