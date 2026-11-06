@@ -15,6 +15,7 @@ import (
 	"uuid"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/meter"
@@ -33,9 +34,22 @@ func (s *UsageStore) Refund(ctx context.Context, req meter.RefundRequest) (meter
 				return err
 			}
 			receipt = meter.RefundReceipt{ChargeID: e.ID, TenantID: e.TenantID, UnitCode: e.UnitCode}
+			if req.RefundID != uuid.Nil() {
+				r, keyed, err := refunded(ctx, tx, req, receipt)
+				if keyed || err != nil {
+					receipt = r
+					return err
+				}
+			}
 			amount, err := refundAmount(e, req)
-			if err != nil || amount == 0 {
+			if err != nil {
 				return err
+			}
+			if err := s.recordRefund(ctx, tx, e, req, amount); err != nil {
+				return err
+			}
+			if amount == 0 {
+				return nil
 			}
 			if err := s.refund(ctx, tx, c, e, amount); err != nil {
 				return err
@@ -80,6 +94,56 @@ func (s *UsageStore) lockRefunded(ctx context.Context, tx pgx.Tx, id uuid.UUID) 
 		return ledgerEntry{}, nil, meter.ErrChargeNotFound
 	}
 	return e, c, nil
+}
+
+const (
+	sqlKeyedRefund = `SELECT charge_id, amount, remaining, refunded FROM limes.refunds WHERE id = $1`
+
+	sqlInsertRefund = `
+INSERT INTO limes.refunds (id, charge_id, tenant_id, amount, remaining, refunded, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7)`
+
+	// constraintRefundKey is limes.refunds' primary key, which a refund
+	// recorded under the id of another tenant's refund, hidden from the
+	// call by row-level security, violates.
+	constraintRefundKey = "refunds_pkey"
+)
+
+// refunded answers a Refund whose RefundID is on record already: keyed
+// reports that it is, with the first refund's receipt again when it was of
+// the same charge for the same request, and ErrRefundConflict when not.
+// receipt is the charge's, as this refund would return it. The charge is
+// locked, so a refund of it under the id that committed meanwhile is read.
+func refunded(ctx context.Context, tx pgx.Tx, req meter.RefundRequest, receipt meter.RefundReceipt) (meter.RefundReceipt, bool, error) {
+	var chargeID uuid.UUID
+	var amount, returned int64
+	var remaining bool
+	err := tx.QueryRow(ctx, sqlKeyedRefund, req.RefundID).Scan(&chargeID, &amount, &remaining, &returned)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return meter.RefundReceipt{}, false, nil
+	case err != nil:
+		return meter.RefundReceipt{}, false, err
+	case chargeID != req.ChargeID || limes.Nanos(amount) != req.Amount || remaining != req.Remaining:
+		return meter.RefundReceipt{}, true, fmt.Errorf("%w: %s", meter.ErrRefundConflict, req.RefundID)
+	}
+	receipt.Amount, receipt.Replayed = limes.Nanos(returned), true
+	return receipt, true, nil
+}
+
+// recordRefund records a keyed refund of the charge e that returns amount,
+// so the request sent again replays it; a refund under no id records
+// nothing. An id another tenant's refund holds is ErrRefundConflict.
+func (s *UsageStore) recordRefund(ctx context.Context, tx pgx.Tx, e ledgerEntry, req meter.RefundRequest, amount limes.Nanos) error {
+	if req.RefundID == uuid.Nil() {
+		return nil
+	}
+	_, err := tx.Exec(ctx, sqlInsertRefund, req.RefundID, e.ID, e.TenantID, int64(req.Amount), req.Remaining, int64(amount), s.clock())
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == constraintRefundKey {
+		return fmt.Errorf("%w: %s", meter.ErrRefundConflict, req.RefundID)
+	}
+	return err
 }
 
 // refundAmount is what req gives back of the charge e: all that is left of

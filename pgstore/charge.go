@@ -10,6 +10,7 @@ import (
 	"uuid"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/meter"
@@ -306,6 +307,7 @@ func (s *UsageStore) lockCharge(ctx context.Context, tx pgx.Tx, spec chargeSpec)
 	if spec.replayAfterLock {
 		l.replayCapID, l.replayRef = spec.capID, spec.externalRef
 	}
+	l.holdID = spec.holdID
 	return lock(ctx, tx, l)
 }
 
@@ -332,6 +334,9 @@ type chargeSpec struct {
 	// replayAfterLock reads the charge on record under externalRef once
 	// the locks are held (lockRequest.replayRef).
 	replayAfterLock bool
+	// holdID is the id a keyed Reserve holds under, looked for once the
+	// locks are held (lockRequest.holdID); nil for none.
+	holdID uuid.UUID
 }
 
 // commitCharge checks every ceiling against c and, when all admit the
@@ -608,6 +613,20 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
 	sqlGetHold = `SELECT ` + sqlHoldColumns + ` FROM limes.reservations WHERE id = $1`
 
 	sqlDeleteHold = `DELETE FROM limes.reservations WHERE id = $1`
+
+	// sqlSettledBy reports whether a charge settled the hold $1.
+	sqlSettledBy = `SELECT EXISTS (SELECT 1 FROM limes.charges WHERE reservation_id = $1)`
+
+	// sqlHoldTaken reports whether $1 names a hold on record, or the charge
+	// that settled one: what a keyed Reserve reads once it holds its locks.
+	sqlHoldTaken = `
+SELECT EXISTS (SELECT 1 FROM limes.reservations WHERE id = $1)
+    OR EXISTS (SELECT 1 FROM limes.charges WHERE reservation_id = $1)`
+
+	// constraintHoldKey is limes.reservations' primary key, which a hold
+	// inserted under the id of another tenant's hold, hidden from the call
+	// by row-level security, violates.
+	constraintHoldKey = "reservations_pkey"
 )
 
 // scanHold reads one row of sqlHoldColumns.
@@ -635,28 +654,109 @@ func (s *UsageStore) Reserve(ctx context.Context, req meter.ReserveRequest) (met
 		return meter.Reservation{}, err
 	}
 	var out meter.Reservation
-	err = s.retryDeadlock(ctx, retriedReserve, func() error {
-		return s.inTenantTx(ctx, req.Subject.TenantID(), func(tx pgx.Tx) error {
-			var err error
-			out, err = s.reserve(ctx, tx, req, copies)
-			return err
+	attempt := func() error {
+		return s.retryDeadlock(ctx, retriedReserve, func() error {
+			return s.inTenantTx(ctx, req.Subject.TenantID(), func(tx pgx.Tx) error {
+				var err error
+				out, err = s.reserve(ctx, tx, req, copies)
+				return err
+			})
 		})
-	})
-	return out, err
+	}
+	err = attempt()
+	// A hold under the id committed while this call waited for its locks:
+	// it is answered afresh, as a replay or a conflict.
+	if errors.Is(err, errHoldTakenAfterLock) {
+		err = attempt()
+	}
+	if err != nil {
+		return meter.Reservation{}, err
+	}
+	return out, nil
+}
+
+// errHoldTakenAfterLock rolls back a keyed Reserve that found its id taken
+// by another call once it held the locks; Reserve runs again, and answers
+// from what that call committed.
+var errHoldTakenAfterLock = fmt.Errorf("%w: pgstore: reservation id taken while the call waited for its locks", limes.ErrInternal)
+
+// reserved answers a Reserve whose ReservationID is on record already, as a
+// hold or as the charge that settled one: keyed reports that it is, with
+// the hold again when it was made for req, in unit, and ErrReserveConflict
+// when it was made for another request or has been settled. The hold is
+// locked first, as Settle and Release lock it, so one settling meanwhile
+// is read once it has.
+func reserved(ctx context.Context, tx pgx.Tx, req meter.ReserveRequest, unit string) (meter.Reservation, bool, error) {
+	b := &pgx.Batch{}
+	b.Queue(sqlLockHold, req.ReservationID)
+	b.Queue(sqlSettledBy, req.ReservationID)
+	br := tx.SendBatch(ctx, b)
+	r, keyed, err := func() (meter.Reservation, bool, error) {
+		h, err := scanHold(br.QueryRow())
+		found := err == nil
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return meter.Reservation{}, false, err
+		}
+		var settled bool
+		if err := br.QueryRow().Scan(&settled); err != nil {
+			return meter.Reservation{}, false, err
+		}
+		switch {
+		case settled:
+			return meter.Reservation{}, true, fmt.Errorf("%w: %s is settled", meter.ErrReserveConflict, req.ReservationID)
+		case !found:
+			return meter.Reservation{}, false, nil
+		case !h.madeFor(req, unit):
+			return meter.Reservation{}, true, fmt.Errorf("%w: %s", meter.ErrReserveConflict, req.ReservationID)
+		}
+		out := h.reservation()
+		out.Replayed = true
+		return out, true, nil
+	}()
+	return r, keyed, errors.Join(err, br.Close())
+}
+
+// madeFor reports whether h is the hold req, in unit, makes: the same
+// subject, copies, amount, unit and attribution.
+func (h hold) madeFor(req meter.ReserveRequest, unit string) bool {
+	subject := req.Subject
+	return h.capID == subject.CapabilityID() && h.tenantID == subject.TenantID() &&
+		sameCopyIDs(copyIDs(h.copies), subject.Copies()) &&
+		h.amount == req.Amount && h.unit == unit && h.op == req.Op && h.actor == req.Actor
+}
+
+// holdKeyConflict is err, the error of a hold's insert, as
+// ErrReserveConflict when the hold's id is another tenant's.
+func holdKeyConflict(err error, id uuid.UUID) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == constraintHoldKey {
+		return fmt.Errorf("%w: %s", meter.ErrReserveConflict, id)
+	}
+	return err
 }
 
 // reserve is Reserve in tx, copies the encoded copies the hold is under.
 func (s *UsageStore) reserve(ctx context.Context, tx pgx.Tx, req meter.ReserveRequest, copies []byte) (meter.Reservation, error) {
 	subject, unit := req.Subject, req.Subject.UnitCode()
+	// A replay is answered before the lineage is read: it moves nothing.
+	if req.ReservationID != uuid.Nil() {
+		if r, keyed, err := reserved(ctx, tx, req, unit); keyed || err != nil {
+			return r, err
+		}
+	}
 	ancestors, err := readLineage(ctx, tx, subject.TenantID(), subject.CapabilityID())
 	if err != nil {
 		return meter.Reservation{}, err
 	}
 	c, err := s.lockCharge(ctx, tx, chargeSpec{
 		capID: subject.CapabilityID(), tenantID: subject.TenantID(), unit: unit, copies: subject.Copies(), copyQuota: subject.CopyQuota(), ancestors: ancestors,
+		holdID: req.ReservationID,
 	})
 	if err != nil {
 		return meter.Reservation{}, err
+	}
+	if c.holdTaken {
+		return meter.Reservation{}, errHoldTakenAfterLock
 	}
 	refuse := func(err error) error { return err }
 	if err := checkCeilings(c, ceilingCheck{
@@ -671,7 +771,7 @@ func (s *UsageStore) reserve(ctx context.Context, tx pgx.Tx, req meter.ReserveRe
 		return meter.Reservation{}, err
 	}
 	h := hold{
-		id: uuid.New(), capID: subject.CapabilityID(), tenantID: subject.TenantID(), ancestors: ancestorIDs(ancestors),
+		id: cmp.Or(req.ReservationID, uuid.New()), capID: subject.CapabilityID(), tenantID: subject.TenantID(), ancestors: ancestorIDs(ancestors),
 		amount: req.Amount, unit: unit, op: req.Op, actor: req.Actor, copies: subject.Copies(),
 		expires: expires.Truncate(timeResolution),
 	}
@@ -680,7 +780,7 @@ func (s *UsageStore) reserve(ctx context.Context, tx pgx.Tx, req meter.ReserveRe
 		h.id, h.capID, h.tenantID, h.ancestors, int64(h.amount), h.unit, string(h.op), h.actor, copies, h.expires,
 	}}
 	if err := c.writeLast(ctx, tx, now, true, insert); err != nil {
-		return meter.Reservation{}, err
+		return meter.Reservation{}, holdKeyConflict(err, h.id)
 	}
 	return h.reservation(), nil
 }

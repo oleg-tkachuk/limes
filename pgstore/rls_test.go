@@ -470,13 +470,19 @@ func tableDigests(t *testing.T) map[string]string {
 var scopedTables = []string{
 	"capabilities", "revocations", "biscuit_revocations", "usage",
 	"copy_usage", "tenant_budgets", "charges", "reservations", "erased_tenants",
+	"refunds",
 }
 
 // Under the read-only setting each table's policies let its rows be read
 // and none be changed or removed, statement by statement.
 func TestReadOnlyPoliciesOfEveryTable(t *testing.T) {
 	f := newTenantFixture(t)
-	if _, err := f.usage.Charge(WithTenant(t.Context(), f.mine), meter.ChargeRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1}, nil); err != nil {
+	charged, err := f.usage.Charge(WithTenant(t.Context(), f.mine), meter.ChargeRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A keyed refund leaves a row of refunds.
+	if _, err := f.usage.Refund(WithTenant(t.Context(), f.mine), meter.RefundRequest{ChargeID: charged.ChargeID, Remaining: true, RefundID: uuid.New()}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.usage.Reserve(WithTenant(t.Context(), f.mine), meter.ReserveRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1}); err != nil {
@@ -486,7 +492,7 @@ func TestReadOnlyPoliciesOfEveryTable(t *testing.T) {
 	if err := f.usage.EraseTenantUsage(WithTenant(t.Context(), f.theirs), meter.EraseTenantUsageRequest{TenantID: f.theirs}); err != nil {
 		t.Fatal(err)
 	}
-	err := pgx.BeginFunc(t.Context(), app, func(tx pgx.Tx) error {
+	err = pgx.BeginFunc(t.Context(), app, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), sqlSetLocal, SettingAllTenants, SettingAllTenantsRead); err != nil {
 			return err
 		}

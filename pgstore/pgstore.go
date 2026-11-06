@@ -379,6 +379,10 @@ type conn struct {
 	maxCopies int64
 	// log is Config.Logger, its default applied.
 	log *slog.Logger
+	// outcomes reports a write whose COMMIT went unanswered as
+	// meter.ErrOutcomeUnknown (outcomeOf): the usage store's, whose keyed
+	// calls a caller sends again on it.
+	outcomes bool
 }
 
 func newConn(cfg Config) (conn, error) {
@@ -433,9 +437,9 @@ func (c conn) inTx(ctx context.Context, fn func(pgx.Tx) error) error {
 		return errReadOnlyScope
 	}
 	if c.checkReadOnly == nil {
-		return c.inReadTx(ctx, fn)
+		return c.runTx(ctx, true, fn)
 	}
-	return c.inReadTx(ctx, func(tx pgx.Tx) error {
+	return c.runTx(ctx, true, func(tx pgx.Tx) error {
 		if err := c.checkReadOnly(ctx, tx); err != nil {
 			return err
 		}
@@ -449,7 +453,18 @@ func (c conn) inTx(ctx context.Context, fn func(pgx.Tx) error) error {
 // (deferTx), so the scope costs no round trip of its own; so does BEGIN on a
 // connection lent to the call (lendingDB).
 func (c conn) inReadTx(ctx context.Context, fn func(pgx.Tx) error) error {
-	return pgx.BeginTxFunc(ctx, c.txs, txOptions, func(tx pgx.Tx) error {
+	return c.runTx(ctx, false, fn)
+}
+
+// runTx is inReadTx for a call that writes when writes, whose COMMIT's
+// answer, lost, is meter.ErrOutcomeUnknown on a store that reports
+// outcomes.
+func (c conn) runTx(ctx context.Context, writes bool, fn func(pgx.Tx) error) error {
+	commitErr := func(err error) error { return err }
+	if writes && c.outcomes {
+		commitErr = outcomeOf
+	}
+	return beginFunc(ctx, c.txs, func(tx pgx.Tx) error {
 		deferred, ok := tx.(*deferTx)
 		if !ok {
 			deferred = &deferTx{Tx: tx}
@@ -461,7 +476,7 @@ func (c conn) inReadTx(ctx context.Context, fn func(pgx.Tx) error) error {
 			return errScope(err)
 		}
 		return fn(deferred)
-	})
+	}, commitErr)
 }
 
 // inTenantTx is inTx for a call whose request names tenant: it refuses a
