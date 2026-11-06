@@ -53,7 +53,8 @@ type NarrowDecision struct {
 	// NarrowPolicy says.
 	Delegate limes.DelegateRequest
 	// Scopes are the scopes granted, as Decision.Scopes: each one asked
-	// for, every one asked when empty.
+	// for, none when empty; a narrowing that asked for scopes and is
+	// granted none is refused with ErrInvalidScope.
 	Scopes []string
 }
 

@@ -165,9 +165,12 @@ type Decision struct {
 	Issue limes.IssueRequest
 	// Scopes are the scopes granted, each one the grant asked for: the
 	// token response states them as its scope (RFC 6749 §5.1, RFC 8693
-	// §2.2.1). Empty grants every scope asked. A scope not asked for is
-	// the policy's fault, answered as the server's failure; a policy that
-	// grants none of the scopes asked refuses with ErrInvalidScope.
+	// §2.2.1). Empty grants none: a policy granting every scope asked
+	// sets Scopes to Grant.Scopes. A grant that asked for scopes and is granted none
+	// is refused with ErrInvalidScope, since a response without scope
+	// would state every scope asked. A scope not asked for is the
+	// policy's fault, answered as the server's failure. A scope named
+	// twice is stated once.
 	Scopes []string
 }
 
@@ -194,8 +197,8 @@ type Policy func(ctx context.Context, g Grant) (Decision, error)
 type Result struct {
 	Capability limes.Capability
 	Token      string
-	// Scopes are the scopes the policy granted (Decision.Scopes), every one
-	// asked when it named none: the token response's scope. Under
+	// Scopes are the scopes the policy granted (Decision.Scopes), each
+	// once: the token response's scope. Under
 	// Config.Exchanges they are this exchange's policy's answer, a
 	// reissued capability's among them.
 	Scopes []string
@@ -511,18 +514,23 @@ func (e *Exchanger) grant(ctx context.Context, req Request, subject Subject, rem
 	return issue, scopes, nil
 }
 
-// holdScopes is the scopes a policy granted, every one asked when it named
-// none, refused when it grants a scope not asked for.
+// holdScopes is the scopes a policy granted, each once in the order first
+// named: refused with ErrInvalidScope when scopes were asked and none
+// granted, and the policy's fault when it grants a scope not asked for.
 func holdScopes(granted, asked []string) ([]string, error) {
-	if len(granted) == 0 {
-		return slices.Clone(asked), nil
-	}
+	var held []string
 	for _, scope := range granted {
 		if !slices.Contains(asked, scope) {
 			return nil, fmt.Errorf("%w: scope %q was not asked for", errPolicy, scope)
 		}
+		if !slices.Contains(held, scope) {
+			held = append(held, scope)
+		}
 	}
-	return slices.Clone(granted), nil
+	if len(held) == 0 && len(asked) > 0 {
+		return nil, fmt.Errorf("%w: none of the scopes asked was granted", ErrInvalidScope)
+	}
+	return held, nil
 }
 
 // holdIssue is issue, a policy's, held to the exchange: its targets, the
