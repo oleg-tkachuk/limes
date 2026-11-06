@@ -755,6 +755,40 @@ until `ReleaseExpired` runs. `Reserve` refuses a capability whose record has
 expired (`ErrExpired`); a cost reported after that is charged with
 `OverrunPolicyRecord`.
 
+## Retrying a lost answer
+
+A store over a database can lose its answer after a call's commit has
+left: the connection drops in a failover, or the context ends, before the
+database replies. The call then returns an error matching
+`meter.ErrOutcomeUnknown` (`outcome_unknown`, 503), wrapping the cause: it
+may have committed, or not. Send it again only when it is keyed to its
+cost, so that a repeat of one that committed is answered as a replay:
+
+- `Charge` with an `ExternalRef`: the first receipt, `Replayed`.
+- `Reserve` with a `ReservationID` of your own: the hold on record,
+  `Replayed`, its expiry unchanged. The same id for another hold — another
+  amount, unit, op, actor, capability or Biscuit copy — or for a hold
+  already settled is `ErrReserveConflict`. Once the hold is released, the
+  id may hold anew.
+- `Refund` with a `RefundID` of your own: the first receipt, `Replayed`,
+  with what that refund returned. The same id for another charge or amount
+  is `ErrRefundConflict`. The id goes with its charge when the ledger
+  removes it.
+- `Settle`: keyed to its reservation already.
+
+```go
+id := uuid.New() // kept with the work it pays for, before the first try
+req := meter.ReserveRequest{Subject: subject, Amount: estimate, ReservationID: id}
+hold, err := usage.Reserve(ctx, req)
+if errors.Is(err, meter.ErrOutcomeUnknown) {
+    hold, err = usage.Reserve(ctx, req) // a hold that committed comes back Replayed
+}
+```
+
+An unkeyed call sent again may count twice, and one not sent again may
+never count. The in-memory store commits in memory and never returns
+`ErrOutcomeUnknown`.
+
 ## Lease a sub-agent its budget
 
 Every charge locks the counters of the whole chain and the tenant's

@@ -3,6 +3,7 @@ package meter
 import (
 	"context"
 	"errors"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -59,6 +60,9 @@ var sentinelMatrix = map[string]sentinelCase{
 	"ErrTenantBudgetNotFound":        {ErrTenantBudgetNotFound, []string{famNotFound}, "", http.StatusInternalServerError},
 	"ErrExternalRefConflict":         {ErrExternalRefConflict, []string{famConflict}, "", http.StatusConflict},
 	"ErrSettleConflict":              {ErrSettleConflict, []string{famConflict}, "", http.StatusConflict},
+	"ErrReserveConflict":             {ErrReserveConflict, []string{famConflict}, "", http.StatusConflict},
+	"ErrRefundConflict":              {ErrRefundConflict, []string{famConflict}, "", http.StatusConflict},
+	"ErrOutcomeUnknown":              {ErrOutcomeUnknown, nil, "", http.StatusInternalServerError},
 	"ErrLeaseExhausted":              {ErrLeaseExhausted, []string{famBudget}, limes.ReasonBudgetExceeded, http.StatusForbidden},
 	"ErrLeaseRequestsExhausted":      {ErrLeaseRequestsExhausted, []string{famRequestLimit}, limes.ReasonRequestLimitExceeded, http.StatusForbidden},
 	"ErrLeaseNotFound":               {ErrLeaseNotFound, []string{famNotFound}, "", http.StatusInternalServerError},
@@ -140,5 +144,19 @@ func TestSentinelsAreIndividuallyMatchable(t *testing.T) {
 		if !errors.Is(errors.Join(errors.New("ctx"), a.err), a.err) {
 			t.Errorf("%s is lost when wrapped", nameA)
 		}
+	}
+}
+
+// A store's ErrOutcomeUnknown wraps its cause beside it: both match, and
+// limes answers it as unavailable, 503, whatever the cause.
+func TestOutcomeUnknownKeepsItsCause(t *testing.T) {
+	cause := errors.New("conn reset after COMMIT was sent")
+	err := fmt.Errorf("%w: %w", ErrOutcomeUnknown, cause)
+	if !errors.Is(err, ErrOutcomeUnknown) || !errors.Is(err, cause) {
+		t.Fatalf("errors.Is(%v): outcome unknown %v, cause %v; want both", err, errors.Is(err, ErrOutcomeUnknown), errors.Is(err, cause))
+	}
+	p, ok := limes.ProblemOf(err)
+	if !ok || p.Code != CodeOutcomeUnknown || p.Category != limes.CategoryUnavailable || p.Status != http.StatusServiceUnavailable {
+		t.Errorf("ProblemOf = %+v, %v; want outcome_unknown, unavailable, 503", p, ok)
 	}
 }

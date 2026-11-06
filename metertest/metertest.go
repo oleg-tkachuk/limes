@@ -16,7 +16,8 @@
 // again: rejection that moves nothing — by a Biscuit copy's, the capability's,
 // an ancestor's or the tenant's ceiling, by a failed onCharged, under
 // concurrent charges — idempotency on ExternalRef and on a settled
-// reservation, also once the capability is gone (Env.DeleteCapability), ChargeByRef,
+// reservation, also once the capability is gone (Env.DeleteCapability), on
+// a ReservationID and on a RefundID, which goes with its charge, ChargeByRef,
 // OverrunPolicyRecord past every ceiling, refunds, holds, their listing and their expiry, request
 // counts, copy counters and CopyUsage, units, counters that never pass
 // MaxNanos, a capability not on record and PurgeOrphans (Env.DeleteCapability),
@@ -428,6 +429,14 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{Name: "RejectionMovesNothing", Run: checkRejectionMovesNothing},
 		{Name: "ExternalRefChargesOnce", Run: checkExternalRefChargesOnce},
 		{Name: "ExternalRefChargesOnceConcurrently", Run: checkExternalRefConcurrent},
+		{Name: "AReserveUnderAnIDHoldsOnce", Run: checkReserveReplaysItsID},
+		{Name: "AReservationIDNamesOneHold", Run: checkReserveIDConflicts},
+		{Name: "AReservationIDOutlivesItsHoldOnlyAsACharge", Run: checkReserveIDAfterItsHold},
+		{Name: "AReserveUnderAnIDHoldsOnceConcurrently", Run: checkReserveIDConcurrent},
+		{Name: "ARefundUnderAnIDRefundsOnce", Run: checkRefundReplaysItsID},
+		{Name: "ARefundIDNamesOneRefund", Run: checkRefundIDConflicts},
+		{Name: "ARefundIDGoesWithItsCharge", Run: checkRefundIDGoesWithItsCharge},
+		{Name: "ARefundIDGoesWithItsTenantsUsage", Run: checkRefundIDGoesWithItsTenant},
 		{Name: "ChargeByRef", Run: checkChargeByRef},
 		{Name: "MalformedRequestsAreRefused", Run: checkMalformed},
 		{Name: "OverrunRecordCrossesEveryCeiling", Run: checkOverrunRecord},
@@ -1548,7 +1557,8 @@ func reserveUnder(t *testing.T, f fixture, copies []limes.CopyCeiling, capID uui
 // store does not keep reads back unset.
 func checkReservedHold(t *testing.T, f fixture, first meter.Reservation, copies []limes.CopyCeiling) {
 	expect.That(t, first.CapabilityID == f.child && first.TenantID == f.Tenant && first.Amount == reservedHold && first.Op == "llm" && first.Actor == "agent" && len(first.Copies) == 1 && sameCeiling(first.Copies[0].Budget, copies[0].Budget), "Reserve returned %+v; want the whole hold, copies with their budgets alone", first)
-	unset, want := fields.Unset(first), []string{"Copies[0].Budget.Unlimited"}
+	// A fresh hold is no replay.
+	unset, want := fields.Unset(first), []string{"Copies[0].Budget.Unlimited", "Replayed"}
 	expect.That(t, slices.Equal(unset, want), "Reserve returned %+v with %v unset, want only %v", first, unset, want)
 	got, err := f.Usage.GetReservation(f.Ctx, first.ID)
 	expect.Must(t, err == nil, "GetReservation: %v", err)

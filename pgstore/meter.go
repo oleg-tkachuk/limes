@@ -28,6 +28,15 @@ import (
 // in a cycle (lock_order_test.go; docs/adr/0018-fewer-round-trips-per-charge.md).
 // onCharged
 // runs on the call's own transaction: it is the pgx.Tx it is handed.
+//
+// A call whose COMMIT left and whose answer did not come back — the
+// connection failed or the context ended first — returns an error matching
+// meter.ErrOutcomeUnknown, wrapping the cause: it may have committed. Bump,
+// Charge, Reserve, Settle, Release, Refund and the leases' calls log it at
+// WARN. One the database answered, or that sent nothing, never
+// does. A keyed id (ChargeRequest.ExternalRef, ReserveRequest.ReservationID,
+// RefundRequest.RefundID) makes the call safe to send again; refunds
+// recorded under one are kept in limes.refunds, removed with their charge.
 type UsageStore struct {
 	conn
 }
@@ -39,6 +48,7 @@ func NewUsageStore(cfg Config) (*UsageStore, error) {
 	if err != nil {
 		return nil, err
 	}
+	c.outcomes = true
 	return &UsageStore{c}, nil
 }
 
@@ -413,6 +423,9 @@ type counters struct {
 	// once the locks were held, when replayed.
 	replay   ledgerEntry
 	replayed bool
+	// holdTaken reports that the lock request's holdID named a hold, or a
+	// settled one, once the locks were held.
+	holdTaken bool
 }
 
 // usageOf is the counters of id, zero when it has none.
@@ -482,6 +495,9 @@ func lockTenantOf(ctx context.Context, tx pgx.Tx, l lockRequest, c *counters) er
 	if l.replayRef != "" {
 		b.Queue(sqlChargeByRef, l.replayCapID, l.replayRef)
 	}
+	if l.holdID != uuid.Nil() {
+		b.Queue(sqlHoldTaken, l.holdID)
+	}
 	br := tx.SendBatch(ctx, b)
 	err := func() error {
 		if l.tenantUnit != "" {
@@ -495,9 +511,14 @@ func lockTenantOf(ctx context.Context, tx pgx.Tx, l lockRequest, c *counters) er
 		}
 		c.tenant = t
 		if l.replayRef != "" {
-			c.replay, c.replayed, err = scanEntry(br.QueryRow())
+			if c.replay, c.replayed, err = scanEntry(br.QueryRow()); err != nil {
+				return err
+			}
 		}
-		return err
+		if l.holdID != uuid.Nil() {
+			return br.QueryRow().Scan(&c.holdTaken)
+		}
+		return nil
 	}()
 	return errors.Join(err, br.Close())
 }
@@ -686,6 +707,10 @@ type lockRequest struct {
 	// the call waited for them.
 	replayCapID uuid.UUID
 	replayRef   string
+	// holdID, when set, is looked for among the holds and the charges that
+	// settled one once every lock is held, with the tenant's aggregate: a
+	// keyed Reserve of the id committed while the call waited for them.
+	holdID uuid.UUID
 }
 
 // chainQuota is one capability's quota of copies, over its subtree.
@@ -765,9 +790,7 @@ func (c *counters) writeBatch(ctx context.Context, tx pgx.Tx, now time.Time, wri
 	// COMMIT's result is read by Close, which fails the batch when it did
 	// not commit.
 	writes := b.Len()
-	if last {
-		queueCommit(tx, b)
-	}
+	committing := last && queueCommit(tx, b)
 	br := tx.SendBatch(ctx, b)
 	var err error
 	for range writes {
@@ -775,7 +798,11 @@ func (c *counters) writeBatch(ctx context.Context, tx pgx.Tx, now time.Time, wri
 			break
 		}
 	}
-	return errors.Join(err, br.Close())
+	err = errors.Join(err, br.Close())
+	if committing {
+		return commitOutcome(tx, err)
+	}
+	return err
 }
 
 // copyIDs are the revocation ids of copies, in order.

@@ -16,6 +16,27 @@ import (
 // when it counts requests and spends nothing — a reporter on
 // MeterReader, and code which only administers tenant ceilings on
 // TenantBudgets.
+//
+// # A call whose answer is lost
+//
+// A store over a database can lose the answer to a call after the call's
+// commit has left: the connection drops, or the context ends, before the
+// database replies. Such a call returns an error matching ErrOutcomeUnknown,
+// beside its cause: it may have committed or not, and the store cannot tell.
+// Only a call keyed to its cost is safe to send again — Charge with an
+// ExternalRef, Reserve with a ReservationID, Refund with a RefundID, and
+// Settle, keyed to its reservation: a repeat of one that committed replays
+// it and moves nothing, and a repeat of one that did not commits it now. An
+// unkeyed call sent again may count twice; one not sent again may never
+// count. A store that commits in memory never returns it.
+//
+// # Growth from 1.0
+//
+// UsageStore's method set, and that of each interface it is made of, is
+// frozen at 1.0: a method added to an interface breaks every store written
+// against it. A capability added later arrives as an interface of its own,
+// optional, which a caller discovers by a type assertion on the store, as
+// Leaser, CopyUsageReader and TenantUsageEraser are.
 type UsageStore interface {
 	Meter
 	MeterReader
@@ -166,6 +187,15 @@ type BudgetMeter interface {
 	// Likewise a counter restarted since the charge (DeleteUsage on a
 	// capability still on record) never counted it, and is left alone.
 	//
+	// With req.RefundID set, Refund is idempotent on it: a refund already
+	// on record under the id, of the same charge for the same request — the
+	// same Amount, or Remaining again — moves nothing and returns the first
+	// receipt, with Replayed set and Amount what that refund returned. The
+	// id names one refund: one on record for another charge or another
+	// request returns ErrRefundConflict and changes nothing. The key lasts
+	// as long as its charge does in the ledger (MinChargeRetention), and
+	// goes with it. Without one, a partial refund sent twice refunds twice.
+	//
 	// For a cost only known afterwards, prefer Reserve/Settle: a
 	// reservation lapses on its own if the caller never settles it, where
 	// an estimate charged up front stays charged.
@@ -180,6 +210,17 @@ type BudgetMeter interface {
 	// settle the hold. A capability whose record has already expired — one
 	// a late cost names through StoredMeterSubject — is refused ErrExpired.
 	// Rejections return the Charge sentinels and hold nothing.
+	//
+	// With req.ReservationID set, Reserve is idempotent on it: a hold
+	// already on record under the id, made for the same request — the same
+	// capability, tenant and Biscuit copies, Amount, unit, Op and Actor —
+	// moves nothing and is returned as on record, with Replayed set and its
+	// ExpiresAt unchanged. The id names one hold: one on record for another
+	// request returns ErrReserveConflict and moves nothing, and so does the
+	// id of a hold already settled, whose charge carries it. The key holds
+	// while the hold, or the charge that settled it, is on record: once the
+	// hold is released — by Release, by ReleaseExpired past its expiry, or
+	// with its capability's usage — the id may hold anew.
 	Reserve(ctx context.Context, req ReserveRequest) (Reservation, error)
 
 	// Settle ends a reservation and charges the actual cost in its place,
@@ -493,8 +534,12 @@ type RefundReceipt struct {
 	// ChargeID is the charge refunded from.
 	ChargeID uuid.UUID
 	// Amount is the amount this call returned; zero when nothing was
-	// left to refund.
+	// left to refund. On a replay, what the refund it replays returned.
 	Amount limes.Nanos
+	// Replayed reports that a refund under the request's RefundID was
+	// already on record, so this call moved nothing and Amount is that
+	// refund's.
+	Replayed bool
 	// TenantID and UnitCode are the charge's.
 	TenantID uuid.UUID
 	UnitCode string
@@ -521,6 +566,12 @@ type ReserveRequest struct {
 	// Op and Actor are carried onto the charge Settle records.
 	Op    limes.Op
 	Actor string
+	// ReservationID is the id the hold is made under, which makes Reserve
+	// idempotent on it (Meter.Reserve): the caller's own, so a Reserve sent
+	// again after its answer was lost (ErrOutcomeUnknown) finds the hold
+	// the first one made. The zero id: the store picks one, and every call
+	// holds anew.
+	ReservationID uuid.UUID
 }
 
 // Validate refuses an amount out of range, a subject that names no
@@ -564,6 +615,10 @@ type Reservation struct {
 	// with the budget each is held against.
 	Copies    []HeldCopy
 	ExpiresAt time.Time
+	// Replayed reports that Reserve found the hold already on record under
+	// its ReservationID, so the call moved nothing. Only Reserve sets it;
+	// GetReservation and ListReservations never do.
+	Replayed bool
 }
 
 // SettleRequest is the input to Meter.Settle.
@@ -603,6 +658,11 @@ type RefundRequest struct {
 	// makes a full refund idempotent: once nothing remains, it returns
 	// nothing.
 	Remaining bool
+	// RefundID names the refund, which makes Refund idempotent on it
+	// (Meter.Refund): the caller's own, so a partial refund sent again
+	// after its answer was lost (ErrOutcomeUnknown) returns the first one's
+	// receipt rather than refunding again. The zero id: every call refunds.
+	RefundID uuid.UUID
 }
 
 // Validate refuses a request that names no amount, or both an amount and

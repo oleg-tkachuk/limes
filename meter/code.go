@@ -16,6 +16,9 @@ const (
 	CodeTenantBudgetVersionMismatch = limes.CodeTenantBudgetVersionMismatch
 	CodeExternalRefConflict         = limes.CodeExternalRefConflict
 	CodeSettleConflict              = limes.CodeSettleConflict
+	CodeReserveConflict             = limes.CodeReserveConflict
+	CodeRefundConflict              = limes.CodeRefundConflict
+	CodeOutcomeUnknown              = limes.CodeOutcomeUnknown
 	CodeLeaseExhausted              = limes.CodeLeaseExhausted
 	CodeLeaseRequestsExhausted      = limes.CodeLeaseRequestsExhausted
 	CodeLeaseNotFound               = limes.CodeLeaseNotFound

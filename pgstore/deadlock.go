@@ -6,6 +6,8 @@ import (
 	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
 // sqlDeadlockDetected is PostgreSQL's code for a transaction it aborted to
@@ -37,6 +39,9 @@ const (
 	retriedSettleLease = "SettleLease"
 )
 
+// logKeyError is the error a log line is about.
+const logKeyError = "error"
+
 // retryDeadlock runs call, a meter call's whole transaction, and runs it
 // once more when PostgreSQL aborted it to break a deadlock: every call takes
 // its locks in one order, so none deadlocks another of this version, but
@@ -44,12 +49,20 @@ const (
 // can (docs/adr/0018-fewer-round-trips-per-charge.md). The transaction was
 // rolled back whole, so running it again — onCharged among it — moves
 // nothing twice. A second deadlock is returned.
+//
+// A call whose COMMIT went unanswered (meter.ErrOutcomeUnknown) is not run
+// again: it may have committed, and only its caller knows whether it is
+// keyed. It is logged, as nothing else tells the operator a commit was lost.
 func (c conn) retryDeadlock(ctx context.Context, op string, call func() error) error {
 	err := call()
-	if !isDeadlock(err) {
-		return err
+	if isDeadlock(err) {
+		c.log.WarnContext(ctx, "pgstore: retrying a meter call PostgreSQL aborted to break a deadlock",
+			slog.String(logKeyOp, op), slog.Any(logKeyError, err))
+		err = call()
 	}
-	c.log.WarnContext(ctx, "pgstore: retrying a meter call PostgreSQL aborted to break a deadlock",
-		slog.String(logKeyOp, op), slog.Any("error", err))
-	return call()
+	if errors.Is(err, meter.ErrOutcomeUnknown) {
+		c.log.WarnContext(ctx, "pgstore: lost the answer to a meter call's commit; it may have committed",
+			slog.String(logKeyOp, op), slog.Any(logKeyError, err))
+	}
+	return err
 }

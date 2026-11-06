@@ -103,8 +103,11 @@ type UsageStore struct {
 	byCharge      map[uuid.UUID]int
 	byRef         map[refKey]int
 	byReservation map[uuid.UUID]int
-	records       *Store // lineage and ceilings of ancestors
-	holds         map[uuid.UUID]hold
+	// byRefund indexes each keyed refund (RefundRequest.RefundID) to the
+	// position of its charge, which holds it: it goes with the charge.
+	byRefund map[uuid.UUID]int
+	records  *Store // lineage and ceilings of ancestors
+	holds    map[uuid.UUID]hold
 	// leases are the budget each leaseholder holds of its chain, by its
 	// capability (meter.Leaser).
 	leases map[uuid.UUID]lease
@@ -287,6 +290,17 @@ type ledgerEntry struct {
 	// leaseID is the lease the charge was taken under, and leaseHolder its
 	// capability; uuid.Nil() for a charge of the whole chain.
 	leaseID, leaseHolder uuid.UUID
+	// refunds are the keyed refunds of the charge, by RefundID: kept on
+	// the charge, they leave the ledger with it.
+	refunds map[uuid.UUID]keyedRefund
+}
+
+// keyedRefund is one refund made under a RefundID: what it asked for and
+// what it returned.
+type keyedRefund struct {
+	amount    limes.Nanos
+	remaining bool
+	refunded  limes.Nanos
 }
 
 // StoreConfig configures a Store.
@@ -376,6 +390,7 @@ func NewUsageStore(cfg UsageStoreConfig) (*UsageStore, error) {
 		byCharge:      map[uuid.UUID]int{},
 		byRef:         map[refKey]int{},
 		byReservation: map[uuid.UUID]int{},
+		byRefund:      map[uuid.UUID]int{},
 		records:       cfg.Records,
 		nowFn:         wallClock(cfg.Now),
 	}, nil
@@ -1135,6 +1150,7 @@ func (s *UsageStore) rebuildLedgerLocked(kept []ledgerEntry) {
 	clear(s.byCharge)
 	clear(s.byRef)
 	clear(s.byReservation)
+	clear(s.byRefund)
 	for _, e := range kept {
 		s.indexLocked(e)
 	}
@@ -1151,6 +1167,9 @@ func (s *UsageStore) indexLocked(entry ledgerEntry) {
 	}
 	if entry.ReservationID != uuid.Nil() {
 		s.byReservation[entry.ReservationID] = i
+	}
+	for id := range entry.refunds {
+		s.byRefund[id] = i
 	}
 }
 
@@ -1465,6 +1484,9 @@ func (s *UsageStore) Reserve(_ context.Context, req meter.ReserveRequest) (meter
 	// its row written back.
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if r, keyed, err := s.reservedLocked(req, unit); keyed {
+		return r, err
+	}
 	if err := s.notErasedLocked(req.Subject.TenantID()); err != nil {
 		return meter.Reservation{}, err
 	}
@@ -1488,7 +1510,7 @@ func (s *UsageStore) Reserve(_ context.Context, req meter.ReserveRequest) (meter
 		return meter.Reservation{}, err
 	}
 	h := hold{
-		id:    uuid.New(),
+		id:    cmp.Or(req.ReservationID, uuid.New()),
 		capID: req.Subject.CapabilityID(), ancestors: ancestorIDs(ancestors), tenantID: req.Subject.TenantID(),
 		amount: req.Amount, unit: unit, op: req.Op, actor: req.Actor,
 		expires: expires, copies: req.Subject.Copies(),
@@ -1496,6 +1518,40 @@ func (s *UsageStore) Reserve(_ context.Context, req meter.ReserveRequest) (meter
 	s.applyHoldLocked(h, +1)
 	s.holds[h.id] = h
 	return h.reservation(), nil
+}
+
+// reservedLocked answers a Reserve whose ReservationID is on record
+// already: keyed reports that it is, with the hold again when it was made
+// for req, and ErrReserveConflict when it was made for another request or
+// has been settled. A hold expired and not yet released is still on record,
+// and replays as it is. s.mu must be held.
+func (s *UsageStore) reservedLocked(req meter.ReserveRequest, unit string) (r meter.Reservation, keyed bool, err error) {
+	id := req.ReservationID
+	if id == uuid.Nil() {
+		return meter.Reservation{}, false, nil
+	}
+	if hasKey(s.byReservation, id) {
+		return meter.Reservation{}, true, fmt.Errorf("%w: %s is settled", meter.ErrReserveConflict, id)
+	}
+	h, ok := s.holds[id]
+	if !ok {
+		return meter.Reservation{}, false, nil
+	}
+	if !h.madeFor(req, unit) {
+		return meter.Reservation{}, true, fmt.Errorf("%w: %s", meter.ErrReserveConflict, id)
+	}
+	r = h.reservation()
+	r.Replayed = true
+	return r, true, nil
+}
+
+// madeFor reports whether h is the hold req, in unit, makes: the same
+// subject, copies, amount, unit and attribution.
+func (h hold) madeFor(req meter.ReserveRequest, unit string) bool {
+	subject := req.Subject
+	return h.capID == subject.CapabilityID() && h.tenantID == subject.TenantID() &&
+		sameCopyIDs(copyIDsOf(h.copies), subject.Copies()) &&
+		h.amount == req.Amount && h.unit == unit && h.op == req.Op && h.actor == req.Actor
 }
 
 // holdExpiry is when a hold of capID made now for ttl ends: with its
@@ -1818,16 +1874,47 @@ func (s *UsageStore) Refund(_ context.Context, req meter.RefundRequest) (meter.R
 	}
 	e := &s.ledger[i]
 	receipt := meter.RefundReceipt{ChargeID: e.ID, TenantID: e.TenantID, UnitCode: e.UnitCode}
+	if r, keyed, err := s.refundedLocked(req, receipt); keyed {
+		return r, err
+	}
 	amount, err := refundAmount(*e, req)
 	if err != nil {
 		return meter.RefundReceipt{}, err
 	}
-	if amount == 0 {
-		return receipt, nil
+	if amount > 0 {
+		s.refundLocked(e, amount)
 	}
-	s.refundLocked(e, amount)
+	if req.RefundID != uuid.Nil() {
+		if e.refunds == nil {
+			e.refunds = map[uuid.UUID]keyedRefund{}
+		}
+		e.refunds[req.RefundID] = keyedRefund{amount: req.Amount, remaining: req.Remaining, refunded: amount}
+		s.byRefund[req.RefundID] = i
+	}
 	receipt.Amount = amount
 	return receipt, nil
+}
+
+// refundedLocked answers a Refund whose RefundID is on record already:
+// keyed reports that it is, with the first refund's receipt again when it
+// was of the same charge for the same request, and ErrRefundConflict when
+// not. receipt is the charge's, as this refund would return it. s.mu must
+// be held.
+func (s *UsageStore) refundedLocked(req meter.RefundRequest, receipt meter.RefundReceipt) (meter.RefundReceipt, bool, error) {
+	if req.RefundID == uuid.Nil() {
+		return meter.RefundReceipt{}, false, nil
+	}
+	i, ok := s.byRefund[req.RefundID]
+	if !ok {
+		return meter.RefundReceipt{}, false, nil
+	}
+	e := s.ledger[i]
+	k := e.refunds[req.RefundID]
+	if e.ID != req.ChargeID || k.amount != req.Amount || k.remaining != req.Remaining {
+		return meter.RefundReceipt{}, true, fmt.Errorf("%w: %s", meter.ErrRefundConflict, req.RefundID)
+	}
+	receipt.Amount, receipt.Replayed = k.refunded, true
+	return receipt, true, nil
 }
 
 // refundAmount is what req gives back of the charge e: all that is left of

@@ -104,3 +104,11 @@ whole of v1, as an exported API does. CI builds each nested module's
 newest release, and once it is at v1 every release of its major, against
 limes as it is (`task verify:nested-internals`), and names the internal
 symbol a change broke.
+
+`meter.UsageStore`, which a consumer implements, keeps its method set for
+the whole of v1, and so does each interface it is made of: a method added
+to one breaks every store written against it.
+A capability added later arrives as an interface of its own, optional,
+which a caller discovers by a type assertion on the store, as
+`meter.Leaser`, `meter.CopyUsageReader` and `meter.TenantUsageEraser`
+are; a store without it goes on compiling and serving everything else.

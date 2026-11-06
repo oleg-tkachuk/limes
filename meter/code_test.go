@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -35,6 +36,9 @@ var meterSentinels = map[string]struct {
 	"ErrTenantBudgetVersionMismatch": {ErrTenantBudgetVersionMismatch, CodeTenantBudgetVersionMismatch},
 	"ErrExternalRefConflict":         {ErrExternalRefConflict, CodeExternalRefConflict},
 	"ErrSettleConflict":              {ErrSettleConflict, CodeSettleConflict},
+	"ErrReserveConflict":             {ErrReserveConflict, CodeReserveConflict},
+	"ErrRefundConflict":              {ErrRefundConflict, CodeRefundConflict},
+	"ErrOutcomeUnknown":              {ErrOutcomeUnknown, CodeOutcomeUnknown},
 	"ErrLeaseExhausted":              {ErrLeaseExhausted, CodeLeaseExhausted},
 	"ErrLeaseRequestsExhausted":      {ErrLeaseRequestsExhausted, CodeLeaseRequestsExhausted},
 	"ErrLeaseNotFound":               {ErrLeaseNotFound, CodeLeaseNotFound},
@@ -140,6 +144,9 @@ func TestMeterProblemOf(t *testing.T) {
 	}{
 		"a charge not found":     {fmt.Errorf("refund: %w", ErrChargeNotFound), http.StatusNotFound, CodeChargeNotFound, ""},
 		"a settle conflicting":   {ErrSettleConflict, http.StatusConflict, CodeSettleConflict, ""},
+		"a reserve conflicting":  {ErrReserveConflict, http.StatusConflict, CodeReserveConflict, ""},
+		"a refund conflicting":   {ErrRefundConflict, http.StatusConflict, CodeRefundConflict, ""},
+		"an outcome unknown":     {fmt.Errorf("%w: %w", ErrOutcomeUnknown, io.ErrUnexpectedEOF), http.StatusServiceUnavailable, CodeOutcomeUnknown, ""},
 		"a lease nested":         {ErrLeaseNested, http.StatusConflict, CodeLeaseNested, ""},
 		"a copy past its limit":  {ErrCopyLimitExceeded, http.StatusForbidden, CodeCopyLimitExceeded, limes.ReasonRequestLimitExceeded},
 		"limes's own":            {limes.ErrBudgetExceeded, http.StatusForbidden, limes.CodeBudgetExceeded, limes.ReasonBudgetExceeded},
