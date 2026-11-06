@@ -38,9 +38,15 @@
 // Every call runs in one READ COMMITTED transaction on one connection,
 // whatever the database's default — but for the two revocation checks, each
 // a single statement (see Tenants) — and every time it
-// writes or compares against comes from Config.Now, never from the database's
-// own clock: the store's clock is the one limes measures expiry and purging
-// by, and a database clock beside it would be a second one.
+// writes or compares against comes from Config.Now, but one: with Config.Now
+// nil, the usage store measures holds' and leases' expiry by the database's
+// clock, now(), the time its transaction began. The replicas of a service
+// share the database and not their clocks: one running ahead would release
+// another's live holds as expired, or refuse their Settle with
+// meter.ErrReservationNotFound. A hold's expiry is then the database's time
+// plus its TTL, and Settle, Reserve, Lease, a charge or a bump under a lease
+// and ReleaseExpired decide by it. With Config.Now set, that clock decides
+// expiry too, as a test that moves it needs.
 //
 // Charge and Settle hand onCharged the charge's transaction, which TxFrom
 // reads from its context, so a write of the consumer's commits with the
@@ -273,7 +279,8 @@ type Config struct {
 	// DB is the database, its schema created by migrate.Run. Required: nil, or a
 	// nil pool or connection, is refused at construction.
 	DB DB
-	// Now is the store's clock. Nil: time.Now.
+	// Now is the store's clock. Nil: time.Now, and the database's clock,
+	// now(), for holds' and leases' expiry (see the package documentation).
 	Now func() time.Time
 	// Scope runs first in every transaction the store opens, with the call's
 	// context, and sets what row-level security policies read: nil is
@@ -383,13 +390,17 @@ type conn struct {
 	// meter.ErrOutcomeUnknown (outcomeOf): the usage store's, whose keyed
 	// calls a caller sends again on it.
 	outcomes bool
+	// expiryByDB measures holds' and leases' expiry by the database's clock:
+	// Config.Now was nil.
+	expiryByDB bool
 }
 
 func newConn(cfg Config) (conn, error) {
 	if isNil(cfg.DB) {
 		return conn{}, errNoDB
 	}
-	if cfg.Now == nil {
+	expiryByDB := cfg.Now == nil
+	if expiryByDB {
 		cfg.Now = time.Now
 	}
 	if cfg.Logger == nil {
@@ -416,15 +427,42 @@ func newConn(cfg Config) (conn, error) {
 		db: cfg.DB, txs: txs, now: cfg.Now, scope: cfg.Scope,
 		checkTenant: cfg.CheckTenant, checkScope: cfg.CheckScope,
 		checkReadOnly: checkReadOnly, checkEvery: checkEvery,
-		leases:    !cfg.DisableLeases,
-		maxCopies: int64(cfg.MaxCopiesPerCapability),
-		log:       cfg.Logger,
+		leases:     !cfg.DisableLeases,
+		maxCopies:  int64(cfg.MaxCopiesPerCapability),
+		log:        cfg.Logger,
+		expiryByDB: expiryByDB,
 	}, nil
 }
 
 // clock is the store's time now, to the column's resolution and in UTC.
 func (c conn) clock() time.Time {
 	return c.now().UTC().Truncate(timeResolution)
+}
+
+// sqlNow is the database's time, as of the start of the transaction it runs
+// in: what a call measures holds' and leases' expiry against (asOf).
+const sqlNow = `SELECT now()`
+
+// asOf is the time a call measures holds' and leases' expiry against:
+// dbNow, the database's (sqlNow), when Config.Now is nil, and the store's
+// clock otherwise; to the column's resolution and in UTC.
+func (c conn) asOf(dbNow time.Time) time.Time {
+	if c.expiryByDB {
+		return dbNow.UTC().Truncate(timeResolution)
+	}
+	return c.clock()
+}
+
+// dueAt is the time a statement that finds holds or leases past their
+// expiry measures it against, as $1 of coalesce($1, now()): nil, for the
+// database's own now(), when Config.Now is nil, and the store's clock
+// otherwise.
+func (c conn) dueAt() *time.Time {
+	if c.expiryByDB {
+		return nil
+	}
+	now := c.clock()
+	return &now
 }
 
 // inTx runs fn, a call that writes, in one transaction, scoped first, and

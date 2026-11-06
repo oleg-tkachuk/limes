@@ -58,8 +58,8 @@ func (s *UsageStore) bump(ctx context.Context, tx pgx.Tx, subject limes.MeterSub
 	}
 	// Under a lease of its own or an ancestor's that holds requests, the
 	// bump stops at the leaseholder (docs/adr/0017-budget-leases.md).
-	if holder, below, ok := leaseFor(subject.CapabilityID(), ancestors, p.leases, s.clock(), leaseState.coversBumps); ok {
-		return s.bumpLeased(ctx, tx, subject, ancestors, below, holder, p.leases[holder])
+	if holder, below, ok := leaseFor(subject.CapabilityID(), ancestors, p.leases, s.asOf(p.now), leaseState.coversBumps); ok {
+		return s.bumpLeased(ctx, tx, subject, ancestors, below, holder, p.leases[holder], s.asOf(p.now))
 	}
 	c, err := lock(ctx, tx, lockRequest{
 		now:     s.clock(),
@@ -260,8 +260,8 @@ func (s *UsageStore) charge(ctx context.Context, tx pgx.Tx, req meter.ChargeRequ
 	}
 	// Under a lease of its own or an ancestor's, the charge stops at the
 	// leaseholder (docs/adr/0017-budget-leases.md).
-	if holder, below, ok := leaseFor(req.Subject.CapabilityID(), ancestors, p.leases, s.clock(), leaseState.coversCharges); ok {
-		return s.chargeLeased(ctx, tx, req, unit, ancestors, below, holder, p.leases[holder], onCharged)
+	if holder, below, ok := leaseFor(req.Subject.CapabilityID(), ancestors, p.leases, s.asOf(p.now), leaseState.coversCharges); ok {
+		return s.chargeLeased(ctx, tx, req, unit, ancestors, below, holder, p.leases[holder], s.asOf(p.now), onCharged)
 	}
 	spec := chargeSpec{
 		capID: req.Subject.CapabilityID(), tenantID: req.Subject.TenantID(), budget: req.Subject.Budget(),
@@ -751,7 +751,7 @@ func (s *UsageStore) reserve(ctx context.Context, tx pgx.Tx, req meter.ReserveRe
 			return r, err
 		}
 	}
-	ancestors, err := readLineage(ctx, tx, subject.TenantID(), subject.CapabilityID())
+	ancestors, dbNow, err := readLineage(ctx, tx, subject.TenantID(), subject.CapabilityID())
 	if err != nil {
 		return meter.Reservation{}, err
 	}
@@ -773,7 +773,7 @@ func (s *UsageStore) reserve(ctx context.Context, tx pgx.Tx, req meter.ReserveRe
 		return meter.Reservation{}, err
 	}
 	now := s.clock()
-	expires, err := holdExpiry(ctx, tx, subject.CapabilityID(), now, cmp.Or(req.TTL, meter.DefaultReservationTTL))
+	expires, err := holdExpiry(ctx, tx, subject.CapabilityID(), s.asOf(dbNow), cmp.Or(req.TTL, meter.DefaultReservationTTL))
 	if err != nil {
 		return meter.Reservation{}, err
 	}
@@ -848,7 +848,7 @@ func (s *UsageStore) Settle(ctx context.Context, req meter.SettleRequest, onChar
 	var receipt meter.ChargeReceipt
 	err := s.retryDeadlock(ctx, retriedSettle, func() error {
 		return s.inTenantTx(ctx, req.Subject.TenantID(), func(tx pgx.Tx) error {
-			h, err := scanHold(tx.QueryRow(ctx, sqlLockHold, req.ReservationID))
+			h, dbNow, err := lockHoldAt(ctx, tx, req.ReservationID)
 			if errors.Is(err, pgx.ErrNoRows) {
 				receipt, err = settled(ctx, tx, req)
 				return err
@@ -856,7 +856,7 @@ func (s *UsageStore) Settle(ctx context.Context, req meter.SettleRequest, onChar
 			if err != nil {
 				return err
 			}
-			if !s.holdServes(h, req.Subject) {
+			if !holdServes(h, req.Subject, s.asOf(dbNow)) {
 				return meter.ErrReservationNotFound
 			}
 			receipt, err = s.settleHold(ctx, tx, req, h, onCharged)
@@ -885,11 +885,28 @@ func settled(ctx context.Context, tx pgx.Tx, req meter.SettleRequest) (meter.Cha
 	return replay(ctx, tx, e)
 }
 
-// holdServes reports whether h is a live hold of subject's, under the
-// copies subject presents.
-func (s *UsageStore) holdServes(h hold, subject limes.MeterSubject) bool {
+// lockHoldAt locks and reads the hold id, with the database's time
+// (sqlNow), in one batch; pgx.ErrNoRows when there is none.
+func lockHoldAt(ctx context.Context, tx pgx.Tx, id uuid.UUID) (hold, time.Time, error) {
+	b := &pgx.Batch{}
+	b.Queue(sqlNow)
+	b.Queue(sqlLockHold, id)
+	br := tx.SendBatch(ctx, b)
+	var dbNow time.Time
+	h, err := func() (hold, error) {
+		if err := br.QueryRow().Scan(&dbNow); err != nil {
+			return hold{}, err
+		}
+		return scanHold(br.QueryRow())
+	}()
+	return h, dbNow, errors.Join(err, br.Close())
+}
+
+// holdServes reports whether h is a hold of subject's live at asOf, under
+// the copies subject presents.
+func holdServes(h hold, subject limes.MeterSubject, asOf time.Time) bool {
 	return h.capID == subject.CapabilityID() && h.tenantID == subject.TenantID() &&
-		h.expires.After(s.clock()) && sameCopyIDs(copyIDs(h.copies), subject.Copies())
+		h.expires.After(asOf) && sameCopyIDs(copyIDs(h.copies), subject.Copies())
 }
 
 // settleHold charges req against the hold h it settles, and deletes the

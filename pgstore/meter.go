@@ -163,12 +163,15 @@ type prelude struct {
 	// leases are the leases held on the chain, by capability, when the
 	// prelude was asked for them: read, not locked.
 	leases map[uuid.UUID]leaseState
+	// now is the database's time (sqlNow), which conn.asOf measures expiry
+	// against.
+	now time.Time
 }
 
 // readPrelude shares tenant's erase lock and refuses it erased, reads the
-// charge on record under capID's ref, when ref is not empty, and capID's
-// lineage holding its records, in one batch: what notErased, a replay's
-// lookup and lineage read one at a time.
+// charge on record under capID's ref, when ref is not empty, capID's
+// lineage holding its records, and the database's time, in one batch: what
+// notErased, a replay's lookup and lineage read one at a time.
 func readPrelude(ctx context.Context, tx pgx.Tx, tenant, capID uuid.UUID, ref string, leases bool) (prelude, error) {
 	b := &pgx.Batch{}
 	b.Queue(sqlShareTenantLock, eraseLockClass, tenant)
@@ -180,6 +183,7 @@ func readPrelude(ctx context.Context, tx pgx.Tx, tenant, capID uuid.UUID, ref st
 	if leases {
 		b.Queue(sqlLeasesOnChain, capID, limes.MaxDelegationDepth)
 	}
+	b.Queue(sqlNow)
 	br := tx.SendBatch(ctx, b)
 	p, err := readPreludeResults(br, tenant, capID, ref, leases)
 	return p, errors.Join(err, br.Close())
@@ -223,17 +227,17 @@ func readPreludeResults(br pgx.BatchResults, tenant, capID uuid.UUID, ref string
 			return p, err
 		}
 	}
-	return p, nil
+	return p, br.QueryRow().Scan(&p.now)
 }
 
-// readLineage is readPrelude with no reference: tenant not erased, and
-// capID's lineage.
-func readLineage(ctx context.Context, tx pgx.Tx, tenant, capID uuid.UUID) ([]ancestor, error) {
+// readLineage is readPrelude with no reference: tenant not erased, capID's
+// lineage, and the database's time.
+func readLineage(ctx context.Context, tx pgx.Tx, tenant, capID uuid.UUID) ([]ancestor, time.Time, error) {
 	p, err := readPrelude(ctx, tx, tenant, capID, "", false)
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
-	return p.ancestors, p.lineageErr
+	return p.ancestors, p.now, p.lineageErr
 }
 
 // heldLineage is capID's ancestors among held, sqlLineageHeld's rows,

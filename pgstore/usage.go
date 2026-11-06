@@ -885,13 +885,14 @@ func readTenantPlace(fields []string) (tenantPlace, bool) {
 }
 
 const (
-	// sqlDueHolds reads the soonest holds past their expiry, and locks them
-	// in id order, the order every call that locks several takes.
+	// sqlDueHolds reads the soonest holds past their expiry at $1 — the
+	// database's now() when $1 is NULL (conn.dueAt) — at most $2, and locks
+	// them in id order, the order every call that locks several takes.
 	sqlDueHolds = `
 SELECT ` + sqlHoldColumns + ` FROM limes.reservations
 WHERE id IN (
     SELECT id FROM limes.reservations
-    WHERE expires_at <= $1
+    WHERE expires_at <= coalesce($1::timestamptz, now())
     ORDER BY expires_at, id
     LIMIT $2)
 ORDER BY id
@@ -949,7 +950,7 @@ func (s *UsageStore) ReleaseExpired(ctx context.Context, req meter.ReleaseExpire
 	limit := meter.HousekeepingLimit(req.Limit)
 	var released int64
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
-		holds, err := collectHolds(ctx, tx, sqlDueHolds, s.clock(), limit)
+		holds, err := collectHolds(ctx, tx, sqlDueHolds, s.dueAt(), limit)
 		if err != nil {
 			return err
 		}
@@ -962,7 +963,7 @@ func (s *UsageStore) ReleaseExpired(ctx context.Context, req meter.ReleaseExpire
 	if err != nil {
 		return meter.ReleaseExpiredResult{}, err
 	}
-	settled, _, err := s.settleEach(ctx, func(fn func(pgx.Tx) error) error { return s.inTx(ctx, fn) }, sqlDueLeases, s.clock(), limit)
+	settled, _, err := s.settleEach(ctx, func(fn func(pgx.Tx) error) error { return s.inTx(ctx, fn) }, sqlDueLeases, s.dueAt(), limit)
 	res := meter.ReleaseExpiredResult{Released: released, SettledLeases: int64(len(settled))}
 	return res, err
 }
