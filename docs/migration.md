@@ -70,6 +70,27 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## v0.168.0
+
+- A proof refused because its holder has no room left in the replay
+  cache is `dpop.ErrReplayQuota`, code `proof_quota_exceeded`, answered
+  429 in category `exhausted` with no challenge, where it was
+  `dpop.ErrReplayed`, `proof_replayed`, 401 `invalid_dpop_proof`. A
+  `dpop.ReplayCache` of your own refuses such an id by returning an error
+  wrapping `dpop.ErrReplayQuota`, which `dpop/dpoptest.RunReplayCache` now
+  requires; one that still reports it as seen is read as a replay. A
+  client mapping by category retries `exhausted` later; one branching on
+  `proof_replayed` no longer sees this case there.
+
+## exchange/v0.19.0
+
+- A token request whose client has no room left in the replay cache is
+  answered 429 `temporarily_unavailable`, where it was 400
+  `invalid_dpop_proof` "used before": `exchange.ErrorOf` and
+  `exchange.ErrorCodes` name the new code. The holder at the token
+  endpoint is the client, so with the defaults one client passes about 15
+  DPoP-bound exchanges a second ([guide](guide.md#the-replay-caches-share-caps-a-holders-rate)).
+
 ## pgstore/v0.68.0
 
 - The schema is at version 41. Migration 041 creates `limes.refunds`, the
@@ -97,12 +118,6 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
   register them with limes, which no longer holds a table of them: this
   release needs limes `v0.167.0` or later, and limes `v0.167.0` needs this
   release to answer the exchange's codes.
-- A token request whose client has no room left in the replay cache is
-  answered 429 `temporarily_unavailable`, where it was 400
-  `invalid_dpop_proof` "used before": `exchange.ErrorOf` and
-  `exchange.ErrorCodes` name the new code. The holder at the token
-  endpoint is the client, so with the defaults one client passes about 15
-  DPoP-bound exchanges a second ([guide](guide.md#the-replay-caches-share-caps-a-holders-rate)).
 
 ## redisreplay/v0.4.0
 
@@ -135,15 +150,6 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
   `github.com/oleg-tkachuk/limes/exchange` with limes. A consumer's
   `limestest` check without the exchange linked in no longer needs
   `limestest.WithoutExchange`.
-- A proof refused because its holder has no room left in the replay
-  cache is `dpop.ErrReplayQuota`, code `proof_quota_exceeded`, answered
-  429 in category `exhausted` with no challenge, where it was
-  `dpop.ErrReplayed`, `proof_replayed`, 401 `invalid_dpop_proof`. A
-  `dpop.ReplayCache` of your own refuses such an id by returning an error
-  wrapping `dpop.ErrReplayQuota`, which `dpop/dpoptest.RunReplayCache` now
-  requires; one that still reports it as seen is read as a replay. A
-  client mapping by category retries `exhausted` later; one branching on
-  `proof_replayed` no longer sees this case there.
 
 ## pgstore/v0.67.0
 
