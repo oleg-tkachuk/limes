@@ -922,8 +922,8 @@ subject and tenant; no line holds a token, a key or a proof.
 
 A refusal of a genuine token is worth a warning: only its holder can cause
 one. Garbage costs anyone nothing to send, so it stays at DEBUG, where a
-flood of it fills no log. Each line carries `op`, and a refusal its `code`,
-`reason` and `error`.
+flood of it fills no log. Each line carries `op` and `duration`, the call's
+elapsed time, and a refusal its `code`, `reason` and `error`.
 
 A revocation's line names the capability, or a bulk revoke's tenant and
 selectors, with the request's `actor` and `note`, and what the store
@@ -937,9 +937,16 @@ with `ErrInvalidConfig`, logged at ERROR.
 call back beside the log, for metrics or an audit sink: `OnIssued`,
 `OnRefused` and `OnFailed`; `OnVerified`, `OnRefused` and `OnFailed`;
 `OnRevoked`, `OnRefused` and `OnFailed`. Every callback is
-optional and takes one event struct, so a field added later breaks none.
-They run on the caller's goroutine before the method returns: a callback
-must not block, and must not panic.
+optional and takes one event struct, so a field added later breaks none;
+each event carries `Duration`, the call's elapsed time on the monotonic
+clock. They run on the caller's goroutine before the method returns: a
+callback must not block, and must not panic.
+
+The callbacks are independent: each outcome calls exactly one, and a nil
+one drops its events silently. An audit consumer that must see every call
+sets every callback of the side it audits, not only the one it counts.
+[ADR-0021](adr/0021-observing-issuer-and-verifier.md) records why the hooks
+take this shape.
 
 ```go
 verifier, err := limes.NewVerifier(limes.VerifierConfig{
