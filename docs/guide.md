@@ -1949,6 +1949,24 @@ verifies its provider's tokens, on go-oidc and go-jose say, implements
 library of its own ([ADR-0010](adr/0010-exchange-jose-subpackage.md)).
 `exchangetest.TestSubjectVerifier` holds such a verifier to the contract.
 
+A `Policy` answers each grant with an `exchange.Decision`: the capability to
+issue, and the scopes it grants of those asked, which the token response
+states as its `scope`. Nothing is granted that the policy does not name: a
+policy granting every scope asked says so.
+
+```go
+func policy(ctx context.Context, g exchange.Grant) (exchange.Decision, error) {
+	return exchange.Decision{Issue: limes.IssueRequest{ /* … */ }, Scopes: g.Scopes}, nil
+}
+```
+
+A request that asked for scopes and is granted none is refused with
+`invalid_scope`, since a response without `scope` would state every scope
+asked (RFC 8693 §2.2.1); one that asked for none is answered without
+`scope`. A scope the request did not ask for is the policy's fault,
+answered `server_error`. A `NarrowPolicy`'s `NarrowDecision.Scopes` is held
+the same way.
+
 By default each exchange issues a capability of its own, with ceilings of
 its own: right for a client that exchanges once and keeps the result. A
 service that exchanges where it receives the token — an MCP server that

@@ -358,7 +358,7 @@ at an RFC 8693 token endpoint (`Handler`):
 `TestRemoteKeysServeAStaleSetForABoundedTime`,
 `TestJWTVerifierKeepsTheContract`, `TestIntrospectionActive`,
 `TestIntrospectionInactive`, `TestIntrospectionOutage`, `TestIntrospectionHoldsACopyToItsLimits`, `TestIntrospectionHoldsTheClientToItsAudiences`, `TestIntrospectionIsClosedByDefault`,
-`TestHandlerAnswersTheScopesGranted`, `TestExchangeHoldsTheGrantedScopes`,
+`TestHandlerAnswersTheScopesGranted`, `TestHandlerAnswersNoScopeGranted`, `TestExchangeHoldsTheGrantedScopes`,
 `TestEffectiveCaveats`, `TestIntrospectHoldsACopyToItsLimits`, `TestIntrospectActive`,
 `TestIntrospectInactive`, `TestIntrospectOutageIsNotInactive`, `TestMarshalCaveatsIsTheClaim`, and the fuzz target
 `FuzzCheckForm`, in `exchange`; and the `mcp-exchange` example.
