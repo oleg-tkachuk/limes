@@ -70,7 +70,7 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
-## pgstore/v0.70.0
+## pgstore/v0.69.1
 
 - `UsageStore.Reserve` and `Lease` refuse a capability with
   `limes.ErrExpired` only once the store's clock is past its record's
@@ -81,7 +81,8 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
   with `Config.Now` nil — so a token a verifier still accepted within its
   leeway was refused, or held until an instant already past. A consumer
   that relied on the store to refuse an expired token checks it at the
-  verifier, as `Verify` does.
+  verifier, as `Verify` does. A patch release, it carried this break all
+  the same, so it is listed here.
 
 ## exchange/v0.21.0
 
