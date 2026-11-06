@@ -104,11 +104,26 @@ describe("brokenSymbols", () => {
 
 describe("failure", () => {
   test("names the module, the tag, the command and the symbols", () => {
-    const v = failure("exchange", "exchange/v1.0.0", ["build", "./..."], "./e.go:1:1: undefined: errs.Errorf\n", [`${LIMES_MODULE}/internal/errs`]);
+    const v = failure("exchange", "exchange/v1.0.0", ["build", "./..."], "./e.go:1:1: undefined: errs.Errorf\n", [`${LIMES_MODULE}/internal/errs`], true);
     assert.equal(v.ok, false);
     assert.match(v.message, /^exchange: exchange\/v1\.0\.0 no longer passes go build \.\/\.\.\. against this limes — the internal symbols it uses: errs\.Errorf\n/);
     assert.match(v.message, /undefined: errs\.Errorf$/);
-    assert.match(failure("exchange", "exchange/v1.0.0", ["vet", "./..."], "boom", []).message, /no internal symbol named/);
+    assert.match(failure("exchange", "exchange/v1.0.0", ["vet", "./..."], "boom", [], true).message, /no internal symbol named/);
+  });
+
+  test("fails a stable release on an exported break", () => {
+    assert.equal(failure("pgstore", "pgstore/v1.0.0", ["build", "./..."], "./w.go:1:1: undefined: limes.Gone", [], true).ok, false);
+  });
+
+  test("passes a release before v1 that only an exported break refuses", () => {
+    const v = failure("pgstore", "pgstore/v0.67.0", ["build", "./..."], "./w.go:1:1: not enough arguments in call to c.Listening", [], false);
+    assert.equal(v.ok, true);
+    assert.match(v.message, /allowed before v1/);
+  });
+
+  test("fails a release before v1 on an internal break", () => {
+    const v = failure("exchange", "exchange/v0.18.0", ["build", "./..."], "./e.go:1:1: undefined: errs.Errorf", [`${LIMES_MODULE}/internal/errs`], false);
+    assert.equal(v.ok, false);
   });
 });
 
