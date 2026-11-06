@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, test } from "node:test";
 
 import { CHANGELOG, TITLE } from "./changelog.ts";
 import { fakeData, fakeGitHub, type FakeData } from "./lib/fake-github.ts";
+import { releaseCommits } from "./lib/modules.ts";
+import type { Policy } from "./lib/release-policy.ts";
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
 import { followWithCandidate, tagReleases, type Tagger } from "./release-tag.ts";
 
@@ -15,6 +17,12 @@ const PGSTORE = "pgstore";
 const IDENTITY = ["-c", "user.name=test", "-c", "user.email=test@example.invalid"];
 // NO_PAUSE: the Go proxy is asked once, with no wait.
 const NO_PAUSE = 0;
+// MERGE_MESSAGE is the release pull request's merge commit's subject.
+const MERGE_MESSAGE = "Merge pull request #1 from example/release/next";
+// EVERY_COMMIT_DUE makes a module due on its first pending commit;
+// NEVER_DUE, on none.
+const EVERY_COMMIT_DUE: Policy = { minorCommits: 1, patchCommits: 1, immediateTypes: [] };
+const NEVER_DUE: Policy = { minorCommits: 99, patchCommits: 99, immediateTypes: [] };
 
 // changelog is a changelog of entries, newest first.
 function changelog(...entries: string[]): string {
@@ -46,7 +54,7 @@ describe("tagReleases", () => {
     repo.write(`${PGSTORE}/${CHANGELOG}`, changelog("## [0.1.1](d)\n\n* require limes v0.2.0", "## [0.1.0](b)"));
     await repo.commit("chore(release): v0.2.0, pgstore/v0.1.1");
     await repo.run("switch", "--quiet", "main");
-    await repo.run(...IDENTITY, "merge", "--quiet", "--no-ff", "-m", "Merge pull request #1 from example/release/next", "release/next");
+    await repo.run(...IDENTITY, "merge", "--quiet", "--no-ff", "-m", MERGE_MESSAGE, "release/next");
     release = (await repo.run("rev-parse", "HEAD")).trim();
     repo.write("later.go", "package limes\n");
     await repo.commit("feat: later");
@@ -59,8 +67,10 @@ describe("tagReleases", () => {
   });
   afterEach(() => repo.cleanup());
 
-  function tagger(): Tagger {
+  function tagger(policy: Policy = NEVER_DUE): Tagger {
     return {
+      commits: releaseCommits(),
+      policy,
       github: fakeGitHub(data),
       repository: REPOSITORY,
       root: repo.dir,
@@ -87,6 +97,44 @@ describe("tagReleases", () => {
       ],
     );
     assert.equal(proxied.length, 2);
+  });
+
+  // mergedAfter merges the release pull request again, from main as it was
+  // before its merge with each of changes committed first: path and subject.
+  async function mergedAfter(...changes: [string, string][]): Promise<void> {
+    await repo.run("reset", "--quiet", "--hard", `${release}^1`);
+    for (const [path, subject] of changes) {
+      repo.write(path, `${subject}\n`);
+      await repo.commit(subject);
+    }
+    await repo.run(...IDENTITY, "merge", "--quiet", "--no-ff", "-m", MERGE_MESSAGE, "release/next");
+  }
+
+  const initialTags = ["v0.1.0", `${PGSTORE}/v0.1.0`];
+
+  test("refuses a plan merged after a commit that releases a module of it, and tags nothing", async () => {
+    await mergedAfter([`${PGSTORE}/break.go`, `fix(${PGSTORE})!: a break after the plan`]);
+    await assert.rejects(tagReleases(tagger()), (err: Error) => {
+      assert.match(err.message, /fix\(pgstore\)!: a break after the plan/);
+      assert.match(err.message, /pgstore\/v0\.1\.1/);
+      assert.match(err.message, /which the plan releases/);
+      assert.match(err.message, /Revert the release pull request's merge/);
+      return true;
+    });
+    assert.deepEqual([...data.tags], initialTags, "no tag is pushed");
+    assert.equal((await repo.run("tag", "--list", "v0.2.0", `${PGSTORE}/v0.1.1`)).trim(), "", "no tag is made");
+    assert.deepEqual(data.published, []);
+  });
+
+  test("refuses a plan merged after a commit that makes a module it leaves out due", async () => {
+    await mergedAfter(["otelmetric/fix.go", "fix(otelmetric): a fix after the plan"]);
+    await assert.rejects(tagReleases(tagger(EVERY_COMMIT_DUE)), /fix\(otelmetric\): a fix after the plan.*leaves out and it makes due/);
+    assert.deepEqual([...data.tags], initialTags);
+  });
+
+  test("tags a plan merged after commits that release nothing, or leave a module out of it short of due", async () => {
+    await mergedAfter(["README.md", "docs: a word"], ["tools/x.txt", "chore: a chore"], ["otelmetric/fix.go", "fix(otelmetric): a fix"]);
+    assert.deepEqual(await tagReleases(tagger(NEVER_DUE)), ["v0.2.0", `${PGSTORE}/v0.1.1`]);
   });
 
   test("tags nothing once every entry is tagged", async () => {

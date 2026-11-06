@@ -169,8 +169,9 @@ jobs:
       # The releases a merged release pull request planned, each tagged on
       # the commit that merged it with the deploy key, published with its
       # changelog entry as its notes, and the Go proxy told of it; a nested
-      # module no tag names yet has its release line started first. See
-      # .github/ci/release-tag.ts.
+      # module no tag names yet has its release line started first. A plan
+      # merged after a commit it did not count tags nothing and fails the
+      # run. See .github/ci/release-tag.ts.
       - name: Tag the planned releases
         id: tag
         if: steps.catchup.outputs.release == 'true' && (inputs.channel || 'release') == 'release'

@@ -15,6 +15,16 @@
 // follows counts its commits from there. Last, the releases an earlier run
 // tagged and never published are published.
 //
+// A plan merged stale is refused, before any tag is made or pushed
+// (lib/stale-plan.ts): when main, as the release pull request's merge found
+// it, holds a commit since the plan's base that releases a module in the
+// plan, or makes one it leaves out due, the versions the plan wrote are not
+// those of the code its merge holds. release-stale.ts drafts such a pull
+// request while it is open; this catches one made ready by hand. The run
+// fails naming the commits; the release merge is reverted, and the next
+// plan counts them. A merge whose shape is not a release commit merged into
+// main cannot be judged, and is tagged as before, with a warning.
+//
 // A release of limes while a line of candidates of its next major is open
 // sets the step output follow-candidate, and release.yaml cuts the next
 // candidate after it: Go orders every v1.0.0-rc.N above every 0.x, so a
@@ -22,18 +32,19 @@
 // fix in it would reach no one on the candidates.
 
 import { changelogPath, entryVersion, newestEntry } from "./changelog.ts";
-import { info, notice, setOutput, summarize } from "./lib/actions.ts";
+import { info, notice, setOutput, summarize, warning } from "./lib/actions.ts";
 import { withDeployKey } from "./lib/deploy-key.ts";
 import { requireEnv } from "./lib/env.ts";
 import { git } from "./lib/git.ts";
 import { gitHubFor, type GitHub } from "./lib/github.ts";
 import { runMain } from "./lib/main.ts";
 import { compareVersions } from "./lib/go-modules.ts";
-import { ROOT_MODULE, releasedModules, selectModule, type Module } from "./lib/modules.ts";
+import { ROOT_MODULE, releaseCommits, releasedModules, selectModule, type Module, type ReleaseCommits } from "./lib/modules.ts";
 import { candidateLineOpen } from "./lib/prerelease.ts";
-import { lastStableTag } from "./lib/release-policy.ts";
+import { lastStableTag, loadPolicy, type Policy } from "./lib/release-policy.ts";
 import { publish, publishLeftBehind, warmGoProxy, type Fetch } from "./lib/releases.ts";
 import { seedLine } from "./lib/seed.ts";
+import { parentsOf, planBaseOf, short, staleLines, staleModules } from "./lib/stale-plan.ts";
 
 // Tagger is what tagging needs, its effects injected so a test can stand in
 // for GitHub, the push and the Go proxy.
@@ -46,6 +57,10 @@ export interface Tagger {
   pauseMs?: number;
   // pushTag pushes a tag made in the checkout.
   pushTag(tag: string): Promise<void>;
+  // commits and policy judge whether a merged plan is stale, as the plan
+  // counts.
+  commits: ReleaseCommits;
+  policy: Policy;
 }
 
 // Planned is one release a merged changelog entry asks for.
@@ -87,9 +102,48 @@ async function bringing(root: string, module: Module): Promise<string> {
   return (await git(["log", "--first-parent", "-1", "--format=%H", "HEAD", "--", changelogPath(module)], root)).trim();
 }
 
+// MERGE_PARENTS is how many parents a release pull request's merge has:
+// main before it, then the release commit.
+const MERGE_PARENTS = 2;
+
+// refuseStale fails when the merge that brought any of planned merged a
+// stale plan (lib/stale-plan.ts), naming what staled it.
+async function refuseStale(t: Tagger, planned: readonly Planned[]): Promise<void> {
+  const problems: string[] = [];
+  for (const merge of new Set(planned.map((p) => p.commit))) {
+    const tags = planned.filter((p) => p.commit === merge).map((p) => p.tag);
+    const parents = await parentsOf(merge, t.root);
+    const [before, release] = parents;
+    if (parents.length !== MERGE_PARENTS || before === undefined || release === undefined) {
+      warning(`${short(merge)}, which brought ${tags.join(", ")}, is no merge of a release commit: whether its plan is stale cannot be told`);
+      continue;
+    }
+    const based = await planBaseOf(release, before, t.root);
+    if (based.base === undefined) {
+      warning(`${short(merge)}, which brought ${tags.join(", ")}: ${based.unknown}; whether its plan is stale cannot be told`);
+      continue;
+    }
+    const staled = await staleModules({ root: t.root, release, base: based.base, head: before, commits: t.commits, policy: t.policy });
+    if (staled.length === 0) {
+      info(`${short(merge)}: its plan, from ${short(based.base)}, is current with main as it merged, ${short(before)}`);
+      continue;
+    }
+    problems.push(
+      `${short(merge)} merged a plan of ${tags.join(", ")} made from ${short(based.base)}, but main was at ${short(before)} when it merged, past commits the plan never counted:\n${staleLines(staled).join("\n")}`,
+    );
+  }
+  if (problems.length > 0) {
+    throw new Error(
+      `${problems.join("\n\n")}\n\nThose versions are stale, so nothing is tagged. Revert the release pull request's merge on main; the plan is made again after the revert's CI passes, counting these commits.`,
+    );
+  }
+}
+
 // tagReleases tags and publishes each release the changelogs ask for, then
-// what earlier runs left unpublished, and returns the tags it cut.
+// what earlier runs left unpublished, and returns the tags it cut. A stale
+// plan tags nothing, not even a seeded line.
 export async function tagReleases(t: Tagger): Promise<string[]> {
+  await refuseStale(t, await plannedReleases(t.root));
   for (const name of releasedModules(t.root)) {
     const seeded = await seedLine(t.root, selectModule(t.root, name), t.pushTag);
     if (seeded !== undefined) {
@@ -129,7 +183,15 @@ async function main(): Promise<void> {
   const github = gitHubFor(requireEnv("GH_TOKEN"), repository);
   const root = (await git(["rev-parse", "--show-toplevel"])).trim();
   const tags = await withDeployKey(repository, (push) =>
-    tagReleases({ github, repository, root, fetchInfo: (url) => fetch(url), pushTag: async (tag) => void (await git(["push", "--quiet", push, `refs/tags/${tag}`], root)) }),
+    tagReleases({
+      github,
+      repository,
+      root,
+      fetchInfo: (url) => fetch(url),
+      pushTag: async (tag) => void (await git(["push", "--quiet", push, `refs/tags/${tag}`], root)),
+      commits: releaseCommits(),
+      policy: loadPolicy(root),
+    }),
   );
   if (tags.length === 0) {
     notice("no release planned is waiting for its tag");
