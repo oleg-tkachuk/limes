@@ -2,6 +2,7 @@ package pgstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -9,6 +10,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/internal/errs"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
 // txKey keys the transaction a charge commits on in the context onCharged
@@ -16,7 +19,7 @@ import (
 type txKey struct{}
 
 // ErrChargeTransaction is onCharged committing or rolling back the charge's
-// transaction, which is the store's to end: the charge is written after
+// transaction, which is the store's to end: the charge is committed after
 // onCharged returns, on the same transaction.
 var ErrChargeTransaction = fmt.Errorf("%w: pgstore: the charge's transaction is the store's to commit or roll back", limes.ErrInvalidRequest)
 
@@ -26,15 +29,23 @@ var ErrChargeTransaction = fmt.Errorf("%w: pgstore: the charge's transaction is 
 // none, and TxFrom reports false; no other method of this package reads a
 // transaction from its context.
 //
+// The charge's writes are in it already, the ledger row among them, and its
+// locks held: every counter on the chain and the tenant's aggregate, which
+// every other charge of the tenant waits for until onCharged returns and
+// the store commits. onCharged keeps to statements on this database, and
+// short ones; a network call there holds the tenant's charges for as long.
+//
 // The transaction is onCharged's while onCharged runs, and no longer: once
 // it returns, every call on it, from any goroutine, fails with
 // pgx.ErrTxClosed, and a call still running then is waited for before the
-// store writes the charge. Calls are taken one at a time, as a pgx.Tx needs.
+// store commits the charge. Calls are taken one at a time, as a pgx.Tx needs.
 // Commit and Rollback return ErrChargeTransaction; a savepoint (Begin) is
 // onCharged's to end. Conn is nil, as the connection is the store's, and a
 // charge whose transaction onCharged ended with SQL of its own — COMMIT,
 // ROLLBACK, or either followed by BEGIN — is refused with
-// ErrChargeTransaction.
+// ErrChargeTransaction and meter.ErrOutcomeUnknown: the charge's writes
+// went before onCharged, so that COMMIT committed them, and that ROLLBACK
+// undid them.
 func TxFrom(ctx context.Context) (pgx.Tx, bool) {
 	tx, ok := ctx.Value(txKey{}).(*callbackTx)
 	if !ok {
@@ -184,35 +195,60 @@ func (t *callbackTx) Conn() *pgx.Conn { return nil }
 // connection in an open transaction block (ReadyForQuery 'T').
 const txStatusInTransaction = 'T'
 
-// sqlCurrentXact is the id of the transaction the statement runs in,
-// assigned first if it has none yet.
-const sqlCurrentXact = `SELECT pg_current_xact_id()::text`
+// settingCharging marks the transaction a charge's writes went in, for the
+// rest of it: a transaction onCharged ended and began again with SQL of its
+// own does not carry it.
+const settingCharging = "limes.charging"
 
-// currentXact is the id of tx's transaction, which stillOpen compares once
-// onCharged returns.
-func currentXact(ctx context.Context, tx pgx.Tx) (string, error) {
-	var xact string
-	err := tx.QueryRow(ctx, sqlCurrentXact).Scan(&xact)
-	return xact, err
-}
+const (
+	// sqlMarkCharge sets settingCharging to $1, local to the transaction,
+	// with the charge's writes.
+	sqlMarkCharge = `SELECT set_config('` + settingCharging + `', $1, true)`
 
-// stillOpen refuses a charge whose transaction onCharged ended with SQL of
-// its own — COMMIT, ROLLBACK, or either followed by BEGIN in the same
-// statement — rather than through the Tx, which refuses: what the store
-// writes next would no longer commit with the charge, nor under the locks
-// it took. xact is the transaction's id before onCharged ran.
-func stillOpen(ctx context.Context, tx pgx.Tx, xact string) error {
-	if status := tx.Conn().PgConn().TxStatus(); status != txStatusInTransaction {
-		return fmt.Errorf("%w: onCharged ended it (status %q)", ErrChargeTransaction, status)
+	// sqlChargeStillOpen fails, dividing by zero, unless the transaction is
+	// still the one sqlMarkCharge marked $1: one that does not fail lets the
+	// COMMIT queued after it commit the charge, and one that does aborts it.
+	// The divisor reads a setting, never folded into a constant, so the
+	// statement fails only when it runs.
+	sqlChargeStillOpen = `SELECT 1 / (coalesce(current_setting('` + settingCharging + `', true), '') = $1)::int`
+
+	// sqlStateDivisionByZero is the SQLSTATE sqlChargeStillOpen fails with.
+	sqlStateDivisionByZero = "22012"
+)
+
+// endCharged ends a charge whose writes were sent, marked mark, before
+// onCharged ran: it refuses one whose transaction onCharged ended with SQL
+// of its own — COMMIT, ROLLBACK, or either followed by BEGIN in the same
+// statement — rather than through the Tx, which refuses, and otherwise
+// sends COMMIT when last, in one batch with the check (sqlChargeStillOpen).
+//
+// The charge's writes went before onCharged, so its COMMIT committed them
+// and its ROLLBACK undid them, under locks it no longer held: which one ran
+// is not known to the store, and the call fails as meter.ErrOutcomeUnknown
+// too. One that left the transaction failed, without ending it, committed
+// nothing.
+func endCharged(ctx context.Context, tx pgx.Tx, mark string, last bool) error {
+	switch status := tx.Conn().PgConn().TxStatus(); status {
+	case txStatusInTransaction:
+	case txStatusIdle:
+		return errs.Errorf("%w: %w: onCharged ended it", meter.ErrOutcomeUnknown, ErrChargeTransaction)
+	default:
+		return fmt.Errorf("%w: onCharged left it failed (status %q)", ErrChargeTransaction, status)
 	}
-	now, err := currentXact(ctx, tx)
-	if err != nil {
-		return err
+	b := &pgx.Batch{}
+	b.Queue(sqlChargeStillOpen, mark)
+	committing := last && queueCommit(tx, b)
+	br := tx.SendBatch(ctx, b)
+	_, err := br.Exec()
+	if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == sqlStateDivisionByZero {
+		_ = br.Close() // its error is the check's, answered: COMMIT did not run
+		return errs.Errorf("%w: %w: onCharged ended it and began another", meter.ErrOutcomeUnknown, ErrChargeTransaction)
 	}
-	if now != xact {
-		return fmt.Errorf("%w: onCharged ended it and began another", ErrChargeTransaction)
+	err = errors.Join(err, br.Close())
+	if committing {
+		return commitOutcome(tx, err)
 	}
-	return nil
+	return err
 }
 
 // closedRow is a QueryRow on a transaction onCharged no longer holds.

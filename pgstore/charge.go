@@ -340,10 +340,11 @@ type chargeSpec struct {
 }
 
 // commitCharge checks every ceiling against c and, when all admit the
-// charge, runs onCharged and writes it, with the release of the hold it
-// settles. The charge is spent on the lineage as it stands; the hold is
-// released from the ancestors that hold it, which a row dropped since may
-// have left. last is the write the call's last statement (writeLast).
+// charge, writes it, with the release of the hold it settles, and runs
+// onCharged after the writes (writeCharged). The charge is spent on the
+// lineage as it stands; the hold is released from the ancestors that hold
+// it, which a row dropped since may have left. last is the write the
+// call's last statement (writeLast).
 func (s *UsageStore) commitCharge(ctx context.Context, tx pgx.Tx, c *counters, spec chargeSpec, last bool, onCharged func(context.Context, meter.Charged) error) (meter.ChargeReceipt, error) {
 	var released limes.Nanos
 	var holders []uuid.UUID
@@ -370,40 +371,42 @@ func (s *UsageStore) commitCharge(ctx context.Context, tx pgx.Tx, c *counters, s
 		ChargeID: uuid.New(), SpentAmount: c.usageOf(spec.capID).spent + spec.amount, Overrun: overrun,
 		TenantID: spec.tenantID, UnitCode: spec.unit,
 	}
-	if err := runOnCharged(ctx, tx, receipt, onCharged); err != nil {
-		return refused, err
-	}
 	spend(c, spec, holders, released)
 	now := s.clock()
 	insert := heldStmt{sql: sqlInsertCharge, args: []any{
 		receipt.ChargeID, spec.capID, spec.tenantID, int64(spec.amount), spec.unit, string(spec.op), spec.actor, now,
 		ancestorIDs(spec.ancestors), copyIDs(spec.copies), spec.externalRef, reservationID, overrun, c.tenant.period, nil, nil,
 	}}
-	if err := c.writeBatch(ctx, tx, now, true, last, []heldStmt{insert}); err != nil {
+	if err := c.writeCharged(ctx, tx, now, true, last, receipt, onCharged, insert); err != nil {
 		return refused, err
 	}
 	return receipt, nil
 }
 
-// runOnCharged runs the caller's onCharged, if any, in tx, and refuses a
-// callback that ended tx.
-func runOnCharged(ctx context.Context, tx pgx.Tx, receipt meter.ChargeReceipt, onCharged func(context.Context, meter.Charged) error) error {
+// writeCharged writes c and then, the charge of receipt, and runs the
+// caller's onCharged, if any, once they are sent: the call's locks are held
+// for no round trip of onCharged's own. Without onCharged the writes carry
+// COMMIT when last (writeLast). With it they go without, marked as the
+// transaction's (sqlMarkCharge); COMMIT goes after onCharged, in one batch
+// with the check that onCharged left the transaction open (endCharged).
+func (c *counters) writeCharged(ctx context.Context, tx pgx.Tx, now time.Time, writeTenant, last bool, receipt meter.ChargeReceipt, onCharged func(context.Context, meter.Charged) error, then ...heldStmt) error {
 	if onCharged == nil {
-		return nil
+		return c.writeBatch(ctx, tx, now, writeTenant, last, then)
 	}
-	xact, err := currentXact(ctx, tx)
-	if err != nil {
+	mark := receipt.ChargeID.String()
+	then = append(then, heldStmt{sql: sqlMarkCharge, args: []any{mark}})
+	if err := c.writeBatch(ctx, tx, now, writeTenant, false, then); err != nil {
 		return err
 	}
 	callbackCtx, end := withTx(ctx, tx)
-	err = func() error {
+	err := func() error {
 		defer end()
 		return onCharged(callbackCtx, meter.Charged{Receipt: receipt})
 	}()
 	if err != nil {
 		return err
 	}
-	return stillOpen(ctx, tx, xact)
+	return endCharged(ctx, tx, mark, last)
 }
 
 // spend adds spec's amount to every counter in c it is spent on — the

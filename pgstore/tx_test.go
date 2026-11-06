@@ -55,6 +55,35 @@ func TestTxFromIsTheChargesTransaction(t *testing.T) {
 	}
 }
 
+// sqlChargeCount counts the ledger rows of one charge id.
+const sqlChargeCount = `SELECT count(*) FROM ` + schema + `.charges WHERE id = $1`
+
+// onCharged runs once the charge's writes are sent, before COMMIT, so the
+// locks are held for no round trip of its own: through TxFrom it reads the
+// ledger row under the receipt's ChargeID, and the receipt is the one the
+// call returns.
+func TestOnChargedRunsAfterTheWrites(t *testing.T) {
+	f := newTenantFixture(t)
+	ctx := WithTenant(t.Context(), f.mine)
+	var seen meter.ChargeReceipt
+	var rows int
+	onCharged := func(ctx context.Context, c meter.Charged) error {
+		seen = c.Receipt
+		tx, _ := TxFrom(ctx)
+		return tx.QueryRow(ctx, sqlChargeCount, c.Receipt.ChargeID).Scan(&rows)
+	}
+	got, err := f.usage.Charge(ctx, meter.ChargeRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1}, onCharged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows != 1 {
+		t.Errorf("ledger rows of the charge inside onCharged = %d, want 1", rows)
+	}
+	if seen.ChargeID != got.ChargeID || seen.SpentAmount != got.SpentAmount || seen.Overrun != got.Overrun {
+		t.Errorf("onCharged saw %+v, the call returned %+v", seen, got)
+	}
+}
+
 // A context no charge handed on holds no transaction.
 func TestTxFromAnotherContext(t *testing.T) {
 	if tx, ok := TxFrom(t.Context()); ok || tx != nil {
@@ -155,12 +184,28 @@ func TestTxFromWaitsForACallInFlight(t *testing.T) {
 	}
 }
 
+// sqlFails is a statement that fails, aborting the transaction it runs in.
+const sqlFails = `SELECT 1 / 0`
+
 // SQL that ends a transaction — the end onCharged cannot reach through the
-// Tx — refuses the charge rather than let the store write it outside the
-// transaction.
+// Tx — refuses the charge. Its writes went before onCharged, so a COMMIT of
+// onCharged's committed them and a ROLLBACK undid them: the call says it
+// does not know which, and a later transaction onCharged began commits
+// nothing. A statement that failed, its error dropped, commits nothing.
 func TestTxFromRefusesATransactionEndedBySQL(t *testing.T) {
-	for _, end := range []string{"COMMIT", "ROLLBACK", "COMMIT; BEGIN", "ROLLBACK; BEGIN"} {
-		t.Run(end, func(t *testing.T) {
+	cases := []struct {
+		sql     string
+		unknown bool
+		spent   int64
+	}{
+		{"COMMIT", true, 1},
+		{"ROLLBACK", true, 0},
+		{"COMMIT; BEGIN", true, 1},
+		{"ROLLBACK; BEGIN", true, 0},
+		{sqlFails, false, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.sql, func(t *testing.T) {
 			f := newTenantFixture(t)
 			ctx := WithTenant(t.Context(), f.mine)
 			onCharged := func(ctx context.Context, _ meter.Charged) error {
@@ -168,14 +213,15 @@ func TestTxFromRefusesATransactionEndedBySQL(t *testing.T) {
 				if tx.Conn() != nil {
 					t.Error("Conn in onCharged is not nil")
 				}
-				_, err := tx.Exec(ctx, end)
-				return err
+				_, _ = tx.Exec(ctx, tc.sql) // what it ended is the store's to find
+				return nil
 			}
-			if _, err := f.usage.Charge(ctx, meter.ChargeRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1}, onCharged); !errors.Is(err, ErrChargeTransaction) {
-				t.Errorf("a charge whose onCharged ran %s: err = %v, want ErrChargeTransaction", end, err)
+			_, err := f.usage.Charge(ctx, meter.ChargeRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1}, onCharged)
+			if !errors.Is(err, ErrChargeTransaction) || errors.Is(err, meter.ErrOutcomeUnknown) != tc.unknown {
+				t.Errorf("a charge whose onCharged ran %s: err = %v, want ErrChargeTransaction, outcome unknown %t", tc.sql, err, tc.unknown)
 			}
-			if u, err := f.usage.GetUsage(ctx, f.child.ID); err == nil && u.SpentAmount != 0 {
-				t.Errorf("usage after a refused charge = %+v; want nothing spent", u)
+			if u, err := f.usage.GetUsage(ctx, f.child.ID); err == nil && int64(u.SpentAmount) != tc.spent {
+				t.Errorf("usage after %s = %+v; want %d spent", tc.sql, u, tc.spent)
 			}
 		})
 	}

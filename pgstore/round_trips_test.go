@@ -32,6 +32,11 @@ const (
 	leasedBumpRoundTrips = 3
 )
 
+// chargeWithCallbackRoundTrips is a Charge whose onCharged runs: the write
+// batch goes before it without COMMIT, and COMMIT after it, with the check
+// that onCharged left the transaction open.
+const chargeWithCallbackRoundTrips = chargeRoundTrips + 1
+
 // separateTxRoundTrips is what a DB that lends no connection adds to each
 // call: BEGIN and COMMIT, each a round trip of its own.
 const separateTxRoundTrips = 2
@@ -129,6 +134,10 @@ func meterRoundTrips(t *testing.T, db DB, sent *atomic.Int64, extra int64) {
 			_, err := usage.Charge(ctx, meter.ChargeRequest{Subject: subject, Amount: 1, ExternalRef: uuid.New().String()}, nil)
 			return err
 		}},
+		"Charge with onCharged": {chargeWithCallbackRoundTrips, func() error {
+			_, err := usage.Charge(ctx, meter.ChargeRequest{Subject: subject, Amount: 1, ExternalRef: uuid.New().String()}, noopCharged)
+			return err
+		}},
 		"Bump": {bumpRoundTrips, func() error {
 			_, err := usage.Bump(ctx, meter.BumpRequest{Subject: subject})
 			return err
@@ -164,6 +173,9 @@ func meterRoundTrips(t *testing.T, db DB, sent *atomic.Int64, extra int64) {
 		t.Errorf("the leased leaf's lease = %+v, %v; want %d requests made under it", l, err, leasedBumps)
 	}
 }
+
+// noopCharged is an onCharged that sends nothing.
+func noopCharged(context.Context, meter.Charged) error { return nil }
 
 // roundTripChain records a chain roundTripChainDepth deep in tenant, with
 // no ceilings, and returns its leaf.

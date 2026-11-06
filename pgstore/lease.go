@@ -289,9 +289,6 @@ func (s *UsageStore) chargeLeased(ctx context.Context, tx pgx.Tx, req meter.Char
 		return refused, err
 	}
 	receipt := meter.ChargeReceipt{ChargeID: uuid.New(), SpentAmount: c.usageOf(capID).spent + req.Amount, TenantID: tenantID, UnitCode: unit}
-	if err := runOnCharged(ctx, tx, receipt, onCharged); err != nil {
-		return refused, err
-	}
 	for _, id := range l.created {
 		u := c.usage[id]
 		u.spent += req.Amount
@@ -306,7 +303,7 @@ func (s *UsageStore) chargeLeased(ctx context.Context, tx pgx.Tx, req meter.Char
 		ancestorIDs(ancestors), [][]byte{}, req.ExternalRef, nil, false, h.lease.period, h.lease.id, holder,
 	}}
 	spentUnder := heldStmt{sql: sqlLeaseSpent, args: []any{holder, int64(req.Amount), h.lease.id}}
-	if err := c.writeLast(ctx, tx, now, false, insert, spentUnder); err != nil {
+	if err := c.writeCharged(ctx, tx, now, false, true, receipt, onCharged, insert, spentUnder); err != nil {
 		return refused, err
 	}
 	return receipt, nil
