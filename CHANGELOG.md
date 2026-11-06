@@ -2,6 +2,26 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.168.0](https://github.com/oleg-tkachuk/limes/compare/v0.167.0...v0.168.0) (2026-11-06)
+
+### ⚠ BREAKING CHANGES
+
+* **dpop:** refuse a holder past its replay share apart from a replay
+
+### Features
+
+* **dpop:** refuse a holder past its replay share apart from a replay ([2d54ff2](https://github.com/oleg-tkachuk/limes/commit/2d54ff2b4e47e4131240d7072c827e893e0591f7))
+* **jwks:** let an operator block a kid and refresh a Remote at once ([ff9fadd](https://github.com/oleg-tkachuk/limes/commit/ff9fadd77fc7f96769526f1c857cd942505acdb8))
+* **meter:** make Reserve and Refund safe to retry after a lost answer ([fcfba8f](https://github.com/oleg-tkachuk/limes/commit/fcfba8f6fd62279f35dacf349a487ca1c468b625))
+
+### Codes
+
+* added: `outcome_unknown`, `proof_quota_exceeded`, `refund_conflict`, `reserve_conflict`
+
+### Contract
+
+* make Reserve and Refund safe to retry after a lost answer
+
 ## [0.167.0](https://github.com/oleg-tkachuk/limes/compare/v0.166.0...v0.167.0) (2026-11-06)
 
 ### ⚠ BREAKING CHANGES
