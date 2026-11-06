@@ -58,8 +58,8 @@ func (s *UsageStore) bump(ctx context.Context, tx pgx.Tx, subject limes.MeterSub
 	}
 	// Under a lease of its own or an ancestor's that holds requests, the
 	// bump stops at the leaseholder (docs/adr/0017-budget-leases.md).
-	if holder, below, ok := leaseFor(subject.CapabilityID(), ancestors, p.leases, s.clock(), leaseState.coversBumps); ok {
-		return s.bumpLeased(ctx, tx, subject, ancestors, below, holder, p.leases[holder])
+	if holder, below, ok := leaseFor(subject.CapabilityID(), ancestors, p.leases, s.asOf(p.now), leaseState.coversBumps); ok {
+		return s.bumpLeased(ctx, tx, subject, ancestors, below, holder, p.leases[holder], s.asOf(p.now))
 	}
 	c, err := lock(ctx, tx, lockRequest{
 		now:     s.clock(),
@@ -260,8 +260,8 @@ func (s *UsageStore) charge(ctx context.Context, tx pgx.Tx, req meter.ChargeRequ
 	}
 	// Under a lease of its own or an ancestor's, the charge stops at the
 	// leaseholder (docs/adr/0017-budget-leases.md).
-	if holder, below, ok := leaseFor(req.Subject.CapabilityID(), ancestors, p.leases, s.clock(), leaseState.coversCharges); ok {
-		return s.chargeLeased(ctx, tx, req, unit, ancestors, below, holder, p.leases[holder], onCharged)
+	if holder, below, ok := leaseFor(req.Subject.CapabilityID(), ancestors, p.leases, s.asOf(p.now), leaseState.coversCharges); ok {
+		return s.chargeLeased(ctx, tx, req, unit, ancestors, below, holder, p.leases[holder], s.asOf(p.now), onCharged)
 	}
 	spec := chargeSpec{
 		capID: req.Subject.CapabilityID(), tenantID: req.Subject.TenantID(), budget: req.Subject.Budget(),
@@ -281,7 +281,7 @@ func (s *UsageStore) charge(ctx context.Context, tx pgx.Tx, req meter.ChargeRequ
 		r, _, err := receiptOfRef(ctx, tx, req, unit, c.replay)
 		return r, cmp.Or(err, errReplayedAfterLock)
 	}
-	return s.commitCharge(ctx, tx, c, spec, true, onCharged)
+	return s.commitCharge(ctx, tx, c, spec, onCharged)
 }
 
 // errReplayedAfterLock rolls back a Charge that found its reference
@@ -340,11 +340,12 @@ type chargeSpec struct {
 }
 
 // commitCharge checks every ceiling against c and, when all admit the
-// charge, runs onCharged and writes it, with the release of the hold it
-// settles. The charge is spent on the lineage as it stands; the hold is
-// released from the ancestors that hold it, which a row dropped since may
-// have left. last is the write the call's last statement (writeLast).
-func (s *UsageStore) commitCharge(ctx context.Context, tx pgx.Tx, c *counters, spec chargeSpec, last bool, onCharged func(context.Context, meter.Charged) error) (meter.ChargeReceipt, error) {
+// charge, writes it, with the release of the hold it settles, and runs
+// onCharged after the writes (writeCharged). The charge is spent on the
+// lineage as it stands; the hold is released from the ancestors that hold
+// it, which a row dropped since may have left, and the hold deleted in the
+// same batch. The write is the call's last statement (writeLast).
+func (s *UsageStore) commitCharge(ctx context.Context, tx pgx.Tx, c *counters, spec chargeSpec, onCharged func(context.Context, meter.Charged) error) (meter.ChargeReceipt, error) {
 	var released limes.Nanos
 	var holders []uuid.UUID
 	var reservationID *uuid.UUID
@@ -370,40 +371,46 @@ func (s *UsageStore) commitCharge(ctx context.Context, tx pgx.Tx, c *counters, s
 		ChargeID: uuid.New(), SpentAmount: c.usageOf(spec.capID).spent + spec.amount, Overrun: overrun,
 		TenantID: spec.tenantID, UnitCode: spec.unit,
 	}
-	if err := runOnCharged(ctx, tx, receipt, onCharged); err != nil {
-		return refused, err
-	}
 	spend(c, spec, holders, released)
 	now := s.clock()
 	insert := heldStmt{sql: sqlInsertCharge, args: []any{
 		receipt.ChargeID, spec.capID, spec.tenantID, int64(spec.amount), spec.unit, string(spec.op), spec.actor, now,
 		ancestorIDs(spec.ancestors), copyIDs(spec.copies), spec.externalRef, reservationID, overrun, c.tenant.period, nil, nil,
 	}}
-	if err := c.writeBatch(ctx, tx, now, true, last, []heldStmt{insert}); err != nil {
+	writes := []heldStmt{insert}
+	if spec.settling != nil {
+		writes = append(writes, heldStmt{sql: sqlDeleteHold, args: []any{spec.settling.id}})
+	}
+	if err := c.writeCharged(ctx, tx, now, true, true, receipt, onCharged, writes...); err != nil {
 		return refused, err
 	}
 	return receipt, nil
 }
 
-// runOnCharged runs the caller's onCharged, if any, in tx, and refuses a
-// callback that ended tx.
-func runOnCharged(ctx context.Context, tx pgx.Tx, receipt meter.ChargeReceipt, onCharged func(context.Context, meter.Charged) error) error {
+// writeCharged writes c and then, the charge of receipt, and runs the
+// caller's onCharged, if any, once they are sent: the call's locks are held
+// for no round trip of onCharged's own. Without onCharged the writes carry
+// COMMIT when last (writeLast). With it they go without, marked as the
+// transaction's (sqlMarkCharge); COMMIT goes after onCharged, in one batch
+// with the check that onCharged left the transaction open (endCharged).
+func (c *counters) writeCharged(ctx context.Context, tx pgx.Tx, now time.Time, writeTenant, last bool, receipt meter.ChargeReceipt, onCharged func(context.Context, meter.Charged) error, then ...heldStmt) error {
 	if onCharged == nil {
-		return nil
+		return c.writeBatch(ctx, tx, now, writeTenant, last, then)
 	}
-	xact, err := currentXact(ctx, tx)
-	if err != nil {
+	mark := receipt.ChargeID.String()
+	then = append(then, heldStmt{sql: sqlMarkCharge, args: []any{mark}})
+	if err := c.writeBatch(ctx, tx, now, writeTenant, false, then); err != nil {
 		return err
 	}
 	callbackCtx, end := withTx(ctx, tx)
-	err = func() error {
+	err := func() error {
 		defer end()
 		return onCharged(callbackCtx, meter.Charged{Receipt: receipt})
 	}()
 	if err != nil {
 		return err
 	}
-	return stillOpen(ctx, tx, xact)
+	return endCharged(ctx, tx, mark, last)
 }
 
 // spend adds spec's amount to every counter in c it is spent on — the
@@ -744,7 +751,7 @@ func (s *UsageStore) reserve(ctx context.Context, tx pgx.Tx, req meter.ReserveRe
 			return r, err
 		}
 	}
-	ancestors, err := readLineage(ctx, tx, subject.TenantID(), subject.CapabilityID())
+	ancestors, dbNow, err := readLineage(ctx, tx, subject.TenantID(), subject.CapabilityID())
 	if err != nil {
 		return meter.Reservation{}, err
 	}
@@ -766,7 +773,7 @@ func (s *UsageStore) reserve(ctx context.Context, tx pgx.Tx, req meter.ReserveRe
 		return meter.Reservation{}, err
 	}
 	now := s.clock()
-	expires, err := holdExpiry(ctx, tx, subject.CapabilityID(), now, cmp.Or(req.TTL, meter.DefaultReservationTTL))
+	expires, err := holdExpiry(ctx, tx, subject.CapabilityID(), s.asOf(dbNow), cmp.Or(req.TTL, meter.DefaultReservationTTL))
 	if err != nil {
 		return meter.Reservation{}, err
 	}
@@ -841,7 +848,7 @@ func (s *UsageStore) Settle(ctx context.Context, req meter.SettleRequest, onChar
 	var receipt meter.ChargeReceipt
 	err := s.retryDeadlock(ctx, retriedSettle, func() error {
 		return s.inTenantTx(ctx, req.Subject.TenantID(), func(tx pgx.Tx) error {
-			h, err := scanHold(tx.QueryRow(ctx, sqlLockHold, req.ReservationID))
+			h, dbNow, err := lockHoldAt(ctx, tx, req.ReservationID)
 			if errors.Is(err, pgx.ErrNoRows) {
 				receipt, err = settled(ctx, tx, req)
 				return err
@@ -849,7 +856,7 @@ func (s *UsageStore) Settle(ctx context.Context, req meter.SettleRequest, onChar
 			if err != nil {
 				return err
 			}
-			if !s.holdServes(h, req.Subject) {
+			if !holdServes(h, req.Subject, s.asOf(dbNow)) {
 				return meter.ErrReservationNotFound
 			}
 			receipt, err = s.settleHold(ctx, tx, req, h, onCharged)
@@ -878,11 +885,28 @@ func settled(ctx context.Context, tx pgx.Tx, req meter.SettleRequest) (meter.Cha
 	return replay(ctx, tx, e)
 }
 
-// holdServes reports whether h is a live hold of subject's, under the
-// copies subject presents.
-func (s *UsageStore) holdServes(h hold, subject limes.MeterSubject) bool {
+// lockHoldAt locks and reads the hold id, with the database's time
+// (sqlNow), in one batch; pgx.ErrNoRows when there is none.
+func lockHoldAt(ctx context.Context, tx pgx.Tx, id uuid.UUID) (hold, time.Time, error) {
+	b := &pgx.Batch{}
+	b.Queue(sqlNow)
+	b.Queue(sqlLockHold, id)
+	br := tx.SendBatch(ctx, b)
+	var dbNow time.Time
+	h, err := func() (hold, error) {
+		if err := br.QueryRow().Scan(&dbNow); err != nil {
+			return hold{}, err
+		}
+		return scanHold(br.QueryRow())
+	}()
+	return h, dbNow, errors.Join(err, br.Close())
+}
+
+// holdServes reports whether h is a hold of subject's live at asOf, under
+// the copies subject presents.
+func holdServes(h hold, subject limes.MeterSubject, asOf time.Time) bool {
 	return h.capID == subject.CapabilityID() && h.tenantID == subject.TenantID() &&
-		h.expires.After(s.clock()) && sameCopyIDs(copyIDs(h.copies), subject.Copies())
+		h.expires.After(asOf) && sameCopyIDs(copyIDs(h.copies), subject.Copies())
 }
 
 // settleHold charges req against the hold h it settles, and deletes the
@@ -901,12 +925,7 @@ func (s *UsageStore) settleHold(ctx context.Context, tx pgx.Tx, req meter.Settle
 	if err != nil {
 		return meter.ChargeReceipt{}, err
 	}
-	receipt, err := s.commitCharge(ctx, tx, c, spec, false, onCharged)
-	if err != nil {
-		return receipt, err
-	}
-	_, err = tx.Exec(ctx, sqlDeleteHold, h.id)
-	return receipt, err
+	return s.commitCharge(ctx, tx, c, spec, onCharged)
 }
 
 // Release ends a reservation without charging. Releasing one that is gone
@@ -935,7 +954,7 @@ func (s *UsageStore) Release(ctx context.Context, req meter.ReleaseRequest) erro
 }
 
 // releaseHold returns h to every counter that still holds it and deletes
-// it; the hold's row is locked.
+// it, in the call's last write (writeLast); the hold's row is locked.
 func (s *UsageStore) releaseHold(ctx context.Context, tx pgx.Tx, h hold) error {
 	c, err := lock(ctx, tx, lockRequest{
 		now:      s.clock(),
@@ -947,5 +966,5 @@ func (s *UsageStore) releaseHold(ctx context.Context, tx pgx.Tx, h hold) error {
 		return err
 	}
 	applyHold(c, h, -1)
-	return c.write(ctx, tx, s.clock(), c.tenant.persisted, heldStmt{sql: sqlDeleteHold, args: []any{h.id}})
+	return c.writeLast(ctx, tx, s.clock(), c.tenant.persisted, heldStmt{sql: sqlDeleteHold, args: []any{h.id}})
 }

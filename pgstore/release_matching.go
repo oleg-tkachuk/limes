@@ -65,7 +65,7 @@ func (s *UsageStore) ReleaseMatching(ctx context.Context, req meter.ReleaseMatch
 		if err != nil {
 			return err
 		}
-		if err := s.releaseHolds(ctx, tx, holds); err != nil {
+		if err := s.releaseHolds(ctx, tx, holds, true); err != nil {
 			return err
 		}
 		res.Released = int64(len(holds))

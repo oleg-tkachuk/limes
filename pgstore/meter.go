@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"time"
@@ -162,12 +163,15 @@ type prelude struct {
 	// leases are the leases held on the chain, by capability, when the
 	// prelude was asked for them: read, not locked.
 	leases map[uuid.UUID]leaseState
+	// now is the database's time (sqlNow), which conn.asOf measures expiry
+	// against.
+	now time.Time
 }
 
 // readPrelude shares tenant's erase lock and refuses it erased, reads the
-// charge on record under capID's ref, when ref is not empty, and capID's
-// lineage holding its records, in one batch: what notErased, a replay's
-// lookup and lineage read one at a time.
+// charge on record under capID's ref, when ref is not empty, capID's
+// lineage holding its records, and the database's time, in one batch: what
+// notErased, a replay's lookup and lineage read one at a time.
 func readPrelude(ctx context.Context, tx pgx.Tx, tenant, capID uuid.UUID, ref string, leases bool) (prelude, error) {
 	b := &pgx.Batch{}
 	b.Queue(sqlShareTenantLock, eraseLockClass, tenant)
@@ -179,6 +183,7 @@ func readPrelude(ctx context.Context, tx pgx.Tx, tenant, capID uuid.UUID, ref st
 	if leases {
 		b.Queue(sqlLeasesOnChain, capID, limes.MaxDelegationDepth)
 	}
+	b.Queue(sqlNow)
 	br := tx.SendBatch(ctx, b)
 	p, err := readPreludeResults(br, tenant, capID, ref, leases)
 	return p, errors.Join(err, br.Close())
@@ -222,17 +227,17 @@ func readPreludeResults(br pgx.BatchResults, tenant, capID uuid.UUID, ref string
 			return p, err
 		}
 	}
-	return p, nil
+	return p, br.QueryRow().Scan(&p.now)
 }
 
-// readLineage is readPrelude with no reference: tenant not erased, and
-// capID's lineage.
-func readLineage(ctx context.Context, tx pgx.Tx, tenant, capID uuid.UUID) ([]ancestor, error) {
+// readLineage is readPrelude with no reference: tenant not erased, capID's
+// lineage, and the database's time.
+func readLineage(ctx context.Context, tx pgx.Tx, tenant, capID uuid.UUID) ([]ancestor, time.Time, error) {
 	p, err := readPrelude(ctx, tx, tenant, capID, "", false)
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
-	return p.ancestors, p.lineageErr
+	return p.ancestors, p.now, p.lineageErr
 }
 
 // heldLineage is capID's ancestors among held, sqlLineageHeld's rows,
@@ -744,44 +749,66 @@ func (c *counters) writeLast(ctx context.Context, tx pgx.Tx, now time.Time, writ
 
 // writeBatch is write, COMMIT queued after it when last.
 func (c *counters) writeBatch(ctx context.Context, tx pgx.Tx, now time.Time, writeTenant, last bool, then []heldStmt) error {
-	b := &pgx.Batch{}
+	var writes []heldStmt
 	if writeTenant {
-		t := c.tenant
-		t.updated = now
-		b.Queue(sqlWriteTenant,
-			t.tenantID, int64(t.ceiling.Max), t.ceiling.Unlimited, int64(t.spent), int64(t.reserved), t.unit,
-			t.start, t.end, t.updated, t.version, t.period)
-		c.tenant = t
+		c.tenant.updated = now
+		writes = append(writes, writeTenantStmt(c.tenant))
 	}
 	if len(c.usage) > 0 {
-		var ids []uuid.UUID
-		var requests, spent, reserved, copiesUnder, reservedRequests []int64
-		var units []string
-		for _, u := range c.usage {
-			ids = append(ids, u.id)
-			requests = append(requests, u.requests)
-			spent = append(spent, int64(u.spent))
-			reserved = append(reserved, int64(u.reserved))
-			units = append(units, u.unit)
-			copiesUnder = append(copiesUnder, u.copiesUnder)
-			reservedRequests = append(reservedRequests, u.reservedRequests)
-		}
-		b.Queue(sqlWriteUsage, ids, requests, spent, reserved, units, copiesUnder, reservedRequests)
+		writes = append(writes, writeUsageStmt(slices.Collect(maps.Values(c.usage))))
 	}
 	if len(c.copies) > 0 {
-		var ids [][]byte
-		var caps []uuid.UUID
-		var requests, spent, reserved []int64
-		for _, r := range c.copies {
-			ids = append(ids, r.revocationID)
-			caps = append(caps, r.capID)
-			requests = append(requests, r.requests)
-			spent = append(spent, int64(r.spent))
-			reserved = append(reserved, int64(r.reserved))
-		}
-		b.Queue(sqlWriteCopies, ids, caps, requests, spent, reserved)
+		writes = append(writes, writeCopiesStmt(slices.Collect(maps.Values(c.copies))))
 	}
-	for _, st := range then {
+	return sendWrites(ctx, tx, append(writes, then...), last)
+}
+
+// writeTenantStmt writes the tenant's aggregate t.
+func writeTenantStmt(t budgetRow) heldStmt {
+	return heldStmt{sql: sqlWriteTenant, args: []any{
+		t.tenantID, int64(t.ceiling.Max), t.ceiling.Unlimited, int64(t.spent), int64(t.reserved), t.unit,
+		t.start, t.end, t.updated, t.version, t.period,
+	}}
+}
+
+// writeUsageStmt writes the usage counters rows, in one statement.
+func writeUsageStmt(rows []*usageRow) heldStmt {
+	var ids []uuid.UUID
+	var requests, spent, reserved, copiesUnder, reservedRequests []int64
+	var units []string
+	for _, u := range rows {
+		ids = append(ids, u.id)
+		requests = append(requests, u.requests)
+		spent = append(spent, int64(u.spent))
+		reserved = append(reserved, int64(u.reserved))
+		units = append(units, u.unit)
+		copiesUnder = append(copiesUnder, u.copiesUnder)
+		reservedRequests = append(reservedRequests, u.reservedRequests)
+	}
+	return heldStmt{sql: sqlWriteUsage, args: []any{ids, requests, spent, reserved, units, copiesUnder, reservedRequests}}
+}
+
+// writeCopiesStmt writes the copy counters rows, of any capability, in one
+// statement.
+func writeCopiesStmt(rows []*copyRow) heldStmt {
+	var ids [][]byte
+	var caps []uuid.UUID
+	var requests, spent, reserved []int64
+	for _, r := range rows {
+		ids = append(ids, r.revocationID)
+		caps = append(caps, r.capID)
+		requests = append(requests, r.requests)
+		spent = append(spent, int64(r.spent))
+		reserved = append(reserved, int64(r.reserved))
+	}
+	return heldStmt{sql: sqlWriteCopies, args: []any{ids, caps, requests, spent, reserved}}
+}
+
+// sendWrites sends stmts in one batch, COMMIT queued after them when last
+// and tx can send it there (queueCommit); none sends nothing.
+func sendWrites(ctx context.Context, tx pgx.Tx, stmts []heldStmt, last bool) error {
+	b := &pgx.Batch{}
+	for _, st := range stmts {
 		b.Queue(st.sql, st.args...)
 	}
 	if b.Len() == 0 {

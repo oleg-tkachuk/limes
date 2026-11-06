@@ -29,30 +29,33 @@ func (s *UsageStore) Refund(ctx context.Context, req meter.RefundRequest) (meter
 	var receipt meter.RefundReceipt
 	err := s.retryDeadlock(ctx, retriedRefund, func() error {
 		return s.inTx(ctx, func(tx pgx.Tx) error {
-			e, c, err := s.lockRefunded(ctx, tx, req.ChargeID)
+			e, c, prior, err := s.lockRefunded(ctx, tx, req)
 			if err != nil {
 				return err
 			}
 			receipt = meter.RefundReceipt{ChargeID: e.ID, TenantID: e.TenantID, UnitCode: e.UnitCode}
-			if req.RefundID != uuid.Nil() {
-				r, keyed, err := refunded(ctx, tx, req, receipt)
-				if keyed || err != nil {
-					receipt = r
-					return err
-				}
+			if r, keyed, err := prior.answer(req, receipt); keyed || err != nil {
+				receipt = r
+				return err
 			}
 			amount, err := refundAmount(e, req)
 			if err != nil {
 				return err
 			}
-			if err := s.recordRefund(ctx, tx, e, req, amount); err != nil {
-				return err
+			var then []heldStmt
+			if req.RefundID != uuid.Nil() {
+				then = append(then, heldStmt{sql: sqlInsertRefund, args: []any{
+					req.RefundID, e.ID, e.TenantID, int64(req.Amount), req.Remaining, int64(amount), s.clock(),
+				}})
 			}
-			if amount == 0 {
-				return nil
+			switch {
+			case amount != 0:
+				err = s.refund(ctx, tx, c, e, amount, then...)
+			case len(then) > 0:
+				err = (&counters{}).writeLast(ctx, tx, s.clock(), false, then...)
 			}
-			if err := s.refund(ctx, tx, c, e, amount); err != nil {
-				return err
+			if err != nil {
+				return refundKeyConflict(err, req.RefundID)
 			}
 			receipt.Amount = amount
 			return nil
@@ -64,18 +67,21 @@ func (s *UsageStore) Refund(ctx context.Context, req meter.RefundRequest) (meter
 	return receipt, nil
 }
 
-// lockRefunded reads the charge id and locks the counters it debited, then
-// the charge itself. It is read once to learn which counters those are,
-// which are locked first, and locked last, as every call locks the ledger:
-// an erase that holds the aggregate and deletes the charges does not meet a
-// refund holding the charge and waiting for the aggregate.
-func (s *UsageStore) lockRefunded(ctx context.Context, tx pgx.Tx, id uuid.UUID) (ledgerEntry, *counters, error) {
-	e, ok, err := readEntry(ctx, tx, sqlChargeByID, id)
+// lockRefunded reads the charge req names and locks the counters it
+// debited, then the charge itself, with the refund on record under
+// req.RefundID read beside it. It is read once to learn which counters
+// those are, which are locked first, and locked last, as every call locks
+// the ledger: an erase that holds the aggregate and deletes the charges does
+// not meet a refund holding the charge and waiting for the aggregate. The
+// charge is locked, so a refund of it under the id that committed meanwhile
+// is read.
+func (s *UsageStore) lockRefunded(ctx context.Context, tx pgx.Tx, req meter.RefundRequest) (ledgerEntry, *counters, priorRefund, error) {
+	e, ok, err := readEntry(ctx, tx, sqlChargeByID, req.ChargeID)
 	if err != nil {
-		return ledgerEntry{}, nil, err
+		return ledgerEntry{}, nil, priorRefund{}, err
 	}
 	if !ok {
-		return ledgerEntry{}, nil, meter.ErrChargeNotFound
+		return ledgerEntry{}, nil, priorRefund{}, meter.ErrChargeNotFound
 	}
 	c, err := lock(ctx, tx, lockRequest{
 		now:      s.clock(),
@@ -84,16 +90,31 @@ func (s *UsageStore) lockRefunded(ctx context.Context, tx pgx.Tx, id uuid.UUID) 
 		copies:   e.copies, copiesCapID: e.CapabilityID,
 	})
 	if err != nil {
-		return ledgerEntry{}, nil, err
+		return ledgerEntry{}, nil, priorRefund{}, err
 	}
-	e, ok, err = readEntry(ctx, tx, sqlChargeByID+` FOR UPDATE`, id)
-	if err != nil {
-		return ledgerEntry{}, nil, err
+	b := &pgx.Batch{}
+	b.Queue(sqlChargeByID+` FOR UPDATE`, req.ChargeID)
+	if req.RefundID != uuid.Nil() {
+		b.Queue(sqlKeyedRefund, req.RefundID)
 	}
-	if !ok {
-		return ledgerEntry{}, nil, meter.ErrChargeNotFound
+	br := tx.SendBatch(ctx, b)
+	prior, err := func() (priorRefund, error) {
+		var err error
+		if e, ok, err = scanEntry(br.QueryRow()); err != nil {
+			return priorRefund{}, err
+		}
+		if !ok {
+			return priorRefund{}, meter.ErrChargeNotFound
+		}
+		if req.RefundID == uuid.Nil() {
+			return priorRefund{}, nil
+		}
+		return scanPriorRefund(br.QueryRow())
+	}()
+	if err = errors.Join(err, br.Close()); err != nil {
+		return ledgerEntry{}, nil, priorRefund{}, err
 	}
-	return e, c, nil
+	return e, c, prior, nil
 }
 
 const (
@@ -109,39 +130,52 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)`
 	constraintRefundKey = "refunds_pkey"
 )
 
-// refunded answers a Refund whose RefundID is on record already: keyed
+// priorRefund is the refund on record under a Refund's RefundID, when
+// found.
+type priorRefund struct {
+	found     bool
+	chargeID  uuid.UUID
+	amount    limes.Nanos
+	remaining bool
+	returned  limes.Nanos
+}
+
+// scanPriorRefund reads the one row of sqlKeyedRefund, if there is one.
+func scanPriorRefund(row pgx.Row) (priorRefund, error) {
+	var p priorRefund
+	var amount, returned int64
+	err := row.Scan(&p.chargeID, &amount, &p.remaining, &returned)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return priorRefund{}, nil
+	}
+	if err != nil {
+		return priorRefund{}, err
+	}
+	p.found, p.amount, p.returned = true, limes.Nanos(amount), limes.Nanos(returned)
+	return p, nil
+}
+
+// answer answers a Refund whose RefundID is on record already as p: keyed
 // reports that it is, with the first refund's receipt again when it was of
 // the same charge for the same request, and ErrRefundConflict when not.
-// receipt is the charge's, as this refund would return it. The charge is
-// locked, so a refund of it under the id that committed meanwhile is read.
-func refunded(ctx context.Context, tx pgx.Tx, req meter.RefundRequest, receipt meter.RefundReceipt) (meter.RefundReceipt, bool, error) {
-	var chargeID uuid.UUID
-	var amount, returned int64
-	var remaining bool
-	err := tx.QueryRow(ctx, sqlKeyedRefund, req.RefundID).Scan(&chargeID, &amount, &remaining, &returned)
+// receipt is the charge's, as this refund would return it.
+func (p priorRefund) answer(req meter.RefundRequest, receipt meter.RefundReceipt) (meter.RefundReceipt, bool, error) {
 	switch {
-	case errors.Is(err, pgx.ErrNoRows):
+	case !p.found:
 		return meter.RefundReceipt{}, false, nil
-	case err != nil:
-		return meter.RefundReceipt{}, false, err
-	case chargeID != req.ChargeID || limes.Nanos(amount) != req.Amount || remaining != req.Remaining:
+	case p.chargeID != req.ChargeID || p.amount != req.Amount || p.remaining != req.Remaining:
 		return meter.RefundReceipt{}, true, fmt.Errorf("%w: %s", meter.ErrRefundConflict, req.RefundID)
 	}
-	receipt.Amount, receipt.Replayed = limes.Nanos(returned), true
+	receipt.Amount, receipt.Replayed = p.returned, true
 	return receipt, true, nil
 }
 
-// recordRefund records a keyed refund of the charge e that returns amount,
-// so the request sent again replays it; a refund under no id records
-// nothing. An id another tenant's refund holds is ErrRefundConflict.
-func (s *UsageStore) recordRefund(ctx context.Context, tx pgx.Tx, e ledgerEntry, req meter.RefundRequest, amount limes.Nanos) error {
-	if req.RefundID == uuid.Nil() {
-		return nil
-	}
-	_, err := tx.Exec(ctx, sqlInsertRefund, req.RefundID, e.ID, e.TenantID, int64(req.Amount), req.Remaining, int64(amount), s.clock())
+// refundKeyConflict is err, the error of a write that recorded a keyed
+// refund, as ErrRefundConflict when the refund's id is another tenant's.
+func refundKeyConflict(err error, id uuid.UUID) error {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == constraintRefundKey {
-		return fmt.Errorf("%w: %s", meter.ErrRefundConflict, req.RefundID)
+		return fmt.Errorf("%w: %s", meter.ErrRefundConflict, id)
 	}
 	return err
 }
@@ -160,11 +194,11 @@ func refundAmount(e ledgerEntry, req meter.RefundRequest) (limes.Nanos, error) {
 }
 
 // refund gives amount of the charge e back to every counter in c that spent
-// it, and records it on the charge. A charge of a period since closed is
-// history: the current period's spend never counted it, so it has nothing
-// to give back.
-func (s *UsageStore) refund(ctx context.Context, tx pgx.Tx, c *counters, e ledgerEntry, amount limes.Nanos) error {
-	if leased, err := s.refundLeased(ctx, tx, c, e, amount); leased || err != nil {
+// it, and records it on the charge, then sends then, in the call's last
+// batch (writeLast). A charge of a period since closed is history: the
+// current period's spend never counted it, so it has nothing to give back.
+func (s *UsageStore) refund(ctx context.Context, tx pgx.Tx, c *counters, e ledgerEntry, amount limes.Nanos, then ...heldStmt) error {
+	if leased, err := s.refundLeased(ctx, tx, c, e, amount, then); leased || err != nil {
 		return err
 	}
 	for _, u := range c.usage {
@@ -181,7 +215,8 @@ func (s *UsageStore) refund(ctx context.Context, tx pgx.Tx, c *counters, e ledge
 			r.spent = max0(r.spent - amount)
 		}
 	}
-	return c.write(ctx, tx, s.clock(), refundTenant, heldStmt{sql: sqlRefunded, args: []any{e.ID, int64(amount)}})
+	refunded := heldStmt{sql: sqlRefunded, args: []any{e.ID, int64(amount)}}
+	return c.writeLast(ctx, tx, s.clock(), refundTenant, append([]heldStmt{refunded}, then...)...)
 }
 
 const sqlRefunded = `UPDATE limes.charges SET refunded = refunded + $2 WHERE id = $1`
@@ -850,13 +885,14 @@ func readTenantPlace(fields []string) (tenantPlace, bool) {
 }
 
 const (
-	// sqlDueHolds reads the soonest holds past their expiry, and locks them
-	// in id order, the order every call that locks several takes.
+	// sqlDueHolds reads the soonest holds past their expiry at $1 — the
+	// database's now() when $1 is NULL (conn.dueAt) — at most $2, and locks
+	// them in id order, the order every call that locks several takes.
 	sqlDueHolds = `
 SELECT ` + sqlHoldColumns + ` FROM limes.reservations
 WHERE id IN (
     SELECT id FROM limes.reservations
-    WHERE expires_at <= $1
+    WHERE expires_at <= coalesce($1::timestamptz, now())
     ORDER BY expires_at, id
     LIMIT $2)
 ORDER BY id
@@ -914,11 +950,11 @@ func (s *UsageStore) ReleaseExpired(ctx context.Context, req meter.ReleaseExpire
 	limit := meter.HousekeepingLimit(req.Limit)
 	var released int64
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
-		holds, err := collectHolds(ctx, tx, sqlDueHolds, s.clock(), limit)
+		holds, err := collectHolds(ctx, tx, sqlDueHolds, s.dueAt(), limit)
 		if err != nil {
 			return err
 		}
-		if err := s.releaseHolds(ctx, tx, holds); err != nil {
+		if err := s.releaseHolds(ctx, tx, holds, true); err != nil {
 			return err
 		}
 		released = int64(len(holds))
@@ -927,7 +963,7 @@ func (s *UsageStore) ReleaseExpired(ctx context.Context, req meter.ReleaseExpire
 	if err != nil {
 		return meter.ReleaseExpiredResult{}, err
 	}
-	settled, _, err := s.settleEach(ctx, func(fn func(pgx.Tx) error) error { return s.inTx(ctx, fn) }, sqlDueLeases, s.clock(), limit)
+	settled, _, err := s.settleEach(ctx, func(fn func(pgx.Tx) error) error { return s.inTx(ctx, fn) }, sqlDueLeases, s.dueAt(), limit)
 	res := meter.ReleaseExpiredResult{Released: released, SettledLeases: int64(len(settled))}
 	return res, err
 }
@@ -940,60 +976,145 @@ func collectHolds(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (hold, error) { return scanHold(row) })
 }
 
-// releaseHolds releases each of holds, locked, tenant by tenant in id order,
-// the order every call locks aggregates in. Every counter the releases write
-// is locked first, together (lockReleased).
-func (s *UsageStore) releaseHolds(ctx context.Context, tx pgx.Tx, holds []hold) error {
-	slices.SortFunc(holds, func(a, b hold) int {
-		if c := slices.Compare(a.tenantID[:], b.tenantID[:]); c != 0 {
-			return c
-		}
-		return slices.Compare(a.id[:], b.id[:])
-	})
-	if err := lockReleased(ctx, tx, holds, leasesToSettle{}); err != nil {
+// releaseHolds releases each of holds, locked, from every counter that
+// still holds it, and deletes them: every counter the releases write is
+// locked and read together first (lockReleased), the releases summed in
+// memory, and all of it written in one batch, with COMMIT when last — a
+// batch of any size takes as many round trips as one hold.
+func (s *UsageStore) releaseHolds(ctx context.Context, tx pgx.Tx, holds []hold, last bool) error {
+	if len(holds) == 0 {
+		return nil
+	}
+	r, err := lockReleased(ctx, tx, holds, leasesToSettle{})
+	if err != nil {
 		return err
 	}
+	ids := make([]uuid.UUID, 0, len(holds))
 	for _, h := range holds {
-		if err := s.releaseHold(ctx, tx, h); err != nil {
-			return err
-		}
+		r.release(h)
+		ids = append(ids, h.id)
 	}
-	return nil
+	return sendWrites(ctx, tx, append(r.writes(s.clock()), heldStmt{sql: sqlDeleteHolds, args: []any{ids}}), last)
 }
 
-// lockReleased locks every counter releasing holds writes, before any is
-// written, in the one order every call takes: the counters of every
-// capability the holds are on or under, together, in capability id order,
-// then each capability's copies, then the tenants' aggregates in tenant id
-// order.
+// sqlDeleteHolds deletes the holds $1.
+const sqlDeleteHolds = `DELETE FROM limes.reservations WHERE id = ANY ($1)`
+
+// releasedRows are the counters releasing holds writes, as lockReleased
+// read them.
+type releasedRows struct {
+	usage map[uuid.UUID]*usageRow
+	// copies are by capability, then revocation id.
+	copies  map[uuid.UUID]map[string]*copyRow
+	tenants map[uuid.UUID]*budgetRow
+}
+
+// release returns h to every counter of r that still holds it, as
+// releaseHold returns it to its own.
+func (r *releasedRows) release(h hold) {
+	c := &counters{usage: r.usage, copies: r.copies[h.capID]}
+	t, ok := r.tenants[h.tenantID]
+	if ok {
+		c.tenant = *t
+	}
+	applyHold(c, h, -1)
+	if ok {
+		*t = c.tenant
+	}
+}
+
+// writes are the statements that write r, at now: every usage and copy
+// counter, and the aggregate of each tenant that has one.
+func (r *releasedRows) writes(now time.Time) []heldStmt {
+	var out []heldStmt
+	for _, id := range sortedUnique(slices.Collect(maps.Keys(r.tenants))) {
+		if t := r.tenants[id]; t.persisted {
+			t.updated = now
+			out = append(out, writeTenantStmt(*t))
+		}
+	}
+	if len(r.usage) > 0 {
+		out = append(out, writeUsageStmt(slices.Collect(maps.Values(r.usage))))
+	}
+	var copies []*copyRow
+	for _, byID := range r.copies {
+		copies = append(copies, slices.Collect(maps.Values(byID))...)
+	}
+	if len(copies) > 0 {
+		out = append(out, writeCopiesStmt(copies))
+	}
+	return out
+}
+
+// lockReleased locks and reads every counter releasing holds writes, and
+// those of leases, before any is written, in one batch and in the one order
+// every call takes: the counters of every capability the holds are on or
+// under, together, in capability id order, then each capability's copies,
+// then the tenants' aggregates in tenant id order.
 // Locked hold by hold instead, each hold's would be in order and the
 // transaction's would not: one hold's root, then another's middle, against
 // a call that holds the middle and waits for the root.
-func lockReleased(ctx context.Context, tx pgx.Tx, holds []hold, leases leasesToSettle) error {
-	tenants, counters := slices.Clone(leases.tenants), slices.Clone(leases.counters)
+func lockReleased(ctx context.Context, tx pgx.Tx, holds []hold, leases leasesToSettle) (*releasedRows, error) {
+	tenants, counterIDs := slices.Clone(leases.tenants), slices.Clone(leases.counters)
 	copies := map[uuid.UUID][][]byte{}
 	for _, h := range holds {
 		tenants = append(tenants, h.tenantID)
-		counters = append(counters, h.capID)
-		counters = append(counters, h.ancestors...)
+		counterIDs = append(counterIDs, h.capID)
+		counterIDs = append(counterIDs, h.ancestors...)
 		copies[h.capID] = append(copies[h.capID], copyIDs(h.copies)...)
 	}
-	if err := drain(tx.Query(ctx, sqlLockUsage, sortedUnique(counters))); err != nil {
-		return err
+	copyCaps := slices.DeleteFunc(sortedUnique(slices.Collect(maps.Keys(copies))), func(id uuid.UUID) bool { return len(copies[id]) == 0 })
+	tenants = sortedUnique(tenants)
+	b := &pgx.Batch{}
+	b.Queue(sqlLockUsage, sortedUnique(counterIDs))
+	for _, capID := range copyCaps {
+		b.Queue(sqlLockCopies, capID, copies[capID])
 	}
-	for _, capID := range sortedUnique(slices.Collect(maps.Keys(copies))) {
-		if ids := copies[capID]; len(ids) > 0 {
-			if err := drain(tx.Query(ctx, sqlLockCopies, capID, ids)); err != nil {
-				return err
-			}
+	for _, t := range tenants {
+		b.Queue(sqlLockTenant, t)
+	}
+	br := tx.SendBatch(ctx, b)
+	r, err := readReleased(br, copyCaps, tenants)
+	return r, errors.Join(err, br.Close())
+}
+
+// readReleased reads lockReleased's batch from br.
+func readReleased(br pgx.BatchResults, copyCaps, tenants []uuid.UUID) (*releasedRows, error) {
+	r := &releasedRows{usage: map[uuid.UUID]*usageRow{}, copies: map[uuid.UUID]map[string]*copyRow{}, tenants: map[uuid.UUID]*budgetRow{}}
+	rows, err := br.Query()
+	if err != nil {
+		return nil, err
+	}
+	usage, err := pgx.CollectRows(rows, scanUsage)
+	if err != nil {
+		return nil, err
+	}
+	for _, u := range usage {
+		r.usage[u.id] = u
+	}
+	for _, capID := range copyCaps {
+		rows, err := br.Query()
+		if err != nil {
+			return nil, err
 		}
-	}
-	for _, t := range sortedUnique(tenants) {
-		if _, err := lockTenant(ctx, tx, t); err != nil {
-			return err
+		scanned, err := pgx.CollectRows(rows, scanCopy)
+		if err != nil {
+			return nil, err
 		}
+		byID := map[string]*copyRow{}
+		for _, c := range scanned {
+			byID[string(c.revocationID)] = c
+		}
+		r.copies[capID] = byID
 	}
-	return nil
+	for _, id := range tenants {
+		t, err := scanTenant(br.QueryRow(), id)
+		if err != nil {
+			return nil, err
+		}
+		r.tenants[id] = &t
+	}
+	return r, nil
 }
 
 // sortedUnique is ids in id order, each once.
@@ -1001,18 +1122,6 @@ func sortedUnique(ids []uuid.UUID) []uuid.UUID {
 	ids = slices.Clone(ids)
 	slices.SortFunc(ids, func(a, b uuid.UUID) int { return slices.Compare(a[:], b[:]) })
 	return slices.Compact(ids)
-}
-
-// drain reads every row a locking query returns, which is when it holds
-// their locks, and reports its error.
-func drain(rows pgx.Rows, err error) error {
-	if err != nil {
-		return err
-	}
-	for rows.Next() {
-	}
-	rows.Close()
-	return rows.Err()
 }
 
 // logKeyLeases is how many leases a call settled, as a log line counts.
@@ -1153,14 +1262,14 @@ func (s *UsageStore) dropUsage(ctx context.Context, tx pgx.Tx, ids []uuid.UUID, 
 	}
 	holds := slices.DeleteFunc(locked, func(h hold) bool { return !slices.Contains(ids, h.capID) })
 	if len(leases.holders) > 0 {
-		if err := lockReleased(ctx, tx, holds, leases); err != nil {
+		if _, err := lockReleased(ctx, tx, holds, leases); err != nil {
 			return err
 		}
 		if err := s.settleLocked(ctx, tx, settledDeleteUsage, leases); err != nil {
 			return err
 		}
 	}
-	if err := s.releaseHolds(ctx, tx, holds); err != nil {
+	if err := s.releaseHolds(ctx, tx, holds, false); err != nil {
 		return err
 	}
 	for _, q := range []string{sqlDeleteUsage, sqlDeleteCopies, sqlForgetAncestors} {

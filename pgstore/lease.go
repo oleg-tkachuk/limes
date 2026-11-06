@@ -120,11 +120,12 @@ WHERE capability_id = $1`
 	// row is locked.
 	sqlLeaseRequestMade = `UPDATE limes.usage SET lease_requests_spent = lease_requests_spent + 1 WHERE capability_id = $1 AND lease_id = $2`
 
-	// sqlDueLeases are the leases past their end at $1, soonest first, at
-	// most $2, with their tenants (migration 033's index).
+	// sqlDueLeases are the leases past their end at $1 — the database's
+	// now() when $1 is NULL (conn.dueAt) — soonest first, at most $2, with
+	// their tenants (migration 033's index).
 	sqlDueLeases = `
 SELECT capability_id, tenant_id FROM limes.usage
-WHERE lease_id IS NOT NULL AND lease_expires <= $1
+WHERE lease_id IS NOT NULL AND lease_expires <= coalesce($1::timestamptz, now())
 ORDER BY lease_expires, capability_id
 LIMIT $2`
 
@@ -209,7 +210,8 @@ func leaseFor(capID uuid.UUID, ancestors []ancestor, leases map[uuid.UUID]leaseS
 // are locked and counted as a bump counts them, the leaseholder's and its
 // lease's balance with them, and nothing above. It returns the
 // capability's request count after the bump, or before it when refused.
-func (s *UsageStore) bumpLeased(ctx context.Context, tx pgx.Tx, subject limes.MeterSubject, ancestors []ancestor, below int, holder uuid.UUID, seen leaseState) (int64, error) {
+// The lease must still be open at asOf.
+func (s *UsageStore) bumpLeased(ctx context.Context, tx pgx.Tx, subject limes.MeterSubject, ancestors []ancestor, below int, holder uuid.UUID, seen leaseState, asOf time.Time) (int64, error) {
 	capID := subject.CapabilityID()
 	isHolder := capID == holder
 	l := lockRequest{now: s.clock(), created: append([]uuid.UUID{capID}, ancestorIDs(ancestors[:below])...), usageTenant: subject.TenantID()}
@@ -222,7 +224,7 @@ func (s *UsageStore) bumpLeased(ctx context.Context, tx pgx.Tx, subject limes.Me
 	}
 	now := s.clock()
 	h, ok := c.usage[holder]
-	if !ok || h.lease.id != seen.id || !h.lease.openAt(now) || !h.lease.coversBumps() {
+	if !ok || h.lease.id != seen.id || !h.lease.openAt(asOf) || !h.lease.coversBumps() {
 		return 0, errLeaseMoved
 	}
 	count := c.usageOf(capID).requests
@@ -256,7 +258,7 @@ var errLeaseStale = fmt.Errorf("%w: pgstore: a lease to settle before another op
 // leaseholder are locked and spent as a charge spends them, the
 // leaseholder's and its lease's balance with them, and nothing above — not
 // the ancestors the lease is held against, not the tenant's aggregate.
-func (s *UsageStore) chargeLeased(ctx context.Context, tx pgx.Tx, req meter.ChargeRequest, unit string, ancestors []ancestor, below int, holder uuid.UUID, seen leaseState, onCharged func(context.Context, meter.Charged) error) (meter.ChargeReceipt, error) {
+func (s *UsageStore) chargeLeased(ctx context.Context, tx pgx.Tx, req meter.ChargeRequest, unit string, ancestors []ancestor, below int, holder uuid.UUID, seen leaseState, asOf time.Time, onCharged func(context.Context, meter.Charged) error) (meter.ChargeReceipt, error) {
 	capID, tenantID := req.Subject.CapabilityID(), req.Subject.TenantID()
 	isHolder := capID == holder
 	l := lockRequest{now: s.clock(), created: append([]uuid.UUID{capID}, ancestorIDs(ancestors[:below])...), usageTenant: tenantID}
@@ -269,7 +271,7 @@ func (s *UsageStore) chargeLeased(ctx context.Context, tx pgx.Tx, req meter.Char
 	}
 	now := s.clock()
 	h, ok := c.usage[holder]
-	if !ok || h.lease.id != seen.id || !h.lease.openAt(now) {
+	if !ok || h.lease.id != seen.id || !h.lease.openAt(asOf) {
 		return meter.ChargeReceipt{}, errLeaseMoved
 	}
 	// Another delivery of the same reference may have committed while this
@@ -289,9 +291,6 @@ func (s *UsageStore) chargeLeased(ctx context.Context, tx pgx.Tx, req meter.Char
 		return refused, err
 	}
 	receipt := meter.ChargeReceipt{ChargeID: uuid.New(), SpentAmount: c.usageOf(capID).spent + req.Amount, TenantID: tenantID, UnitCode: unit}
-	if err := runOnCharged(ctx, tx, receipt, onCharged); err != nil {
-		return refused, err
-	}
 	for _, id := range l.created {
 		u := c.usage[id]
 		u.spent += req.Amount
@@ -306,7 +305,7 @@ func (s *UsageStore) chargeLeased(ctx context.Context, tx pgx.Tx, req meter.Char
 		ancestorIDs(ancestors), [][]byte{}, req.ExternalRef, nil, false, h.lease.period, h.lease.id, holder,
 	}}
 	spentUnder := heldStmt{sql: sqlLeaseSpent, args: []any{holder, int64(req.Amount), h.lease.id}}
-	if err := c.writeLast(ctx, tx, now, false, insert, spentUnder); err != nil {
+	if err := c.writeCharged(ctx, tx, now, false, true, receipt, onCharged, insert, spentUnder); err != nil {
 		return refused, err
 	}
 	return receipt, nil
@@ -377,11 +376,11 @@ func (s *UsageStore) Lease(ctx context.Context, req meter.LeaseRequest) (meter.L
 func (s *UsageStore) lease(ctx context.Context, tx pgx.Tx, req meter.LeaseRequest) (meter.Lease, error) {
 	subject, unit := req.Subject, req.Subject.UnitCode()
 	capID, tenantID := subject.CapabilityID(), subject.TenantID()
-	ancestors, err := readLineage(ctx, tx, tenantID, capID)
+	ancestors, dbNow, err := readLineage(ctx, tx, tenantID, capID)
 	if err != nil {
 		return meter.Lease{}, err
 	}
-	now := s.clock()
+	now, asOf := s.clock(), s.asOf(dbNow)
 	held := append([]uuid.UUID{capID}, ancestorIDs(ancestors)...)
 	// The tenant's aggregate is locked for its period; a lease of requests
 	// alone, which holds none of its budget, does not create it.
@@ -394,7 +393,7 @@ func (s *UsageStore) lease(ctx context.Context, tx pgx.Tx, req meter.LeaseReques
 		return meter.Lease{}, err
 	}
 	for _, a := range ancestors {
-		if c.usageOf(a.id).lease.openAt(now) {
+		if c.usageOf(a.id).lease.openAt(asOf) {
 			return meter.Lease{}, fmt.Errorf("%w: %s holds one above %s", meter.ErrLeaseNested, a.id, capID)
 		}
 	}
@@ -403,7 +402,7 @@ func (s *UsageStore) lease(ctx context.Context, tx pgx.Tx, req meter.LeaseReques
 	// before an amount is added: what it spends from now on is this
 	// period's, and settlement counts a lease's spend in its own period.
 	closed := req.Amount > 0 && self.lease.period != c.tenant.period
-	if self.lease.held() && (!self.lease.openAt(now) || !slices.Equal(self.lease.ancestors, ancestorIDs(ancestors)) || closed) {
+	if self.lease.held() && (!self.lease.openAt(asOf) || !slices.Equal(self.lease.ancestors, ancestorIDs(ancestors)) || closed) {
 		return meter.Lease{}, errLeaseStale
 	}
 	refuse := func(err error) error { return err }
@@ -413,7 +412,7 @@ func (s *UsageStore) lease(ctx context.Context, tx pgx.Tx, req meter.LeaseReques
 	if err := admitRequests(c, subject, ancestors, req.Requests); err != nil {
 		return meter.Lease{}, err
 	}
-	expires, err := holdExpiry(ctx, tx, capID, now, cmp.Or(req.TTL, meter.DefaultLeaseTTL))
+	expires, err := holdExpiry(ctx, tx, capID, asOf, cmp.Or(req.TTL, meter.DefaultLeaseTTL))
 	if err != nil {
 		return meter.Lease{}, err
 	}
@@ -606,7 +605,8 @@ func (s *UsageStore) settleEach(ctx context.Context, inTx func(func(pgx.Tx) erro
 // leaseholder, the leaseholder's hold and the lease's balance. It reports
 // false when e was taken under no lease or one since settled, whose refund
 // goes to the chain the settlement charged; c holds the chain's counters.
-func (s *UsageStore) refundLeased(ctx context.Context, tx pgx.Tx, c *counters, e ledgerEntry, amount limes.Nanos) (bool, error) {
+// then goes after its writes, in the call's last batch (writeLast).
+func (s *UsageStore) refundLeased(ctx context.Context, tx pgx.Tx, c *counters, e ledgerEntry, amount limes.Nanos, then []heldStmt) (bool, error) {
 	if e.leaseID == nil || e.leaseHolder == nil {
 		return false, nil
 	}
@@ -629,7 +629,7 @@ func (s *UsageStore) refundLeased(ctx context.Context, tx pgx.Tx, c *counters, e
 	only.usage[h.id] = h
 	refunded := heldStmt{sql: sqlRefunded, args: []any{e.ID, int64(amount)}}
 	back := heldStmt{sql: sqlLeaseSpent, args: []any{h.id, -int64(amount), h.lease.id}}
-	return true, only.write(ctx, tx, s.clock(), false, refunded, back)
+	return true, only.writeLast(ctx, tx, s.clock(), false, append([]heldStmt{refunded, back}, then...)...)
 }
 
 // forgetLeaseAncestors drops ids, whose counters went, from every lease's
