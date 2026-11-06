@@ -70,17 +70,8 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
-## v0.168.0
+## v0.169.0
 
-- A proof refused because its holder has no room left in the replay
-  cache is `dpop.ErrReplayQuota`, code `proof_quota_exceeded`, answered
-  429 in category `exhausted` with no challenge, where it was
-  `dpop.ErrReplayed`, `proof_replayed`, 401 `invalid_dpop_proof`. A
-  `dpop.ReplayCache` of your own refuses such an id by returning an error
-  wrapping `dpop.ErrReplayQuota`, which `dpop/dpoptest.RunReplayCache` now
-  requires; one that still reports it as seen is read as a replay. A
-  client mapping by category retries `exhausted` later; one branching on
-  `proof_replayed` no longer sees this case there.
 - `RevocationSignal.Listening()` is `Listening(lease time.Duration)`, and
   a signal renews its lease with `RevocationSignal.Renew()` each time it
   knows itself still listening: a notification heard, a connection
@@ -108,17 +99,11 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
   `SyncedTTL`. Clears less `SignalsWhole` and `ClearsWithoutLineage` is
   the Clears the consumer asked for itself.
 
-## exchange/v0.19.0
+## exchange/v0.20.0
 
-- A token request whose client has no room left in the replay cache is
-  answered 429 `temporarily_unavailable`, where it was 400
-  `invalid_dpop_proof` "used before": `exchange.ErrorOf` and
-  `exchange.ErrorCodes` name the new code. The holder at the token
-  endpoint is the client, so with the defaults one client passes about 15
-  DPoP-bound exchanges a second ([guide](guide.md#the-replay-caches-share-caps-a-holders-rate)).
 - `exchange.DefaultTTL` is gone. A policy that names no TTL gives the
   capability the Issuer's own default, `IssuerConfig.DefaultTTL`
-  (`limes.Issuer.DefaultTTL`, new in limes `v0.168.0`, which this release
+  (`limes.Issuer.DefaultTTL`, new in limes `v0.169.0`, which this release
   needs), still capped at the subject token's remaining life, where the
   exchange's fifteen minutes overrode it. An issuer configured with
   another default now sets the exchange's.
@@ -157,6 +142,27 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
   `jwks.DefaultRefreshInterval` whatever the provider's Cache-Control
   says. Fetches a token starts, and failed fetches, are logged to
   `slog.Default()`.
+
+## v0.168.0
+
+- A proof refused because its holder has no room left in the replay
+  cache is `dpop.ErrReplayQuota`, code `proof_quota_exceeded`, answered
+  429 in category `exhausted` with no challenge, where it was
+  `dpop.ErrReplayed`, `proof_replayed`, 401 `invalid_dpop_proof`. A
+  `dpop.ReplayCache` of your own refuses such an id by returning an error
+  wrapping `dpop.ErrReplayQuota`, which `dpop/dpoptest.RunReplayCache` now
+  requires; one that still reports it as seen is read as a replay. A
+  client mapping by category retries `exhausted` later; one branching on
+  `proof_replayed` no longer sees this case there.
+
+## exchange/v0.19.0
+
+- A token request whose client has no room left in the replay cache is
+  answered 429 `temporarily_unavailable`, where it was 400
+  `invalid_dpop_proof` "used before": `exchange.ErrorOf` and
+  `exchange.ErrorCodes` name the new code. The holder at the token
+  endpoint is the client, so with the defaults one client passes about 15
+  DPoP-bound exchanges a second ([guide](guide.md#the-replay-caches-share-caps-a-holders-rate)).
 
 ## pgstore/v0.68.0
 
