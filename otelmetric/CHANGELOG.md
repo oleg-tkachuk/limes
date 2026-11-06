@@ -2,6 +2,16 @@
 
 Every release of the otelmetric module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.17.5](https://github.com/oleg-tkachuk/limes/compare/otelmetric%2Fv0.17.4...otelmetric%2Fv0.17.5) (2026-11-06)
+
+### Bug Fixes
+
+* **otelmetric:** describe syncs and losses as signals now count them ([f53b413](https://github.com/oleg-tkachuk/limes/commit/f53b413f4041f090fb1ccbb3a8a0ed99a9e30bdb))
+
+### Dependencies
+
+* require limes v0.169.0
+
 ## [0.17.4](https://github.com/oleg-tkachuk/limes/compare/otelmetric%2Fv0.17.3...otelmetric%2Fv0.17.4) (2026-11-03)
 
 ### Dependencies

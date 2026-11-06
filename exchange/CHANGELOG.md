@@ -2,6 +2,34 @@
 
 Every release of the exchange module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.20.0](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.19.0...exchange%2Fv0.20.0) (2026-11-06)
+
+### ⚠ BREAKING CHANGES
+
+* **exchange:** allow jwtverify the clock skew limes allows
+* **exchange:** answer the scopes the policy granted
+* **exchange:** bound jwtverify's stale keys and fetch an unknown kid
+* **exchange:** close token introspection by default
+* **exchange:** give a capability the issuer's default lifetime
+
+### Bug Fixes
+
+* **exchange:** allow jwtverify the clock skew limes allows ([da68168](https://github.com/oleg-tkachuk/limes/commit/da6816808384afee032ecd87519d8c2748a0f2a9))
+* **exchange:** answer the scopes the policy granted ([6f26454](https://github.com/oleg-tkachuk/limes/commit/6f264548e3d73d98e36219843ad76863da1e671b))
+* **exchange:** bound jwtverify's stale keys and fetch an unknown kid ([ee85369](https://github.com/oleg-tkachuk/limes/commit/ee853695cb6c63ebf9c42eefb63963319ad6fe54))
+* **exchange:** close token introspection by default ([d6cf734](https://github.com/oleg-tkachuk/limes/commit/d6cf7341eb6d6767cdea172ce6b1c609faecd20d))
+* **exchange:** give a capability the issuer's default lifetime ([bd36cf0](https://github.com/oleg-tkachuk/limes/commit/bd36cf0058b1855b6201dae2b69ddc906e0a1826))
+
+### Defaults
+
+* removed: `exchange.DefaultTTL`
+* changed: `exchange.IntrospectionConfig.Audiences` — none → required
+* changed: `jwtverify.Config.ClockSkew` — none → `limes.DefaultLeeway`
+
+### Dependencies
+
+* require limes v0.169.0
+
 ## [0.19.0](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.18.0...exchange%2Fv0.19.0) (2026-11-06)
 
 ### ⚠ BREAKING CHANGES

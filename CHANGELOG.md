@@ -2,6 +2,24 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.169.0](https://github.com/oleg-tkachuk/limes/compare/v0.168.0...v0.169.0) (2026-11-06)
+
+### ⚠ BREAKING CHANGES
+
+* **cache:** hold a revocation signal's sync to a lease it renews
+
+### Features
+
+* **cache:** hold a revocation signal's sync to a lease it renews ([621a7bc](https://github.com/oleg-tkachuk/limes/commit/621a7bc73b95ce30179643554ee39b419bb8592d))
+* **issuer:** expose the effective default ttl ([92c9cd6](https://github.com/oleg-tkachuk/limes/commit/92c9cd6f50b0a6cb6bc15013d9e7a70d2c0b7b69))
+
+### Performance Improvements
+
+* **cache:** invalidate only the lookups a forget outdates ([cd76c81](https://github.com/oleg-tkachuk/limes/commit/cd76c810cfeed163f62c6ed3fd77db107ed4e06d))
+* **cache:** keep the cache on a revocation signal's reconnect ([270aa99](https://github.com/oleg-tkachuk/limes/commit/270aa998777de1d905e21b6ac6d60871c2ba3d8c))
+* **cache:** keep the expiry order sorted and age an answer from its lookup's start ([5948c72](https://github.com/oleg-tkachuk/limes/commit/5948c72793705632f2373b108e5d768e883ee8d2))
+* **cache:** key a set of biscuit revocation ids by a chained digest ([8ff84ba](https://github.com/oleg-tkachuk/limes/commit/8ff84ba3b8fe6be6dc94154cfdcd9c0d2da8c59c))
+
 ## [0.168.0](https://github.com/oleg-tkachuk/limes/compare/v0.167.0...v0.168.0) (2026-11-06)
 
 ### ⚠ BREAKING CHANGES
