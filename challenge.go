@@ -165,7 +165,7 @@ func (v *Verifier) ErrorResponse(ctx context.Context, err error, scheme AuthSche
 		nonce, nerr := v.DPoPNonce(ctx)
 		if nerr != nil {
 			v.logger().ErrorContext(ctx, "limes: no DPoP nonce for a use_dpop_nonce challenge; answering the server's failure",
-				slog.Any("error", nerr), slog.Any("reason", err))
+				slog.Any(logKeyError, nerr), slog.String(logKeyReason, string(rule.reason)))
 			return answer(internalError, internalError.slug, "")
 		}
 		resp.DPoPNonce = nonce
@@ -182,12 +182,7 @@ func answer(r refusal, kind string, reason Reason) ErrorResponse {
 }
 
 // logger is VerifierConfig.Logger, or slog.Default() for none.
-func (v *Verifier) logger() *slog.Logger {
-	if v.cfg.Logger == nil {
-		return slog.Default()
-	}
-	return v.cfg.Logger
-}
+func (v *Verifier) logger() *slog.Logger { return orDefault(v.cfg.Logger) }
 
 // challenge is one WWW-Authenticate challenge (RFC 9110 §11.6.1): the scheme,
 // then error and error_description (RFC 6750 §3) when there is an error, for

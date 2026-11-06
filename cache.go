@@ -299,7 +299,7 @@ func withStaleLog(c ttlcache.Config, logger *slog.Logger, kind string) ttlcache.
 	now := c.Now
 	c.OnStale = func(at time.Time, cause error) {
 		logger.Warn("limes: revocation upstream failed; serving a stale cached answer",
-			slog.String("kind", kind), slog.Duration("age", now().Sub(at)), slog.Any("error", cause))
+			slog.String(logKeyKind, kind), slog.Duration(logKeyAge, now().Sub(at)), slog.Any(logKeyError, cause))
 	}
 	return c
 }

@@ -135,9 +135,23 @@ type VerifierConfig struct {
 	// characters RFC 6750 §3 allows in an auth-param value.
 	Realm string
 
-	// Logger logs what ErrorResponse cannot answer the way the refusal
-	// asks: a nonce the DPoP verifier cannot give. Nil: slog.Default().
+	// Logger logs every token checked, by Verify, Authorize, Introspect and
+	// BiscuitCopy, naming the capability by id, issuer and kid and never
+	// logging a token or a proof. The levels follow who can cause the line:
+	// a token accepted at DEBUG; a token refused after its signature
+	// verified — expired, revoked, unrecorded, for another audience, without
+	// its proof, outside its caveats — at WARN, since only a holder of a
+	// genuine token causes it; a token refused before — absent, malformed,
+	// forged, under an unknown kid — at DEBUG, since anyone can send one in
+	// volume; a check that failed for the server's own reasons — the keys or
+	// the revocations out of reach — at ERROR. It also logs what
+	// ErrorResponse cannot answer the way the refusal asks: a nonce the DPoP
+	// verifier cannot give. Nil: slog.Default().
 	Logger *slog.Logger
+
+	// Events are called beside the log, for metrics or an audit sink. The
+	// zero VerifierEvents calls nothing.
+	Events VerifierEvents
 }
 
 // BiscuitConfig is how a verifier reads the Biscuit form
@@ -365,43 +379,54 @@ func setKeyIssuers(cfg *VerifierConfig) error {
 // lookup — and the proof's id is recorded in the replay cache last, so
 // neither a revoked token nor a copy this verifier cannot meter records one.
 func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (VerifiedCapability, error) {
-	return v.verify(ctx, req, nil)
+	return v.verifyObserved(ctx, VerifierOperationVerify, req, nil)
+}
+
+// verifyObserved is verify, logged and reported as op (observe).
+func (v *Verifier) verifyObserved(ctx context.Context, op VerifierOperation, req VerifyRequest, accept func(Capability) error) (VerifiedCapability, error) {
+	vc, cap, err := v.verify(ctx, req, accept)
+	v.observe(ctx, op, cap, vc.fromBiscuit, err)
+	if err != nil {
+		return VerifiedCapability{}, err
+	}
+	return vc, nil
 }
 
 // verify is Verify with accept, when set, run on the capability after every
 // check of the token and before the proof's id is recorded: a request accept
-// refuses spends none of the replay cache's room either.
-func (v *Verifier) verify(ctx context.Context, req VerifyRequest, accept func(Capability) error) (VerifiedCapability, error) {
+// refuses spends none of the replay cache's room either. It returns the
+// grant, too, once the token's signature has verified, refused or not.
+func (v *Verifier) verify(ctx context.Context, req VerifyRequest, accept func(Capability) error) (VerifiedCapability, *grant, error) {
 	if err := checkVerifyRequest(req); err != nil {
-		return VerifiedCapability{}, err
+		return VerifiedCapability{}, nil, err
 	}
 	cap, biscuitIDs, err := v.authenticate(ctx, req.Token)
 	if err != nil {
-		return VerifiedCapability{}, err
+		return VerifiedCapability{}, cap, err
 	}
 	// 5) Audience match.
 	if !slices.Contains(cap.Audience, req.Audience) {
-		return VerifiedCapability{}, fmt.Errorf("%w: token audience %v lacks %q",
+		return VerifiedCapability{}, cap, fmt.Errorf("%w: token audience %v lacks %q",
 			ErrAudienceMismatch, cap.Audience, req.Audience)
 	}
 	// 6–7) The scheme and the proof of possession, which need no I/O.
 	proof, err := v.checkPossession(ctx, req, cap)
 	if err != nil {
-		return VerifiedCapability{}, err
+		return VerifiedCapability{}, cap, err
 	}
 	// 8–9) Revocation, after the checks that need no I/O.
 	if err := v.checkRevoked(ctx, cap, biscuitIDs); err != nil {
-		return VerifiedCapability{}, err
+		return VerifiedCapability{}, cap, err
 	}
 	// 10–11) What the verifier and its caller require beyond the token.
 	if err := v.checkAccepted(cap, accept); err != nil {
-		return VerifiedCapability{}, err
+		return VerifiedCapability{}, cap, err
 	}
 	// 12) The proof's id, recorded in the replay cache, last.
 	if err := v.recordProof(ctx, cap, proof); err != nil {
-		return VerifiedCapability{}, err
+		return VerifiedCapability{}, cap, err
 	}
-	return VerifiedCapability{c: cap.Capability, copies: cap.copies, fromBiscuit: biscuitIDs != nil}, nil
+	return VerifiedCapability{c: cap.Capability, copies: cap.copies, fromBiscuit: biscuitIDs != nil}, cap, nil
 }
 
 // checkVerifyRequest refuses a request with no token, or none of the
@@ -472,7 +497,8 @@ func (v *Verifier) recordProof(ctx context.Context, cap *grant, proof dpop.Check
 // authenticate is what Verify and Introspect check of a token itself: its
 // size, its signatures and issuer (1–3), that it is not a token lifted out
 // of a Biscuit, and its time window (4). It returns the grant and, for a
-// Biscuit, the ids of its verified chain.
+// Biscuit, the ids of its verified chain; refused outside its window, the
+// grant alone, which observe names.
 func (v *Verifier) authenticate(ctx context.Context, token string) (*grant, [][]byte, error) {
 	if token == "" {
 		return nil, nil, ErrNoCredentials
@@ -486,7 +512,7 @@ func (v *Verifier) authenticate(ctx context.Context, token string) (*grant, [][]
 		return nil, nil, err
 	}
 	if err := v.checkWindow(cap); err != nil {
-		return nil, nil, err
+		return cap, nil, err
 	}
 	return cap, biscuitIDs, nil
 }
@@ -610,19 +636,30 @@ type Introspection struct {
 // Introspect is no authorization: it yields no VerifiedCapability, so its
 // answer can be neither delegated from nor checked against a request.
 func (v *Verifier) Introspect(ctx context.Context, token string) (Introspection, error) {
-	cap, biscuitIDs, err := v.authenticate(ctx, token)
+	in, cap, err := v.introspect(ctx, token)
+	v.observe(ctx, VerifierOperationIntrospect, cap, in.FromBiscuit, err)
 	if err != nil {
 		return Introspection{}, err
 	}
+	return in, nil
+}
+
+// introspect is Introspect, unlogged, returning the grant too once the
+// token's signature has verified.
+func (v *Verifier) introspect(ctx context.Context, token string) (Introspection, *grant, error) {
+	cap, biscuitIDs, err := v.authenticate(ctx, token)
+	if err != nil {
+		return Introspection{}, cap, err
+	}
 	if err := v.checkRevoked(ctx, cap, biscuitIDs); err != nil {
-		return Introspection{}, err
+		return Introspection{}, cap, err
 	}
 	// As Verify: a copy whose limits no Meter here counts is not vouched
 	// for, so no answer states it narrower in words than it is in effect.
 	if len(cap.copies) > 0 && !v.cfg.Biscuit.MeterCopies {
-		return Introspection{}, ErrCopyCountersNotMetered
+		return Introspection{}, cap, ErrCopyCountersNotMetered
 	}
-	return Introspection{Capability: cap.Clone(), FromBiscuit: biscuitIDs != nil, Copies: cap.copies}, nil
+	return Introspection{Capability: cap.Clone(), FromBiscuit: biscuitIDs != nil, Copies: cap.copies}, cap, nil
 }
 
 // DPoPNonce is the nonce to send in the DPoP-Nonce header — with a
@@ -644,7 +681,7 @@ func (v *Verifier) DPoPNonce(ctx context.Context) (string, error) {
 // one outside the allowed networks, say — spends none of the replay cache's
 // room, which every holder of the capability shares.
 func (v *Verifier) Authorize(ctx context.Context, req AuthorizeRequest) (VerifiedCapability, error) {
-	return v.verify(ctx, req.Verify, func(c Capability) error {
+	return v.verifyObserved(ctx, VerifierOperationAuthorize, req.Verify, func(c Capability) error {
 		if err := c.Caveats.CheckSource(req.ClientAddr); err != nil {
 			return err
 		}
@@ -676,7 +713,12 @@ func (v *Verifier) verifyBiscuit(ctx context.Context, token string) (*grant, [][
 	if err != nil {
 		return nil, nil, formRefusal(err)
 	}
-	return unsealedGrant(sealed, u)
+	g, ids, err := unsealedGrant(sealed, u)
+	if err != nil {
+		return nil, nil, err
+	}
+	g.kid = sealed.kid
+	return g, ids, nil
 }
 
 // verifySigned checks a compact JWT's header, signature, issuer and tenant —
@@ -754,6 +796,7 @@ func (v *Verifier) readSignedClaims(payload, kid string) (*grant, error) {
 	if err := cap.Caveats.Validate(); err != nil {
 		return nil, refuseToken(ErrInvalidToken, err)
 	}
+	cap.kid = kid
 	return cap, nil
 }
 

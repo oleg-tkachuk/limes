@@ -295,4 +295,7 @@ func TestErrorResponseAnswersANonceOutageAsTheServers(t *testing.T) {
 	if !strings.Contains(logged.String(), "level=ERROR") || !strings.Contains(logged.String(), outage.Error()) {
 		t.Errorf("log = %q, want an error naming %q", logged.String(), outage)
 	}
+	if want := logKeyReason + "=" + string(ReasonNonceRequired); !strings.Contains(logged.String(), want) {
+		t.Errorf("log = %q, want the refusal's reason, %s", logged.String(), want)
+	}
 }

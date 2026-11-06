@@ -113,6 +113,9 @@ type grant struct {
 	// copies are the request and budget limits the attenuation blocks of a
 	// verified Biscuit set, innermost block first (VerifiedCapability.Copies).
 	copies []CopyCeiling
+	// kid is the key the token was verified under, for the verifier's log;
+	// empty on a grant the issuer signs.
+	kid string
 }
 
 // CopyCeiling is a limit one attenuation block of a Biscuit set on the copy

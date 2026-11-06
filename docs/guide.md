@@ -902,6 +902,52 @@ A replayed charge or settle moved nothing and is not counted.
 with `WithTenantAttribute`, every measurement — a refused charge or settle
 included — carries the subject's tenant.
 
+## Observing the issuer and verifier
+
+The issuer and the verifier log through `log/slog` (`IssuerConfig.Logger`,
+`VerifierConfig.Logger`; nil logs to `slog.Default()`). A capability is
+named by its id, issuer, kid, subject and tenant; no line holds a token, a
+key or a proof.
+
+| Event | Level |
+|---|---|
+| `Issue`, `Delegate`, `Reissue`, `Biscuit` minted a token | INFO |
+| `Revoke`, `RevokeMatching`, `RevokeBiscuit` revoked | INFO |
+| The issuer refused a request (a `Code` of limes's) | WARN |
+| A token accepted | DEBUG |
+| A token refused after its signature verified: expired, revoked, unrecorded, another audience, no proof, outside its caveats | WARN |
+| A token refused before: absent, malformed, forged, an unknown kid | DEBUG |
+| A store, signer, key set or revocation lookup failed | ERROR |
+
+A refusal of a genuine token is worth a warning: only its holder can cause
+one. Garbage costs anyone nothing to send, so it stays at DEBUG, where a
+flood of it fills no log. Each line carries `op`, and a refusal its `code`,
+`reason` and `error`.
+
+The issuer's `Revoke`, `RevokeMatching` and `RevokeBiscuit` are the store's
+own methods (`Store.Revoke`, `BulkRevoker`, `BiscuitRevocationStore`), logged
+beside what the issuer mints, so one log is the audit trail of both. A store
+without the method is `ErrInvalidRequest`.
+
+`IssuerConfig.Events` and `VerifierConfig.Events` call back beside the log,
+for metrics or an audit sink: `OnIssued`, `OnRevoked`, `OnRefused` and
+`OnFailed`; `OnVerified`, `OnRefused` and `OnFailed`. Every callback is
+optional and takes one event struct, so a field added later breaks none.
+They run on the caller's goroutine before the method returns: a callback
+must not block, and must not panic.
+
+```go
+verifier, err := limes.NewVerifier(limes.VerifierConfig{
+    // ...
+    Logger: logger,
+    Events: limes.VerifierEvents{
+        OnRefused: func(ctx context.Context, e limes.VerifierErrorEvent) {
+            refusals.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", string(e.Reason))))
+        },
+    },
+})
+```
+
 ## Check your own store
 
 Much of each contract lives in request fields and in which sentinel comes
