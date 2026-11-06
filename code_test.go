@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/oleg-tkachuk/limes/dpop"
+	"github.com/oleg-tkachuk/limes/internal/errcode"
 	"github.com/oleg-tkachuk/limes/internal/link"
 	"github.com/oleg-tkachuk/limes/jwks"
 )
@@ -87,7 +88,7 @@ var sentinels = map[string]error{
 	"..ErrCursorRepeated": ErrCursorRepeated, "..ErrCopyCountersNotMetered": ErrCopyCountersNotMetered,
 	"..ErrBiscuitAttenuation": ErrBiscuitAttenuation, "..ErrNotFound": ErrNotFound, "..ErrConflict": ErrConflict,
 	"..ErrAlreadyExists": ErrAlreadyExists, "..ErrInvalidCaveats": ErrInvalidCaveats,
-	"..ErrInvalidConfig": ErrInvalidConfig, "..ErrInternal": ErrInternal,
+	"..ErrInvalidConfig": ErrInvalidConfig, "..ErrInternal": ErrInternal, "..ErrRevocationUnavailable": ErrRevocationUnavailable,
 	"dpop.ErrRequired": dpop.ErrRequired, "dpop.ErrInvalid": dpop.ErrInvalid, "dpop.ErrReplayed": dpop.ErrReplayed,
 	"dpop.ErrNonceRequired": dpop.ErrNonceRequired,
 	"jwks.ErrUnavailable":   jwks.ErrUnavailable, "jwks.ErrUnknownKID": jwks.ErrUnknownKID,
@@ -123,7 +124,7 @@ func TestEverySentinelHasACode(t *testing.T) {
 // rule names a status exactly when no refusal rule answers its sentinel.
 func TestCodesAreWhole(t *testing.T) {
 	seen := map[Code]bool{}
-	for _, r := range allCodeRules {
+	for _, r := range allCodeRules() {
 		if seen[r.code] {
 			t.Errorf("code %q names two sentinels", r.code)
 		}
@@ -141,8 +142,8 @@ func TestCodesAreWhole(t *testing.T) {
 			t.Errorf("Reason %q is no Code", reason)
 		}
 	}
-	if len(Codes()) != len(allCodeRules) {
-		t.Errorf("Codes() lists %d, want %d", len(Codes()), len(allCodeRules))
+	if len(Codes()) != len(allCodeRules()) {
+		t.Errorf("Codes() lists %d, want %d", len(Codes()), len(allCodeRules()))
 	}
 }
 
@@ -333,6 +334,7 @@ func TestAnErrorNamingItsCode(t *testing.T) {
 // The codes of each optional component are some of Codes, in its order,
 // apart from each other and from limes's own.
 func TestComponentCodes(t *testing.T) {
+	standInExchange(t)
 	for name, tc := range map[string]struct {
 		codes func() []string
 		has   Code
@@ -366,5 +368,101 @@ func TestComponentCodes(t *testing.T) {
 		if slices.Contains(link.MeterCodes(), c) {
 			t.Errorf("%q is both the exchange's and the meter's", c)
 		}
+	}
+}
+
+// answered is an error of a component that carries its whole answer, as
+// the exchange's sentinels do.
+type answered struct {
+	code     Code
+	status   int
+	title    string
+	category Category
+}
+
+func (a answered) Error() string              { return string(a.code) }
+func (a answered) LimesErrorCode() string     { return string(a.code) }
+func (a answered) LimesErrorStatus() int      { return a.status }
+func (a answered) LimesErrorTitle() string    { return a.title }
+func (a answered) LimesErrorCategory() string { return string(a.category) }
+
+// The exchange's codes as the exchange registers them, which a test of this
+// module stands in: limes holds no table of them.
+var (
+	exchangeGrant  = answered{CodeInvalidGrant, http.StatusBadRequest, "The subject token was refused", CategoryUnauthenticated}
+	exchangeServer = answered{CodeServerError, http.StatusInternalServerError, "The server could not decide on the request", CategoryInternal}
+	// exchangeRequest names a code of limes's own, whose rule answers it.
+	exchangeRequest = answered{CodeInvalidRequest, http.StatusBadRequest, "The request is malformed", CategoryInvalid}
+)
+
+// standInExchange registers the exchange's stand-ins for the test, and
+// nothing after it.
+func standInExchange(t *testing.T) {
+	t.Helper()
+	saved := registrations
+	registrations = func() []errcode.Registration {
+		return []errcode.Registration{
+			{Component: errcode.ComponentExchange, Err: exchangeGrant},
+			{Component: errcode.ComponentExchange, Err: exchangeRequest},
+			{Component: errcode.ComponentExchange, Err: exchangeServer},
+			{Component: errcode.ComponentExchange, Err: exchangeGrant},
+		}
+	}
+	t.Cleanup(func() { registrations = saved })
+}
+
+// An error carrying its own answer is answered by it — through a wrap, and
+// ahead of a limes error it wraps — though limes holds no rule of its code;
+// a code limes holds a rule of is answered by that rule.
+func TestAnErrorCarryingItsAnswer(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err  error
+		want Problem
+	}{
+		"its own answer": {fmt.Errorf("exchanging: %w: %w", exchangeServer, ErrRevoked),
+			Problem{Type: ProblemTypeURI(string(CodeServerError)), Title: exchangeServer.title, Status: http.StatusInternalServerError, Code: CodeServerError, Category: CategoryInternal}},
+		"a code of limes's": {exchangeRequest,
+			Problem{Type: ProblemTypeURI(string(CodeInvalidRequest)), Title: "The request is invalid", Status: http.StatusBadRequest, Code: CodeInvalidRequest, Category: CategoryInvalid}},
+	} {
+		if got, ok := ProblemOf(tc.err); !ok || !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s: ProblemOf = %+v, %v; want %+v", name, got, ok, tc.want)
+		}
+		if got, ok := CodeOf(tc.err); !ok || got != tc.want.Code {
+			t.Errorf("%s: CodeOf = %q, %v; want %q", name, got, ok, tc.want.Code)
+		}
+		if got, ok := CategoryOf(tc.err); !ok || got != tc.want.Category {
+			t.Errorf("%s: CategoryOf = %q, %v; want %q", name, got, ok, tc.want.Category)
+		}
+	}
+}
+
+// A registered code is answered by code alone, listed once by Codes and as
+// its component's, while one limes holds a rule of stays limes's own.
+func TestARegisteredCodeIsAnsweredByCode(t *testing.T) {
+	if _, ok := ProblemOfCode(CodeServerError); ok {
+		t.Fatal("ProblemOfCode(server_error) answers with nothing registered: limes holds a rule of the exchange's code")
+	}
+	standInExchange(t)
+	want, _ := ProblemOf(exchangeServer)
+	if got, ok := ProblemOfCode(CodeServerError); !ok || !reflect.DeepEqual(got, want) {
+		t.Errorf("ProblemOfCode(server_error) = %+v, %v; want %+v, as ProblemOf answers", got, ok, want)
+	}
+	if got, ok := CategoryOfCode(CodeInvalidGrant); !ok || got != CategoryUnauthenticated {
+		t.Errorf("CategoryOfCode(invalid_grant) = %q, %v", got, ok)
+	}
+	if _, ok := ReasonOfCode(CodeInvalidGrant); ok {
+		t.Error("ReasonOfCode(invalid_grant) has a reason: a registered code is no refusal of a presented capability")
+	}
+	counted := map[Code]int{}
+	for _, c := range Codes() {
+		counted[c]++
+	}
+	for _, c := range []Code{CodeInvalidGrant, CodeServerError, CodeInvalidRequest} {
+		if counted[c] != 1 {
+			t.Errorf("Codes() lists %q %d times, want once", c, counted[c])
+		}
+	}
+	if got := link.ExchangeCodes(); !slices.Equal(got, []string{string(CodeInvalidGrant), string(CodeServerError)}) {
+		t.Errorf("the exchange's codes = %q; want its own two, not limes's invalid_request", got)
 	}
 }

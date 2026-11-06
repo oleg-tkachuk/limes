@@ -516,7 +516,7 @@ func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability,
 	// is still caught here, before a token no verifier would accept leaves:
 	// the walk reaches past the bound only from a chain too deep.
 	if _, err := i.store.IsRevoked(ctx, child.ID); err != nil {
-		return Capability{}, "", errs.Errorf("limes: delegate from parent %s: %w", parent.ID, err)
+		return Capability{}, "", revocationLookupFailed(fmt.Sprintf("delegate from parent %s", parent.ID), err)
 	}
 	return child, token, nil
 }
@@ -599,7 +599,7 @@ func (i *Issuer) checkLive(ctx context.Context, c Capability, now time.Time, wha
 	}
 	revoked, err := i.store.IsRevoked(ctx, c.ID)
 	if err != nil {
-		return errs.Errorf("limes: %s %s: revocation lookup: %w", what, c.ID, err)
+		return revocationLookupFailed(fmt.Sprintf("%s %s: revocation lookup", what, c.ID), err)
 	}
 	if revoked {
 		return errs.Errorf("limes: %s %s: %w", what, c.ID, ErrRevoked)

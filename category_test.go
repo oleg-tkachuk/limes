@@ -19,7 +19,7 @@ var docCategory = regexp.MustCompile("(?m)^\\| `([a-z_]+)` \\| [0-9]{3} \\| .* \
 // Every code has one of the categories, so a consumer mapping the categories
 // maps every error; a new code without one fails here.
 func TestEveryCodeHasACategory(t *testing.T) {
-	for _, r := range allCodeRules {
+	for _, r := range allCodeRules() {
 		if !slices.Contains(Categories(), r.category) {
 			t.Errorf("%s has category %q, none of Categories()", r.code, r.category)
 		}
@@ -42,7 +42,8 @@ func TestCategoryOf(t *testing.T) {
 		{ErrAlreadyExists, CategoryAlreadyExists},
 		{ErrMalformedAuthorization, CategoryInvalid},
 		{ErrUnitCodeMismatch, CategoryPrecondition},
-		{ErrProofUnsupported, CategoryPrecondition},
+		{ErrProofUnsupported, CategoryInternal},
+		{ErrRevocationUnavailable, CategoryUnavailable},
 		{jwks.ErrUnavailable, CategoryUnavailable},
 		{ErrCursorRepeated, CategoryUnavailable},
 		{ErrNoRevocationLineage, CategoryUnavailable},
@@ -101,6 +102,31 @@ func TestEveryGatewayStatusIsUnavailable(t *testing.T) {
 		gateway := p.Status == http.StatusBadGateway || p.Status == http.StatusServiceUnavailable
 		if gateway != (r.category == CategoryUnavailable) {
 			t.Errorf("%s answers %d in category %q", r.code, p.Status, r.category)
+		}
+	}
+}
+
+// statusClass is the class of an HTTP status: its hundreds.
+func statusClass(status int) int { return status / 100 }
+
+// A category spans one class of status: the client's 4xx or the server's
+// 5xx, never both, so whose fault an error is follows from its category.
+func TestEveryCategoryIsOneStatusClass(t *testing.T) {
+	standInExchange(t)
+	classes := map[Category]map[int][]Code{}
+	for _, code := range Codes() {
+		p, ok := ProblemOfCode(code)
+		if !ok {
+			t.Fatalf("ProblemOfCode(%q) answers nothing", code)
+		}
+		if classes[p.Category] == nil {
+			classes[p.Category] = map[int][]Code{}
+		}
+		classes[p.Category][statusClass(p.Status)] = append(classes[p.Category][statusClass(p.Status)], code)
+	}
+	for category, byClass := range classes {
+		if len(byClass) != 1 {
+			t.Errorf("category %q spans status classes %v", category, byClass)
 		}
 	}
 }

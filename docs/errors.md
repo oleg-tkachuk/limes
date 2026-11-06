@@ -151,8 +151,8 @@ reason.
 - **A 409** is a request that disagrees with what is on record: read it
   again, and decide.
 
-`limes.Codes()` lists every code, the meter's and the exchange's among
-them, so a consumer's test can prove its own mapping covers them all
+`limes.Codes()` lists every code, the meter's among them and, in a
+binary that links the exchange in, the exchange's, so a consumer's test can prove its own mapping covers them all
 (`limestest`, under [Categories](#categories)). A code's status, category and
 reason are part of the contract ([compatibility.md](compatibility.md)):
 changing one is a break, marked and listed in the release notes, and these
@@ -174,9 +174,13 @@ rather than every code:
 | `not_found` | What the request names is not on record. |
 | `conflict` | The request disagrees with what is on record: read it again, and decide. |
 | `already_exists` | What the request would create is on record already: read it rather than create it again. |
-| `precondition` | The request is well formed, and the state it needs is not there — the store's configuration, the ledger, another capability's lease: it fails again until that state changes. |
+| `precondition` | The request is well formed, and the state it needs is not on record — the ledger's room, the charge it refunds, another capability's lease: it fails again until that state changes. |
 | `unavailable` | A dependency failed on this request — did not answer, or answered a page it had already given: retry later. |
-| `internal` | The server's configuration or a store failed: the server's to fix. |
+| `internal` | The server's configuration or a store failed: the server's to fix. A feature the server does not run — leasing, a proof checker — is its configuration. |
+
+Each category spans one class of status: every code of it is the client's,
+a 4xx, or every one the server's, a 5xx. Whose fault an error is follows
+from its category.
 
 The status stays the finer answer: within `exhausted`, a permanent refusal
 (`request_limit_exceeded`) never lifts while a budget can.
@@ -228,7 +232,8 @@ status and category, for a consumer that answers in HTTP's terms.
 A category says what retrying would do, not how bad the failure is, and
 agrees with the status: every 502 and 503 is `unavailable`, a dependency
 that failed and may answer the next time — the issuer's keys
-(`keys_unavailable`), a store whose pages handed back a cursor already
+(`keys_unavailable`), the store or upstream that answers revocation
+lookups (`revocation_unavailable`), a store whose pages handed back a cursor already
 fetched (`cursor_repeated`), which a walk begun again can get past once
 whatever moved its listing settles, and a revocation upstream that names
 no lineage (`no_revocation_lineage`), which `NewRevocationCache` refuses
@@ -245,6 +250,7 @@ unauthenticated code, not to its permission-denied one.
 | `malformed_authorization` | 400 | `limes.ErrMalformedAuthorization` | `malformed_authorization` (permanent) | `invalid_request` | The Authorization header is malformed | `invalid` |
 | `no_credentials` | 401 | `limes.ErrNoCredentials` | `no_credentials` |  | Credentials are required | `unauthenticated` |
 | `keys_unavailable` | 503 | `jwks.ErrUnavailable` | `keys_unavailable` |  | The issuer's keys cannot be fetched | `unavailable` |
+| `revocation_unavailable` | 503 | `limes.ErrRevocationUnavailable` | `revocation_unavailable` |  | The revocation status cannot be checked | `unavailable` |
 | `nonce_required` | 401 | `dpop.ErrNonceRequired` | `nonce_required` | `use_dpop_nonce` | A DPoP proof with the server's nonce is required | `unauthenticated` |
 | `proof_required` | 401 | `dpop.ErrRequired` | `proof_required` | `invalid_dpop_proof` | The DPoP proof is missing or invalid | `unauthenticated` |
 | `proof_invalid` | 401 | `dpop.ErrInvalid` | `proof_invalid` | `invalid_dpop_proof` | The DPoP proof is missing or invalid | `unauthenticated` |
@@ -284,7 +290,7 @@ unauthenticated code, not to its permission-denied one.
 | `unknown_tenant` | 404 | `limes.ErrUnknownTenant` |  |  | The tenant is unknown | `not_found` |
 | `tenant_deleted` | 410 | `limes.ErrTenantDeleted` |  |  | The tenant is deleted | `not_found` |
 | `scope_mismatch` | 500 | `limes.ErrScopeMismatch` |  |  | The call is scoped to another tenant than its request names | `internal` |
-| `proof_unsupported` | 500 | `limes.ErrProofUnsupported` |  |  | The capability is bound to a key and no proof is checked | `precondition` |
+| `proof_unsupported` | 500 | `limes.ErrProofUnsupported` |  |  | The capability is bound to a key and no proof is checked | `internal` |
 | `no_revocation_lineage` | 502 | `limes.ErrNoRevocationLineage` |  |  | The revocation upstream names no lineage | `unavailable` |
 | `copy_counters_not_metered` | 500 | `limes.ErrCopyCountersNotMetered` |  |  | Copy limits need a verifier that meters copies | `internal` |
 | `cursor_repeated` | 502 | `limes.ErrCursorRepeated` |  |  | The store returned a cursor already fetched | `unavailable` |
@@ -315,8 +321,8 @@ them, and may leave them out of a check of its own mapping
 | `lease_requests_exhausted` | 403 | `meter.ErrLeaseRequestsExhausted` | `request_limit_exceeded` (permanent) |  | The token's request or budget limit is exhausted | `exhausted` |
 | `lease_not_found` | 404 | `meter.ErrLeaseNotFound` |  |  | The capability holds no lease | `not_found` |
 | `lease_nested` | 409 | `meter.ErrLeaseNested` |  |  | An ancestor of the capability holds a lease | `precondition` |
-| `leasing_disabled` | 500 | `meter.ErrLeasingDisabled` |  |  | Leasing is not enabled on the store | `precondition` |
-| `feature_disabled` | 500 | `meter.ErrFeatureDisabled` |  |  | A feature is disabled by the store's configuration | `precondition` |
+| `leasing_disabled` | 500 | `meter.ErrLeasingDisabled` |  |  | Leasing is not enabled on the store | `internal` |
+| `feature_disabled` | 500 | `meter.ErrFeatureDisabled` |  |  | A feature is disabled by the store's configuration | `internal` |
 
 ## The exchange's codes
 
@@ -325,10 +331,18 @@ in RFC 6749 §5.2's format, as the token endpoint does. The codes are RFC
 6749's, RFC 8707's `invalid_target`, RFC 9396's
 `invalid_authorization_details` and RFC 9449's DPoP codes.
 
-They are limes's codes too: each sentinel of the exchange names its own,
-so `limes.CodeOf`, `limes.CategoryOf` and `limes.ProblemOf` answer an
-exchange's error as the endpoint does — with the same code and status,
-ahead of any limes error it wraps — and `limes.Codes()` lists them. One
+They are limes's codes too: each sentinel of the exchange carries its
+own code, status, title and category, so `limes.CodeOf`,
+`limes.CategoryOf` and `limes.ProblemOf` answer an exchange's error as the
+endpoint does — with the same code and status, ahead of any limes error it
+wraps — and the exchange registers them as it initialises, so
+`limes.Codes()`, `limes.ProblemOfCode` and `limes.CategoryOfCode` answer
+them in a binary that links the exchange in. limes holds no table of them:
+the exchange adds a code without a release of limes. An error an
+`Exchanger` returns that is no refusal of the client's — the issuer, a
+store or the policy failing — wraps `exchange.ErrServerError`, so
+`limes.ProblemOf` answers it `server_error`, 500, as the endpoint does,
+whatever limes error it wraps. One
 mapping of the categories covers the exchange. A consumer that runs no exchange never meets these codes,
 and may leave them out of a check of its own mapping
 (`limestest.WithoutExchange`).
@@ -375,6 +389,7 @@ type means the same for the whole of v1.
 | <a id="malformed_authorization"></a>`malformed_authorization` | 400 | [limes's codes](#limess-codes) |
 | <a id="no_credentials"></a>`no_credentials` | 401 | [limes's codes](#limess-codes) |
 | <a id="keys_unavailable"></a>`keys_unavailable` | 503 | [limes's codes](#limess-codes) |
+| <a id="revocation_unavailable"></a>`revocation_unavailable` | 503 | [limes's codes](#limess-codes) |
 | <a id="nonce_required"></a>`nonce_required` | 401 | [limes's codes](#limess-codes) |
 | <a id="proof_required"></a>`proof_required` | 401 | [limes's codes](#limess-codes) |
 | <a id="proof_invalid"></a>`proof_invalid` | 401 | [limes's codes](#limess-codes) |
@@ -447,6 +462,7 @@ type means the same for the whole of v1.
 | <a id="use_dpop_nonce"></a>`use_dpop_nonce` | 400 | [The exchange's codes](#the-exchanges-codes) |
 | <a id="invalid_dpop_proof"></a>`invalid_dpop_proof` | 400 | [The exchange's codes](#the-exchanges-codes) |
 | <a id="keys-unavailable"></a>`keys-unavailable` | 503 | A refusal with no `reason`: The issuer's keys cannot be fetched |
+| <a id="revocation-unavailable"></a>`revocation-unavailable` | 503 | A refusal with no `reason`: The revocation status cannot be checked |
 | <a id="malformed-authorization"></a>`malformed-authorization` | 400 | A refusal with no `reason`: The Authorization header is malformed |
 | <a id="no-credentials"></a>`no-credentials` | 401 | A refusal with no `reason`: Credentials are required |
 | <a id="dpop-nonce-required"></a>`dpop-nonce-required` | 401 | A refusal with no `reason`: A DPoP proof with the server's nonce is required |

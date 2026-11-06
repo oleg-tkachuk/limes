@@ -3,6 +3,12 @@
 // import it, refuse with the same sentinels limes exports
 // (limes.ErrInvalidRequest, limes.ErrInvalidConfig, limes.ErrInternal):
 // one value under each name, matched by errors.Is from any of them.
+//
+// It is a frozen surface. The nested modules (exchange, biscuit,
+// redisreplay, pgstore) import it from production code, and a released
+// version of each must still build against every later limes of the same
+// major: nothing here is removed, renamed or changed in signature. CI holds
+// it so (task verify:nested-internals, .github/ci/nested-internals.ts).
 package errs
 
 import (
