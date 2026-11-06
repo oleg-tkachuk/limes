@@ -131,18 +131,25 @@ func (c BiscuitCopy) Copies() []CopyCeiling { return cloneCopyCeilings(c.copies)
 // not checked: a copy can be revoked whatever its state. Nor is MeterCopies:
 // a copy carrying limits is named, and can be revoked, on any verifier.
 func (v *Verifier) BiscuitCopy(ctx context.Context, token string) (BiscuitCopy, error) {
-	if !isBiscuit(token) {
-		return BiscuitCopy{}, fmt.Errorf("%w: not a Biscuit token", ErrInvalidToken)
-	}
-	if len(token) > v.cfg.MaxTokenBytes {
-		return BiscuitCopy{}, fmt.Errorf("%w: token is %d bytes (limit %d)",
-			ErrInvalidToken, len(token), v.cfg.MaxTokenBytes)
-	}
-	c, ids, err := v.verifyBiscuit(ctx, token)
+	c, ids, err := v.biscuitCopy(ctx, token)
+	v.observe(ctx, VerifierOperationBiscuitCopy, c, true, err)
 	if err != nil {
 		return BiscuitCopy{}, err
 	}
 	return BiscuitCopy{capabilityID: c.ID, revocationID: slices.Clone(ids[len(ids)-1]), copies: cloneCopyCeilings(c.copies)}, nil
+}
+
+// biscuitCopy is BiscuitCopy, unlogged: the grant token carries and the
+// revocation ids of its chain.
+func (v *Verifier) biscuitCopy(ctx context.Context, token string) (*grant, [][]byte, error) {
+	if !isBiscuit(token) {
+		return nil, nil, fmt.Errorf("%w: not a Biscuit token", ErrInvalidToken)
+	}
+	if len(token) > v.cfg.MaxTokenBytes {
+		return nil, nil, fmt.Errorf("%w: token is %d bytes (limit %d)",
+			ErrInvalidToken, len(token), v.cfg.MaxTokenBytes)
+	}
+	return v.verifyBiscuit(ctx, token)
 }
 
 func init() {

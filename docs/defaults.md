@@ -30,6 +30,8 @@ or be marked breaking by hand.
 | `limes.IssuerConfig` | `MaxTokenBytes` | `DefaultMaxTokenBytes` |  |
 | `limes.IssuerConfig` | `Now` | `time.Now` |  |
 | `limes.IssuerConfig` | `Biscuit` | refused | `Issuer.Biscuit` refuses: the issuer mints JWTs alone. |
+| `limes.IssuerConfig` | `Logger` | `slog.Default()` |  |
+| `limes.IssuerConfig` | `Events` | none | No callback is made. |
 | `limes.RevocationCacheConfig` | `Capabilities` | required |  |
 | `limes.RevocationCacheConfig` | `RequireLineage` | off | A lookup with no lineage is taken, and the cache clears whole on every `ClearRevoked`. |
 | `limes.RevocationCacheConfig` | `Biscuits` | refused | Every Biscuit question is refused. |
@@ -53,6 +55,7 @@ or be marked breaking by hand.
 | `limes.VerifierConfig` | `DPoP` | refused | Every key-bound capability is refused with `ErrProofUnsupported`. |
 | `limes.VerifierConfig` | `Realm` | `DefaultRealm` |  |
 | `limes.VerifierConfig` | `Logger` | `slog.Default()` |  |
+| `limes.VerifierConfig` | `Events` | none | No callback is made. |
 | `limes.BiscuitConfig` | `Revocations` | required |  |
 | `limes.BiscuitConfig` | `Form` | required |  |
 | `limes.BiscuitConfig` | `MeterCopies` | off | A Biscuit setting a copy's own limits is refused with `ErrCopyCountersNotMetered`. |

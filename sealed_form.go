@@ -87,8 +87,10 @@ func isBiscuit(token string) bool {
 func (i *Issuer) Biscuit(ctx context.Context, req BiscuitRequest) (BiscuitResult, error) {
 	token, err := i.biscuit(ctx, req.Capability)
 	if err != nil {
+		i.refused(ctx, IssuerOperationBiscuit, req.Capability.c.ID, err)
 		return BiscuitResult{}, err
 	}
+	i.issued(ctx, IssuerOperationBiscuit, req.Capability.c)
 	return BiscuitResult{Token: token}, nil
 }
 

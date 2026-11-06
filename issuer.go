@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"fmt"
+	"log/slog"
 	"slices"
 	"time"
 	"uuid"
@@ -34,6 +35,9 @@ type Issuer struct {
 	maxTokenBytes int
 	// form seals a capability in the Biscuit form (Biscuit).
 	form TokenForm
+
+	logger *slog.Logger
+	events IssuerEvents
 }
 
 // DefaultIssueTTL is IssuerConfig.DefaultTTL when it is zero.
@@ -70,6 +74,17 @@ type IssuerConfig struct {
 	// github.com/oleg-tkachuk/limes/biscuit's Form. Nil: Issuer.Biscuit
 	// refuses, and this issuer mints JWTs alone.
 	Biscuit TokenForm
+
+	// Logger logs everything the issuer does, naming capabilities by id and
+	// never logging a token or a key: each token minted and each revocation
+	// at INFO, each request refused at WARN, each call that failed for the
+	// server's own reasons — a store or a signer — at ERROR. Nil:
+	// slog.Default().
+	Logger *slog.Logger
+
+	// Events are called beside the log, for metrics or an audit sink. The
+	// zero IssuerEvents calls nothing.
+	Events IssuerEvents
 }
 
 // NewIssuer validates wiring and returns a ready Issuer.
@@ -106,6 +121,8 @@ func NewIssuer(cfg IssuerConfig) (*Issuer, error) {
 		defaultTTL:    cfg.DefaultTTL,
 		maxTokenBytes: cfg.MaxTokenBytes,
 		form:          cfg.Biscuit,
+		logger:        cfg.Logger,
+		events:        cfg.Events,
 	}, nil
 }
 
@@ -193,7 +210,14 @@ type IssueResult struct {
 
 // Issue mints a top-level capability.
 func (i *Issuer) Issue(ctx context.Context, req IssueRequest) (IssueResult, error) {
-	return result(i.issue(ctx, req))
+	res, err := result(i.issue(ctx, req))
+	if err != nil {
+		i.refused(ctx, IssuerOperationIssue, uuid.Nil(), err,
+			slog.String(logKeySubject, req.Subject.Subject), slog.String(logKeyTenant, req.Subject.TenantID.String()))
+		return IssueResult{}, err
+	}
+	i.issued(ctx, IssuerOperationIssue, res.Capability)
+	return res, nil
 }
 
 // Reissue signs the capability on record under id again, and records
@@ -204,6 +228,17 @@ func (i *Issuer) Issue(ctx context.Context, req IssueRequest) (IssueResult, erro
 // (ErrExpired) or revoked (ErrRevoked), and an issuer whose store reads no
 // record (a RecordReader, as every Store is) with ErrInvalidRequest.
 func (i *Issuer) Reissue(ctx context.Context, id uuid.UUID) (IssueResult, error) {
+	res, err := i.reissue(ctx, id)
+	if err != nil {
+		i.refused(ctx, IssuerOperationReissue, id, err)
+		return IssueResult{}, err
+	}
+	i.issued(ctx, IssuerOperationReissue, res.Capability)
+	return res, nil
+}
+
+// reissue is Reissue, unlogged.
+func (i *Issuer) reissue(ctx context.Context, id uuid.UUID) (IssueResult, error) {
 	records, ok := i.store.(RecordReader)
 	if !ok {
 		return IssueResult{}, invalidRequest("IssuerConfig.Store reads no record back (RecordReader), so nothing can be reissued")
@@ -481,7 +516,14 @@ type DelegateRequest struct {
 // request of the child is one more on the parent's counter as well, and a
 // parent's limits bound everything delegated from it.
 func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (IssueResult, error) {
-	return result(i.delegate(ctx, req))
+	res, err := result(i.delegate(ctx, req))
+	if err != nil {
+		i.refused(ctx, IssuerOperationDelegate, req.Parent.c.ID, err,
+			slog.String(logKeySubject, req.Subject.Subject))
+		return IssueResult{}, err
+	}
+	i.issued(ctx, IssuerOperationDelegate, res.Capability)
+	return res, nil
 }
 
 // delegate is Delegate, returning the capability and its token apart.
