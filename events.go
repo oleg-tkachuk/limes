@@ -42,6 +42,7 @@ const (
 	logKeySession        = "session"
 	logKeyRun            = "run"
 	logKeySubjectIssuer  = "subject_issuer"
+	logKeyDuration       = "duration"
 )
 
 // IssuerOperation names what an Issuer was asked to do, in its log lines
@@ -87,6 +88,11 @@ const (
 // optional. They run synchronously, on the caller's goroutine, after the
 // outcome is logged and before the method returns: a callback must not
 // block, and must not panic — the issuer does not recover one.
+//
+// The callbacks are independent: each outcome calls one of them, and a nil
+// one drops its events without a word. An audit sink that must see every
+// call sets OnIssued, OnRefused and OnFailed all. ADR-0021 records the
+// design.
 type IssuerEvents struct {
 	// OnIssued is called for every token minted: by Issue, Delegate,
 	// Reissue and Biscuit, which IssuedEvent.Operation tells apart.
@@ -107,6 +113,9 @@ type IssuedEvent struct {
 	// Capability is the capability the token carries: a copy, the
 	// callback's own.
 	Capability Capability
+	// Duration is the call's elapsed time, from its entry to the outcome,
+	// on the monotonic clock.
+	Duration time.Duration
 }
 
 // IssuerErrorEvent is one call an Issuer refused, or that failed.
@@ -122,6 +131,9 @@ type IssuerErrorEvent struct {
 	Code Code
 	// Err is the error the call returned.
 	Err error
+	// Duration is the call's elapsed time, from its entry to the outcome,
+	// on the monotonic clock.
+	Duration time.Duration
 }
 
 // VerifierEvents are the callbacks a Verifier makes as it checks tokens
@@ -130,6 +142,11 @@ type IssuerErrorEvent struct {
 // request the verifier checks waits for them — after the outcome is logged
 // and before the method returns: a callback must not block, and must not
 // panic — the verifier does not recover one.
+//
+// The callbacks are independent: each outcome calls one of them, and a nil
+// one drops its events without a word. An audit sink that must see every
+// check sets OnVerified, OnRefused and OnFailed all. ADR-0021 records the
+// design.
 type VerifierEvents struct {
 	// OnVerified is called for every token the verifier accepted: by
 	// Verify, Authorize, Introspect and BiscuitCopy.
@@ -155,6 +172,9 @@ type VerifiedEvent struct {
 	Subject      string
 	// FromBiscuit reports that the token is a Biscuit.
 	FromBiscuit bool
+	// Duration is the call's elapsed time, from its entry to the outcome,
+	// on the monotonic clock.
+	Duration time.Duration
 }
 
 // VerifierErrorEvent is one token a Verifier refused, or a check that
@@ -177,6 +197,9 @@ type VerifierErrorEvent struct {
 	TenantID      uuid.UUID
 	// Err is the error the call returned.
 	Err error
+	// Duration is the call's elapsed time, from its entry to the outcome,
+	// on the monotonic clock.
+	Duration time.Duration
 }
 
 // RevokerEvents are the callbacks a Revoker makes as it revokes
@@ -220,6 +243,9 @@ type RevokedEvent struct {
 	Revoked int64
 	Tenants []uuid.UUID
 	More    bool
+	// Duration is the call's elapsed time, from its entry to the outcome,
+	// on the monotonic clock.
+	Duration time.Duration
 }
 
 // RevokerErrorEvent is one call a Revoker's store refused, or that failed.
@@ -236,6 +262,9 @@ type RevokerErrorEvent struct {
 	Code Code
 	// Err is the error the call returned.
 	Err error
+	// Duration is the call's elapsed time, from its entry to the outcome,
+	// on the monotonic clock.
+	Duration time.Duration
 }
 
 // isFailure reports whether err is the server's failure rather than a

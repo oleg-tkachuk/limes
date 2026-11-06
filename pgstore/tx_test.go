@@ -58,10 +58,10 @@ func TestTxFromIsTheChargesTransaction(t *testing.T) {
 // sqlChargeCount counts the ledger rows of one charge id.
 const sqlChargeCount = `SELECT count(*) FROM ` + schema + `.charges WHERE id = $1`
 
-// onCharged runs once the charge's writes are sent, before COMMIT, so the
-// locks are held for no round trip of its own: through TxFrom it reads the
-// ledger row under the receipt's ChargeID, and the receipt is the one the
-// call returns.
+// onCharged runs once the charge's writes are sent, before COMMIT, so that
+// its own writes see the charge: through TxFrom it reads the ledger row
+// under the receipt's ChargeID, and the receipt is the one the call
+// returns.
 func TestOnChargedRunsAfterTheWrites(t *testing.T) {
 	f := newTenantFixture(t)
 	ctx := WithTenant(t.Context(), f.mine)

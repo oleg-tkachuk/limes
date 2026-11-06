@@ -85,12 +85,13 @@ func isBiscuit(token string) bool {
 // sets limits of its own is counted against Caveats.Copies. Delegate, which
 // has the issuer mint a new principal, still requires OpShare.
 func (i *Issuer) Biscuit(ctx context.Context, req BiscuitRequest) (BiscuitResult, error) {
+	start := time.Now()
 	token, err := i.biscuit(ctx, req.Capability)
 	if err != nil {
-		i.refused(ctx, IssuerOperationBiscuit, req.Capability.c.ID, err)
+		i.refused(ctx, IssuerOperationBiscuit, start, req.Capability.c.ID, err)
 		return BiscuitResult{}, err
 	}
-	i.issued(ctx, IssuerOperationBiscuit, req.Capability.c)
+	i.issued(ctx, IssuerOperationBiscuit, start, req.Capability.c)
 	return BiscuitResult{Token: token}, nil
 }
 

@@ -384,8 +384,9 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (VerifiedCapab
 
 // verifyObserved is verify, logged and reported as op (observe).
 func (v *Verifier) verifyObserved(ctx context.Context, op VerifierOperation, req VerifyRequest, accept func(Capability) error) (VerifiedCapability, error) {
+	start := time.Now()
 	vc, cap, err := v.verify(ctx, req, accept)
-	v.observe(ctx, op, cap, vc.fromBiscuit, err)
+	v.observe(ctx, op, start, cap, vc.fromBiscuit, err)
 	if err != nil {
 		return VerifiedCapability{}, err
 	}
@@ -633,8 +634,9 @@ type Introspection struct {
 // Introspect is no authorization: it yields no VerifiedCapability, so its
 // answer can be neither delegated from nor checked against a request.
 func (v *Verifier) Introspect(ctx context.Context, token string) (Introspection, error) {
+	start := time.Now()
 	in, cap, err := v.introspect(ctx, token)
-	v.observe(ctx, VerifierOperationIntrospect, cap, in.FromBiscuit, err)
+	v.observe(ctx, VerifierOperationIntrospect, start, cap, in.FromBiscuit, err)
 	if err != nil {
 		return Introspection{}, err
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"slices"
+	"time"
 	"uuid"
 )
 
@@ -97,6 +98,7 @@ func NewRevoker(cfg RevokerConfig) (*Revoker, error) {
 // Revoke revokes one capability through the store (RevocationStore.Revoke),
 // then drops what that outdates from the cache.
 func (r *Revoker) Revoke(ctx context.Context, req RevokeRequest) (RevokeResult, error) {
+	start := time.Now()
 	attrs := []slog.Attr{
 		slog.String(logKeyCapability, req.CapabilityID.String()),
 		slog.String(logKeyActor, req.Actor),
@@ -105,7 +107,7 @@ func (r *Revoker) Revoke(ctx context.Context, req RevokeRequest) (RevokeResult, 
 	}
 	res, err := r.store.Revoke(ctx, req)
 	if err != nil {
-		r.refused(ctx, RevokerErrorEvent{Operation: RevokerOperationRevoke, CapabilityID: req.CapabilityID, Err: err}, attrs)
+		r.refused(ctx, start, RevokerErrorEvent{Operation: RevokerOperationRevoke, CapabilityID: req.CapabilityID, Err: err}, attrs)
 		return res, err
 	}
 	if r.cache != nil {
@@ -114,7 +116,7 @@ func (r *Revoker) Revoke(ctx context.Context, req RevokeRequest) (RevokeResult, 
 	attrs = append(attrs,
 		slog.Bool(logKeyAlreadyRevoked, res.AlreadyRevoked),
 		slog.String(logKeyPrior, string(res.PriorDisposition)))
-	r.revoked(ctx, RevokedEvent{
+	r.revoked(ctx, start, RevokedEvent{
 		Operation: RevokerOperationRevoke, CapabilityID: req.CapabilityID,
 		Actor: req.Actor, Note: req.Note,
 		AlreadyRevoked: res.AlreadyRevoked, PriorDisposition: res.PriorDisposition,
@@ -125,14 +127,15 @@ func (r *Revoker) Revoke(ctx context.Context, req RevokeRequest) (RevokeResult, 
 // RevokeMatching revokes a batch of the capabilities matching req through
 // the BulkRevoker, then clears the cache. Without one it is ErrInvalidConfig.
 func (r *Revoker) RevokeMatching(ctx context.Context, req RevokeMatchingRequest) (RevokeMatchingResult, error) {
+	start := time.Now()
 	attrs := matchingAttrs(req)
 	if r.bulk == nil {
-		r.refused(ctx, RevokerErrorEvent{Operation: RevokerOperationRevokeMatching, TenantID: req.TenantID, Err: errNoRevokerBulk}, attrs)
+		r.refused(ctx, start, RevokerErrorEvent{Operation: RevokerOperationRevokeMatching, TenantID: req.TenantID, Err: errNoRevokerBulk}, attrs)
 		return RevokeMatchingResult{}, errNoRevokerBulk
 	}
 	res, err := r.bulk.RevokeMatching(ctx, req)
 	if err != nil {
-		r.refused(ctx, RevokerErrorEvent{Operation: RevokerOperationRevokeMatching, TenantID: req.TenantID, Err: err}, attrs)
+		r.refused(ctx, start, RevokerErrorEvent{Operation: RevokerOperationRevokeMatching, TenantID: req.TenantID, Err: err}, attrs)
 		return res, err
 	}
 	if r.cache != nil {
@@ -146,7 +149,7 @@ func (r *Revoker) RevokeMatching(ctx context.Context, req RevokeMatchingRequest)
 		slog.Int64(logKeyRevoked, res.Revoked),
 		slog.Any(logKeyTenants, tenants),
 		slog.Bool(logKeyMore, res.More))
-	r.revoked(ctx, RevokedEvent{
+	r.revoked(ctx, start, RevokedEvent{
 		Operation: RevokerOperationRevokeMatching, TenantID: req.TenantID,
 		Actor: req.Actor, Note: req.Note,
 		Revoked: res.Revoked, Tenants: slices.Clone(res.Tenants), More: res.More,
@@ -158,6 +161,7 @@ func (r *Revoker) RevokeMatching(ctx context.Context, req RevokeMatchingRequest)
 // then clears the cache. Without one it is ErrInvalidConfig. The copy is
 // logged by its capability's id alone.
 func (r *Revoker) RevokeBiscuit(ctx context.Context, req RevokeBiscuitRequest) (RevokeBiscuitResult, error) {
+	start := time.Now()
 	id := req.Copy.CapabilityID()
 	attrs := []slog.Attr{
 		slog.String(logKeyCapability, id.String()),
@@ -165,19 +169,19 @@ func (r *Revoker) RevokeBiscuit(ctx context.Context, req RevokeBiscuitRequest) (
 		slog.String(logKeyNote, req.Note),
 	}
 	if r.biscuits == nil {
-		r.refused(ctx, RevokerErrorEvent{Operation: RevokerOperationRevokeBiscuit, CapabilityID: id, Err: errNoRevokerBiscuits}, attrs)
+		r.refused(ctx, start, RevokerErrorEvent{Operation: RevokerOperationRevokeBiscuit, CapabilityID: id, Err: errNoRevokerBiscuits}, attrs)
 		return RevokeBiscuitResult{}, errNoRevokerBiscuits
 	}
 	res, err := r.biscuits.RevokeBiscuit(ctx, req)
 	if err != nil {
-		r.refused(ctx, RevokerErrorEvent{Operation: RevokerOperationRevokeBiscuit, CapabilityID: id, Err: err}, attrs)
+		r.refused(ctx, start, RevokerErrorEvent{Operation: RevokerOperationRevokeBiscuit, CapabilityID: id, Err: err}, attrs)
 		return res, err
 	}
 	if r.cache != nil {
 		r.cache.Clear()
 	}
 	attrs = append(attrs, slog.Bool(logKeyAlreadyRevoked, res.AlreadyRevoked))
-	r.revoked(ctx, RevokedEvent{
+	r.revoked(ctx, start, RevokedEvent{
 		Operation: RevokerOperationRevokeBiscuit, CapabilityID: id,
 		Actor: req.Actor, Note: req.Note, AlreadyRevoked: res.AlreadyRevoked,
 	}, attrs)

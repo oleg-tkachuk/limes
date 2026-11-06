@@ -89,8 +89,14 @@ every call that writes counters takes, so none deadlocks another.
 5. **What a consumer hooks in keeps its place.** A custom `Config.Scope`
    runs as now, before the read batch, one round trip more. A charge with
    `onCharged` runs it after the write batch's statements and before
-   `COMMIT`, which then goes on its own, one round trip more; `TxFrom`
-   still hands it the transaction, the connection-backed `pgx.Tx` of (1).
+   `COMMIT`, so that the callback's own writes — an outbox row with a
+   foreign key to the ledger — see the charge's row. `COMMIT` then cannot
+   ride in the last write batch and goes on its own, one round trip more:
+   `Charge` with a callback takes 5, without 4. The order shortens no
+   lock: the tenant's aggregate and the counters are locked before the
+   write batch and held to `COMMIT` whether `onCharged` runs before the
+   writes or after them. `TxFrom` still hands it the transaction, the
+   connection-backed `pgx.Tx` of (1).
 6. **The scale benchmarks hold it**: `Charge` at three round trips and
    `Bump` at three, whatever the depth, and the tenant's parallel charges
    at the added latency measured before and after.

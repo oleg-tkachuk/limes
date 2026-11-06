@@ -3,6 +3,7 @@ package limes
 import (
 	"context"
 	"log/slog"
+	"time"
 	"uuid"
 )
 
@@ -13,13 +14,16 @@ const (
 	msgVerifierFailed  = "limes: verifier check failed"
 )
 
-// observe logs a call to op and calls the event it makes (VerifierEvents):
-// accepted when err is nil, refused or failed otherwise. cap is the grant
-// once the token's signature verified, nil before; fromBiscuit, that the
-// accepted token is a Biscuit. The levels are VerifierConfig.Logger's.
-func (v *Verifier) observe(ctx context.Context, op VerifierOperation, cap *grant, fromBiscuit bool, err error) {
+// observe logs a call to op that began at start and calls the event it
+// makes (VerifierEvents): accepted when err is nil, refused or failed
+// otherwise. cap is the grant once the token's signature verified, nil
+// before; fromBiscuit, that the accepted token is a Biscuit. The levels are
+// VerifierConfig.Logger's. With no event set and the line's level off, it
+// allocates nothing.
+func (v *Verifier) observe(ctx context.Context, op VerifierOperation, start time.Time, cap *grant, fromBiscuit bool, err error) {
+	elapsed := time.Since(start)
 	if err == nil {
-		v.accepted(ctx, op, cap, fromBiscuit)
+		v.accepted(ctx, op, elapsed, cap, fromBiscuit)
 		return
 	}
 	failed := isFailure(err)
@@ -32,12 +36,13 @@ func (v *Verifier) observe(ctx context.Context, op VerifierOperation, cap *grant
 	}
 	if logger := v.logger(); logger.Enabled(ctx, level) {
 		attrs := append(grantAttrs(op, cap), errorAttrs(err)...)
+		attrs = append(attrs, slog.Duration(logKeyDuration, elapsed))
 		logger.LogAttrs(ctx, level, msg, attrs...)
 	}
 	if hook == nil {
 		return
 	}
-	ev := VerifierErrorEvent{Operation: op, Err: err}
+	ev := VerifierErrorEvent{Operation: op, Err: err, Duration: elapsed}
 	ev.Reason, _ = ReasonOf(err)
 	ev.Code, _ = CodeOf(err)
 	if cap != nil {
@@ -46,16 +51,18 @@ func (v *Verifier) observe(ctx context.Context, op VerifierOperation, cap *grant
 	hook(ctx, ev)
 }
 
-// accepted logs, at DEBUG, a token op accepted, and calls OnVerified.
-func (v *Verifier) accepted(ctx context.Context, op VerifierOperation, cap *grant, fromBiscuit bool) {
+// accepted logs, at DEBUG, a token op accepted after elapsed, and calls
+// OnVerified.
+func (v *Verifier) accepted(ctx context.Context, op VerifierOperation, elapsed time.Duration, cap *grant, fromBiscuit bool) {
 	if logger := v.logger(); logger.Enabled(ctx, slog.LevelDebug) {
-		attrs := append(grantAttrs(op, cap), slog.Bool(logKeyBiscuit, fromBiscuit))
+		attrs := append(grantAttrs(op, cap), slog.Bool(logKeyBiscuit, fromBiscuit), slog.Duration(logKeyDuration, elapsed))
 		logger.LogAttrs(ctx, slog.LevelDebug, msgVerified, attrs...)
 	}
 	if v.cfg.Events.OnVerified != nil {
 		v.cfg.Events.OnVerified(ctx, VerifiedEvent{
 			Operation: op, CapabilityID: cap.ID, Issuer: cap.Issuer,
 			TenantID: cap.Subject.TenantID, Subject: cap.Subject.Subject, FromBiscuit: fromBiscuit,
+			Duration: elapsed,
 		})
 	}
 }

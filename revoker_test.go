@@ -410,3 +410,34 @@ func TestRevokerClearsNothingOnFailure(t *testing.T) {
 		t.Errorf("the cache was cleared %d times after failures", stats.Clears)
 	}
 }
+
+// slowRevoke revokes as its fakeRevocations does, after slowStoreDelay.
+type slowRevoke struct{ *fakeRevocations }
+
+func (s slowRevoke) Revoke(ctx context.Context, req RevokeRequest) (RevokeResult, error) {
+	time.Sleep(slowStoreDelay)
+	return s.fakeRevocations.Revoke(ctx, req)
+}
+
+// A revocation's event carries how long the call took, carried out or not.
+func TestRevokerReportsTheCallsDuration(t *testing.T) {
+	for name, err := range map[string]error{"revoked": nil, "refused": notOnRecord(uuid.New()), "failed": errors.New("store down")} {
+		t.Run(name, func(t *testing.T) {
+			store := newFakeRevocations()
+			store.err = err
+			var ev revokerEvents
+			r := newTestRevoker(t, RevokerConfig{Store: slowRevoke{store}, Logger: slog.New(slog.DiscardHandler), Events: ev.hooks()})
+			_, _ = r.Revoke(context.Background(), RevokeRequest{CapabilityID: uuid.New(), Actor: "ops"})
+			var got []time.Duration
+			for _, e := range ev.revoked {
+				got = append(got, e.Duration)
+			}
+			for _, e := range append(ev.refused, ev.failed...) {
+				got = append(got, e.Duration)
+			}
+			if len(got) != 1 || got[0] < slowStoreDelay {
+				t.Fatalf("durations = %v, want one of at least %s", got, slowStoreDelay)
+			}
+		})
+	}
+}

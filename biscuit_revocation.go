@@ -131,8 +131,9 @@ func (c BiscuitCopy) Copies() []CopyCeiling { return cloneCopyCeilings(c.copies)
 // not checked: a copy can be revoked whatever its state. Nor is MeterCopies:
 // a copy carrying limits is named, and can be revoked, on any verifier.
 func (v *Verifier) BiscuitCopy(ctx context.Context, token string) (BiscuitCopy, error) {
+	start := time.Now()
 	c, ids, err := v.biscuitCopy(ctx, token)
-	v.observe(ctx, VerifierOperationBiscuitCopy, c, true, err)
+	v.observe(ctx, VerifierOperationBiscuitCopy, start, c, true, err)
 	if err != nil {
 		return BiscuitCopy{}, err
 	}

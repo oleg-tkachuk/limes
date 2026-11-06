@@ -149,7 +149,12 @@ type BudgetMeter interface {
 	// the receipt the call will return (Charged), so
 	// a side effect such as an outbox write commits with the spend and names
 	// the ChargeID. Whether the ledger row is there yet to read is the
-	// store's: pgstore writes it before onCharged runs, memstore after. Pass
+	// store's: pgstore writes it before onCharged runs, memstore after.
+	// pgstore does so that what onCharged writes — an outbox row with a
+	// foreign key to the ledger, say — sees the charge's row; it costs a
+	// round trip, since COMMIT then goes after onCharged rather than with
+	// the last writes, and it shortens no lock, which the call holds to
+	// COMMIT in either order. Pass
 	// nil to skip it. It must not call back into the Meter: an
 	// implementation may hold its counters while onCharged runs, so a nested
 	// call can wait on itself. A store with transactions runs it inside the

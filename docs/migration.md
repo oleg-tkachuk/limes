@@ -162,6 +162,30 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 
 ## v0.168.0
 
+- An `Issuer` and a `Verifier` built with no `Logger` log to
+  `slog.Default()`, where they logged nothing: the issuer a line at INFO
+  for every token it mints and at WARN or ERROR for a refusal or a failure;
+  the verifier a token refused after its signature verified at WARN, a
+  failure of its own at ERROR, and a token accepted or refused before its
+  signature verified at DEBUG. A service that configured nothing sees these
+  lines in its default log. To silence them, hand each its own `Logger`,
+  one that discards or one at a higher level
+  ([ADR-0021](adr/0021-observing-issuer-and-verifier.md)):
+
+  ```go
+  quiet := slog.New(slog.DiscardHandler)
+  // or keep only failures:
+  quiet = slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+  issuer, err := limes.NewIssuer(limes.IssuerConfig{
+      // ...
+      Logger: quiet,
+  })
+  verifier, err := limes.NewVerifier(limes.VerifierConfig{
+      // ...
+      Logger: quiet,
+  })
+  ```
+
 - A proof refused because its holder has no room left in the replay
   cache is `dpop.ErrReplayQuota`, code `proof_quota_exceeded`, answered
   429 in category `exhausted` with no challenge, where it was

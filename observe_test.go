@@ -427,8 +427,13 @@ func TestVerifierEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantVerified := VerifiedEvent{Operation: VerifierOperationVerify, CapabilityID: c.ID, Issuer: c.Issuer, TenantID: c.Subject.TenantID, Subject: c.Subject.Subject}
-	if len(verified) != 1 || verified[0] != wantVerified {
-		t.Errorf("OnVerified got %+v, want %+v", verified, wantVerified)
+	if len(verified) != 1 {
+		t.Fatalf("OnVerified got %+v, want one event", verified)
+	}
+	got := verified[0]
+	got.Duration = 0
+	if got != wantVerified {
+		t.Errorf("OnVerified got %+v, want %+v", got, wantVerified)
 	}
 
 	if err := verifyData(v, "garbage"); err == nil {
@@ -532,3 +537,133 @@ func TestLogsHoldNoToken(t *testing.T) {
 		}
 	}
 }
+
+// slowStoreDelay is how long the slow fakes below take to answer, the least
+// duration a call through one of them can report.
+const slowStoreDelay = 5 * time.Millisecond
+
+// slowInsert records as its IssuanceStore does, after slowStoreDelay.
+type slowInsert struct{ IssuanceStore }
+
+func (s slowInsert) Insert(ctx context.Context, req InsertRequest) error {
+	time.Sleep(slowStoreDelay)
+	return s.IssuanceStore.Insert(ctx, req)
+}
+
+// slowRevocations answers as its RevocationLookup does, after slowStoreDelay.
+type slowRevocations struct{ RevocationLookup }
+
+func (s slowRevocations) IsRevoked(ctx context.Context, id uuid.UUID) (bool, error) {
+	time.Sleep(slowStoreDelay)
+	return s.RevocationLookup.IsRevoked(ctx, id)
+}
+
+// wantDuration fails the test unless rec logs a duration of at least
+// slowStoreDelay.
+func wantDuration(t *testing.T, what string, rec map[string]any) {
+	t.Helper()
+	got, ok := rec[logKeyDuration].(float64)
+	if !ok || time.Duration(got) < slowStoreDelay {
+		t.Errorf("%s: %s = %v, want at least %v in nanoseconds", what, logKeyDuration, rec[logKeyDuration], slowStoreDelay)
+	}
+}
+
+// Every event and every log line carries the call's duration, from entry to
+// outcome: a store that takes slowStoreDelay makes it at least that.
+func TestEventsCarryDuration(t *testing.T) {
+	ctx := context.Background()
+	issuer, v, store, _ := buildIssuerVerifier(t)
+	var issued []IssuedEvent
+	var issuerErrs []IssuerErrorEvent
+	issuer.events = IssuerEvents{
+		OnIssued: func(_ context.Context, e IssuedEvent) { issued = append(issued, e) },
+		OnFailed: func(_ context.Context, e IssuerErrorEvent) { issuerErrs = append(issuerErrs, e) },
+	}
+	var logs logCapture
+	issuer.logger, v.cfg.Logger = logs.logger(), logs.logger()
+
+	issuer.store = slowInsert{store}
+	res, err := issuer.Issue(ctx, observedIssue())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issued) != 1 || issued[0].Duration < slowStoreDelay {
+		t.Errorf("OnIssued got %+v, want a duration of at least %v", issued, slowStoreDelay)
+	}
+	wantDuration(t, "issued", logs.only(t))
+
+	logs.reset()
+	issuer.store = slowInsert{failingInsert{store}}
+	if _, err := issuer.Issue(ctx, observedIssue()); err == nil {
+		t.Fatal("issued through a store that cannot record")
+	}
+	if len(issuerErrs) != 1 || issuerErrs[0].Duration < slowStoreDelay {
+		t.Errorf("OnFailed got %+v, want a duration of at least %v", issuerErrs, slowStoreDelay)
+	}
+	wantDuration(t, "issue failed", logs.only(t))
+
+	var verified []VerifiedEvent
+	var refused, failed []VerifierErrorEvent
+	v.cfg.Events = VerifierEvents{
+		OnVerified: func(_ context.Context, e VerifiedEvent) { verified = append(verified, e) },
+		OnRefused:  func(_ context.Context, e VerifierErrorEvent) { refused = append(refused, e) },
+		OnFailed:   func(_ context.Context, e VerifierErrorEvent) { failed = append(failed, e) },
+	}
+	v.cfg.Revocations = slowRevocations{store}
+	logs.reset()
+	if err := verifyData(v, res.Token); err != nil {
+		t.Fatal(err)
+	}
+	if len(verified) != 1 || verified[0].Duration < slowStoreDelay {
+		t.Errorf("OnVerified got %+v, want a duration of at least %v", verified, slowStoreDelay)
+	}
+	wantDuration(t, "verified", logs.only(t))
+
+	store.revoked[res.Capability.ID] = true
+	logs.reset()
+	if err := verifyData(v, res.Token); err == nil {
+		t.Fatal("verified a revoked token")
+	}
+	if len(refused) != 1 || refused[0].Duration < slowStoreDelay {
+		t.Errorf("OnRefused got %+v, want a duration of at least %v", refused, slowStoreDelay)
+	}
+	wantDuration(t, "refused", logs.only(t))
+
+	v.cfg.Revocations = slowRevocations{downRevocations{}}
+	logs.reset()
+	if err := verifyData(v, res.Token); err == nil {
+		t.Fatal("verified with the revocations down")
+	}
+	if len(failed) != 1 || failed[0].Duration < slowStoreDelay {
+		t.Errorf("OnFailed got %+v, want a duration of at least %v", failed, slowStoreDelay)
+	}
+	wantDuration(t, "failed", logs.only(t))
+}
+
+// With no event set and the line's level off, observing a check allocates
+// nothing of its own: an accepted token nothing at all, a refusal only what
+// classifying its error does (isFailure). Measuring the duration costs no
+// allocation on the hot path.
+func TestObserveAllocatesNothingUnobserved(t *testing.T) {
+	_, v, _, _ := buildIssuerVerifier(t)
+	v.cfg.Logger = slog.New(slog.DiscardHandler)
+	v.cfg.Events = VerifierEvents{}
+	ctx := context.Background()
+	cap := &grant{}
+	start := time.Now()
+	for _, err := range []error{nil, ErrInvalidToken} {
+		want := 0.0
+		if err != nil {
+			want = testing.AllocsPerRun(allocRuns, func() { _ = isFailure(err) })
+		}
+		allocs := testing.AllocsPerRun(allocRuns, func() {
+			v.observe(ctx, VerifierOperationVerify, start, cap, false, err)
+		})
+		if allocs != want {
+			t.Errorf("observe with err %v allocated %v times per call, want %v", err, allocs, want)
+		}
+	}
+}
+
+// allocRuns is how many calls testing.AllocsPerRun averages over.
+const allocRuns = 100

@@ -216,13 +216,14 @@ type IssueResult struct {
 
 // Issue mints a top-level capability.
 func (i *Issuer) Issue(ctx context.Context, req IssueRequest) (IssueResult, error) {
+	start := time.Now()
 	res, err := result(i.issue(ctx, req))
 	if err != nil {
-		i.refused(ctx, IssuerOperationIssue, uuid.Nil(), err,
+		i.refused(ctx, IssuerOperationIssue, start, uuid.Nil(), err,
 			slog.String(logKeySubject, req.Subject.Subject), slog.String(logKeyTenant, req.Subject.TenantID.String()))
 		return IssueResult{}, err
 	}
-	i.issued(ctx, IssuerOperationIssue, res.Capability)
+	i.issued(ctx, IssuerOperationIssue, start, res.Capability)
 	return res, nil
 }
 
@@ -234,12 +235,13 @@ func (i *Issuer) Issue(ctx context.Context, req IssueRequest) (IssueResult, erro
 // (ErrExpired) or revoked (ErrRevoked), and an issuer whose store reads no
 // record (a RecordReader, as every Store is) with ErrInvalidRequest.
 func (i *Issuer) Reissue(ctx context.Context, id uuid.UUID) (IssueResult, error) {
+	start := time.Now()
 	res, err := i.reissue(ctx, id)
 	if err != nil {
-		i.refused(ctx, IssuerOperationReissue, id, err)
+		i.refused(ctx, IssuerOperationReissue, start, id, err)
 		return IssueResult{}, err
 	}
-	i.issued(ctx, IssuerOperationReissue, res.Capability)
+	i.issued(ctx, IssuerOperationReissue, start, res.Capability)
 	return res, nil
 }
 
@@ -522,13 +524,14 @@ type DelegateRequest struct {
 // request of the child is one more on the parent's counter as well, and a
 // parent's limits bound everything delegated from it.
 func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (IssueResult, error) {
+	start := time.Now()
 	res, err := result(i.delegate(ctx, req))
 	if err != nil {
-		i.refused(ctx, IssuerOperationDelegate, req.Parent.c.ID, err,
+		i.refused(ctx, IssuerOperationDelegate, start, req.Parent.c.ID, err,
 			slog.String(logKeySubject, req.Subject.Subject))
 		return IssueResult{}, err
 	}
-	i.issued(ctx, IssuerOperationDelegate, res.Capability)
+	i.issued(ctx, IssuerOperationDelegate, start, res.Capability)
 	return res, nil
 }
 
