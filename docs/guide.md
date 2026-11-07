@@ -729,8 +729,9 @@ usage.Charge(ctx, req, func(ctx context.Context, c meter.Charged) error {
 })
 ```
 
-The ledger row is written after the callback returns, so the callback cannot
-read it back yet; the receipt is what it has.
+Whether the ledger row is there to read yet is the store's — `pgstore`
+writes it before the callback, so an outbox row may reference it, `memstore`
+after; the receipt is what every store hands it.
 
 `Settle` takes the same callback. It must not call back into the `Meter`: a
 store may hold its counters while the callback runs. The module never names
@@ -738,8 +739,9 @@ the transaction's type — the store puts it in the callback's context and its
 own accessor reads it — which is why this library has no database dependency.
 
 `Refund` takes a callback of its own, on the same terms: it runs inside the
-refund's transaction, once the refund's writes are made and before they
-commit, and its error rolls the refund back whole. It is handed the
+refund, atomically with it, and its error rolls the refund back whole.
+Whether the refund's writes are there to read yet is the store's —
+`pgstore` makes them before the callback, `memstore` after. It is handed the
 receipt the call will return, so an outbox event names the charge, the
 amount actually refunded and the refund's `RefundID`:
 
