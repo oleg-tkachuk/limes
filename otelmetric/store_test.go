@@ -167,7 +167,7 @@ func TestMeteringLabelsAmountsAndOutcomes(t *testing.T) {
 	if _, err := usage.Settle(ctx, meter.SettleRequest{Subject: held, ReservationID: res.ID, Amount: limes.MustParseAmount("1")}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := usage.Refund(ctx, meter.RefundRequest{ChargeID: r.ChargeID, Remaining: true}); err != nil {
+	if _, err := usage.Refund(ctx, meter.RefundRequest{ChargeID: r.ChargeID, Remaining: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -302,7 +302,7 @@ func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
 		return err
 	})
 	measured("Refund", metricRefundAmount, func() error {
-		_, err := usage.Refund(ctx, meter.RefundRequest{ChargeID: receipt.ChargeID, Amount: limes.MustParseAmount("1")})
+		_, err := usage.Refund(ctx, meter.RefundRequest{ChargeID: receipt.ChargeID, Amount: limes.MustParseAmount("1")}, nil)
 		return err
 	})
 	var res meter.Reservation
