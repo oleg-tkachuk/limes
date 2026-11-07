@@ -2,6 +2,16 @@
 
 Every release of the otelmetric module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.18.0](https://github.com/oleg-tkachuk/limes/compare/otelmetric%2Fv0.17.5...otelmetric%2Fv0.18.0) (2026-11-07)
+
+### Features
+
+* **otelmetric:** forward the refund callback to the wrapped store ([5474d2a](https://github.com/oleg-tkachuk/limes/commit/5474d2ae5f1423ef4e951bddf9ba6fd9bded9707))
+
+### Dependencies
+
+* require limes v0.171.0
+
 ## [0.17.5](https://github.com/oleg-tkachuk/limes/compare/otelmetric%2Fv0.17.4...otelmetric%2Fv0.17.5) (2026-11-06)
 
 ### Bug Fixes
