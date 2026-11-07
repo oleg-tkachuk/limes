@@ -52,6 +52,15 @@ const (
 	keyedReserveRoundTrips = reserveRoundTrips + 1
 )
 
+// refundWithCallbackRoundTrips and keyedRefundWithCallbackRoundTrips are a
+// Refund whose onRefunded runs: as with onCharged, the write batch goes
+// before it without COMMIT, and COMMIT after it, with the check that
+// onRefunded left the transaction open.
+const (
+	refundWithCallbackRoundTrips      = refundRoundTrips + 1
+	keyedRefundWithCallbackRoundTrips = keyedRefundRoundTrips + 1
+)
+
 // separateTxRoundTrips is what a DB that lends no connection adds to each
 // call: BEGIN and COMMIT, each a round trip of its own.
 const separateTxRoundTrips = 2
@@ -190,11 +199,19 @@ func meterRoundTrips(t *testing.T, db DB, sent *atomic.Int64, extra int64) {
 			return usage.Release(ctx, meter.ReleaseRequest{Subject: subject, ReservationID: held.ID})
 		}, hold},
 		"Refund": {refundRoundTrips, func() error {
-			_, err := usage.Refund(ctx, meter.RefundRequest{ChargeID: charged.ChargeID, Amount: 1})
+			_, err := usage.Refund(ctx, meter.RefundRequest{ChargeID: charged.ChargeID, Amount: 1}, nil)
 			return err
 		}, charge},
 		"keyed Refund": {keyedRefundRoundTrips, func() error {
-			_, err := usage.Refund(ctx, meter.RefundRequest{ChargeID: charged.ChargeID, Amount: 1, RefundID: uuid.New()})
+			_, err := usage.Refund(ctx, meter.RefundRequest{ChargeID: charged.ChargeID, Amount: 1, RefundID: uuid.New()}, nil)
+			return err
+		}, charge},
+		"Refund with onRefunded": {refundWithCallbackRoundTrips, func() error {
+			_, err := usage.Refund(ctx, meter.RefundRequest{ChargeID: charged.ChargeID, Amount: 1}, noopRefunded)
+			return err
+		}, charge},
+		"keyed Refund with onRefunded": {keyedRefundWithCallbackRoundTrips, func() error {
+			_, err := usage.Refund(ctx, meter.RefundRequest{ChargeID: charged.ChargeID, Amount: 1, RefundID: uuid.New()}, noopRefunded)
 			return err
 		}, charge},
 	}
@@ -233,6 +250,9 @@ func meterRoundTrips(t *testing.T, db DB, sent *atomic.Int64, extra int64) {
 
 // noopCharged is an onCharged that sends nothing.
 func noopCharged(context.Context, meter.Charged) error { return nil }
+
+// noopRefunded is an onRefunded that sends nothing.
+func noopRefunded(context.Context, meter.Refunded) error { return nil }
 
 // roundTripChain records a chain roundTripChainDepth deep in tenant, with
 // no ceilings, and returns its leaf.

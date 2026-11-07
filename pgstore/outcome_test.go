@@ -165,7 +165,7 @@ func TestALostCommitIsAnOutcomeUnknown(t *testing.T) {
 		},
 		"Refund": {
 			call: func(s *UsageStore) (bool, error) {
-				r, err := s.Refund(ctx, refund)
+				r, err := s.Refund(ctx, refund, nil)
 				return r.Replayed, err
 			},
 			recorded: func() bool {

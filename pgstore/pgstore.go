@@ -59,12 +59,13 @@
 // verifier could still accept the token and its record may be purged
 // (limes.MinPurgeRetention).
 //
-// Charge and Settle hand onCharged the charge's transaction, which TxFrom
-// reads from its context, so a write of the consumer's commits with the
-// charge or not at all. The transaction is the store's to end: Commit and
-// Rollback on it return ErrChargeTransaction, a charge whose transaction
-// onCharged ended with SQL of its own is refused with ErrChargeTransaction,
-// and once onCharged returns every call on it fails with pgx.ErrTxClosed.
+// Charge and Settle hand onCharged the charge's transaction, and Refund
+// hands onRefunded the refund's, which TxFrom reads from its context, so a
+// write of the consumer's commits with the charge or the refund or not at
+// all. The transaction is the store's to end: Commit and Rollback on it
+// return ErrChargeTransaction, a call whose transaction the callback ended
+// with SQL of its own is refused with ErrChargeTransaction, and once the
+// callback returns every call on it fails with pgx.ErrTxClosed.
 //
 // # Tenants
 //
@@ -142,7 +143,7 @@
 // for one tenant (BenchmarkChargeParallel beside
 // BenchmarkChargeParallelTenants). A network between the service and the
 // database adds its round trip to every statement of the transaction, and
-// onCharged runs inside it, holding the lock: keep it short. A tenant that
+// onCharged and onRefunded run inside it, holding the lock: keep them short. A tenant that
 // needs more charges a second than that is a sizing question — fewer,
 // larger charges, as Reserve and Settle allow — not a setting.
 package pgstore

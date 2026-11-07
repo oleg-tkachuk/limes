@@ -47,7 +47,8 @@ const logKeyError = "error"
 // its locks in one order, so none deadlocks another of this version, but
 // during a rolling upgrade one of a version that took them in another order
 // can (docs/adr/0018-fewer-round-trips-per-charge.md). The transaction was
-// rolled back whole, so running it again — onCharged among it — moves
+// rolled back whole, so running it again — onCharged or onRefunded among
+// it — moves
 // nothing twice. A second deadlock is returned.
 //
 // A call whose COMMIT went unanswered (meter.ErrOutcomeUnknown) is not run

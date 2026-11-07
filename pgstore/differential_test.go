@@ -372,7 +372,7 @@ func diffApply(side *diffSide, s int, subject limes.MeterSubject, id, tenant uui
 			return nil
 		}
 		c := side.charges[len(side.charges)-1-int(amount-1)%len(side.charges)]
-		_, err := u.Refund(ctx, meter.RefundRequest{ChargeID: c, Remaining: true})
+		_, err := u.Refund(ctx, meter.RefundRequest{ChargeID: c, Remaining: true}, nil)
 		return err
 	case diffStepReserve:
 		r, err := u.Reserve(ctx, meter.ReserveRequest{Subject: subject, Amount: nanos, TTL: diffTTL})
