@@ -70,6 +70,45 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## pgstore/v0.70.0
+
+- `UsageStore.Refund` takes the `onRefunded` callback of
+  `meter.UsageStore.Refund`, new in limes `v0.171.0`, which this release
+  needs. It runs on the refund's transaction, which `TxFrom` reads, after
+  the charge's refunded amount and a keyed refund's `limes.refunds` row are
+  written and before `COMMIT`, on the terms `onCharged` runs on: `Commit`
+  or `Rollback` on it, or a refund whose transaction it ended with SQL of
+  its own, is `ErrChargeTransaction`. Pass `nil` where no callback is
+  needed:
+
+  ```go
+  // before
+  receipt, err := usage.Refund(ctx, req)
+  // after
+  receipt, err := usage.Refund(ctx, req, nil)
+  ```
+
+## v0.171.0
+
+- `meter.UsageStore.Refund` takes a callback, as `Charge` and `Settle`
+  do: `Refund(ctx, req, onRefunded func(ctx context.Context, r
+  meter.Refunded) error)`. It runs inside the refund, atomically with it,
+  so a side effect such as an outbox event commits with the refund or not
+  at all; its error rolls the refund back. It runs neither on a replay
+  under a `RefundID` nor for a refund of nothing. Pass `nil` where no
+  callback is needed, and a store of your own takes the parameter and runs
+  it as `meter.UsageStore.Refund` describes, which `metertest` checks:
+
+  ```go
+  // before
+  receipt, err := usage.Refund(ctx, meter.RefundRequest{ChargeID: id, Remaining: true})
+  // after
+  receipt, err := usage.Refund(ctx, meter.RefundRequest{ChargeID: id, Remaining: true}, nil)
+  ```
+
+  `meter.RefundReceipt` gains `RefundID`, the request's, which a store of
+  your own sets on every receipt it returns, a replay's among them.
+
 ## pgstore/v0.69.1
 
 - `UsageStore.Reserve` and `Lease` refuse a capability with

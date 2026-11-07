@@ -132,8 +132,8 @@ func (s *meteringStore) Charge(ctx context.Context, req meter.ChargeRequest, onC
 }
 
 // Refund emits limes.refund.amount.
-func (s *meteringStore) Refund(ctx context.Context, req meter.RefundRequest) (meter.RefundReceipt, error) {
-	r, err := s.inner.Refund(ctx, req)
+func (s *meteringStore) Refund(ctx context.Context, req meter.RefundRequest, onRefunded func(ctx context.Context, r meter.Refunded) error) (meter.RefundReceipt, error) {
+	r, err := s.inner.Refund(ctx, req, onRefunded)
 	if err == nil && r.Amount > 0 {
 		s.in.recordRefund(ctx, r)
 	}

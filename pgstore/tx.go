@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -14,37 +15,41 @@ import (
 	"github.com/oleg-tkachuk/limes/meter"
 )
 
-// txKey keys the transaction a charge commits on in the context onCharged
-// receives.
+// txKey keys the transaction a charge or a refund commits on in the context
+// its callback receives.
 type txKey struct{}
 
-// ErrChargeTransaction is onCharged committing or rolling back the charge's
-// transaction, which is the store's to end: the charge is committed after
-// onCharged returns, on the same transaction.
-var ErrChargeTransaction = fmt.Errorf("%w: pgstore: the charge's transaction is the store's to commit or roll back", limes.ErrInvalidRequest)
+// ErrChargeTransaction is a callback — onCharged, onRefunded — committing or
+// rolling back the transaction it runs on, which is the store's to end: the
+// charge or the refund is committed after the callback returns, on the same
+// transaction.
+var ErrChargeTransaction = fmt.Errorf("%w: pgstore: the transaction a callback runs on is the store's to commit or roll back", limes.ErrInvalidRequest)
 
-// TxFrom returns the transaction a charge commits on, from the context
-// UsageStore.Charge and UsageStore.Settle hand onCharged: a write through it
-// commits with the charge, or with it not at all. Any other context holds
-// none, and TxFrom reports false; no other method of this package reads a
-// transaction from its context.
+// TxFrom returns the transaction a charge or a refund commits on, from the
+// context UsageStore.Charge and UsageStore.Settle hand onCharged, and
+// UsageStore.Refund onRefunded: a write through it commits with the charge
+// or the refund, or with it not at all. Any other context holds none, and
+// TxFrom reports false; no other method of this package reads a transaction
+// from its context.
 //
-// The charge's writes are in it already, the ledger row among them, and its
-// locks held: every counter on the chain and the tenant's aggregate, which
-// every other charge of the tenant waits for until onCharged returns and
-// the store commits. onCharged keeps to statements on this database, and
-// short ones; a network call there holds the tenant's charges for as long.
+// The call's writes are in it already — a charge's ledger row, a refund's
+// refunded amount on the charge and, under a RefundID, its limes.refunds
+// row — and its locks held: every counter on the chain and the tenant's
+// aggregate, which every other charge of the tenant waits for until the
+// callback returns and the store commits. The callback keeps to statements
+// on this database, and short ones; a network call there holds the
+// tenant's charges for as long.
 //
-// The transaction is onCharged's while onCharged runs, and no longer: once
-// it returns, every call on it, from any goroutine, fails with
+// The transaction is the callback's while it runs, and no longer: once it
+// returns, every call on it, from any goroutine, fails with
 // pgx.ErrTxClosed, and a call still running then is waited for before the
-// store commits the charge. Calls are taken one at a time, as a pgx.Tx needs.
+// store commits. Calls are taken one at a time, as a pgx.Tx needs.
 // Commit and Rollback return ErrChargeTransaction; a savepoint (Begin) is
-// onCharged's to end. Conn is nil, as the connection is the store's, and a
-// charge whose transaction onCharged ended with SQL of its own — COMMIT,
+// the callback's to end. Conn is nil, as the connection is the store's, and
+// a call whose transaction the callback ended with SQL of its own — COMMIT,
 // ROLLBACK, or either followed by BEGIN — is refused with
-// ErrChargeTransaction and meter.ErrOutcomeUnknown: the charge's writes
-// went before onCharged, so that COMMIT committed them, and that ROLLBACK
+// ErrChargeTransaction and meter.ErrOutcomeUnknown: the call's writes went
+// before the callback, so that COMMIT committed them, and that ROLLBACK
 // undid them.
 func TxFrom(ctx context.Context) (pgx.Tx, bool) {
 	tx, ok := ctx.Value(txKey{}).(*callbackTx)
@@ -54,14 +59,14 @@ func TxFrom(ctx context.Context) (pgx.Tx, bool) {
 	return tx, true
 }
 
-// callbackGuard is what every callbackTx of one onCharged shares: whether
-// onCharged has returned, and the lock that takes calls one at a time.
+// callbackGuard is what every callbackTx of one callback shares: whether
+// the callback has returned, and the lock that takes calls one at a time.
 type callbackGuard struct {
 	mu     sync.Mutex
 	closed bool
 }
 
-// close ends the transaction for onCharged, once any call running on it
+// close ends the transaction for the callback, once any call running on it
 // has returned.
 func (g *callbackGuard) close() {
 	g.mu.Lock()
@@ -69,7 +74,7 @@ func (g *callbackGuard) close() {
 	g.mu.Unlock()
 }
 
-// run runs call unless onCharged has returned, holding the lock while it
+// run runs call unless the callback has returned, holding the lock while it
 // runs.
 func (g *callbackGuard) run(call func() error) error {
 	g.mu.Lock()
@@ -80,24 +85,24 @@ func (g *callbackGuard) run(call func() error) error {
 	return call()
 }
 
-// callbackTx is the charge's transaction, or a savepoint in it, as
-// onCharged sees it.
+// callbackTx is the call's transaction, or a savepoint in it, as the
+// callback sees it.
 type callbackTx struct {
 	tx    pgx.Tx
 	guard *callbackGuard
-	// savepoint is whether tx is a savepoint onCharged began, which it may
-	// end.
+	// savepoint is whether tx is a savepoint the callback began, which it
+	// may end.
 	savepoint bool
 }
 
-// withTx is ctx carrying tx for one call of onCharged, and the func that
-// ends it when onCharged returns.
+// withTx is ctx carrying tx for one run of a callback, and the func that
+// ends it when the callback returns.
 func withTx(ctx context.Context, tx pgx.Tx) (context.Context, func()) {
 	guard := &callbackGuard{}
 	return context.WithValue(ctx, txKey{}, &callbackTx{tx: tx, guard: guard}), guard.close
 }
 
-// Begin starts a savepoint, which onCharged may commit or roll back.
+// Begin starts a savepoint, which the callback may commit or roll back.
 func (t *callbackTx) Begin(ctx context.Context) (pgx.Tx, error) {
 	var nested pgx.Tx
 	err := t.guard.run(func() (err error) {
@@ -110,7 +115,7 @@ func (t *callbackTx) Begin(ctx context.Context) (pgx.Tx, error) {
 	return &callbackTx{tx: nested, guard: t.guard, savepoint: true}, nil
 }
 
-// Commit releases a savepoint; the charge's own transaction is the store's.
+// Commit releases a savepoint; the call's own transaction is the store's.
 func (t *callbackTx) Commit(ctx context.Context) error {
 	if !t.savepoint {
 		return ErrChargeTransaction
@@ -118,7 +123,7 @@ func (t *callbackTx) Commit(ctx context.Context) error {
 	return t.guard.run(func() error { return t.tx.Commit(ctx) })
 }
 
-// Rollback rolls back to a savepoint; the charge's own transaction is the
+// Rollback rolls back to a savepoint; the call's own transaction is the
 // store's.
 func (t *callbackTx) Rollback(ctx context.Context) error {
 	if !t.savepoint {
@@ -145,7 +150,7 @@ func (t *callbackTx) SendBatch(ctx context.Context, b *pgx.Batch) pgx.BatchResul
 }
 
 // LargeObjects is the transaction's large objects: the zero LargeObjects,
-// which no call can use, once onCharged has returned.
+// which no call can use, once the callback has returned.
 func (t *callbackTx) LargeObjects() pgx.LargeObjects {
 	var lo pgx.LargeObjects
 	_ = t.guard.run(func() error { lo = t.tx.LargeObjects(); return nil })
@@ -187,27 +192,27 @@ func (t *callbackTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.
 	return row
 }
 
-// Conn is nil: the connection is the store's, and through it onCharged could
-// end the charge's transaction or run beside it.
+// Conn is nil: the connection is the store's, and through it the callback
+// could end the call's transaction or run beside it.
 func (t *callbackTx) Conn() *pgx.Conn { return nil }
 
 // txStatusInTransaction is the transaction status PostgreSQL reports of a
 // connection in an open transaction block (ReadyForQuery 'T').
 const txStatusInTransaction = 'T'
 
-// settingCharging marks the transaction a charge's writes went in, for the
-// rest of it: a transaction onCharged ended and began again with SQL of its
-// own does not carry it.
+// settingCharging marks the transaction a charge's or a refund's writes
+// went in, for the rest of it: a transaction the callback ended and began
+// again with SQL of its own does not carry it.
 const settingCharging = "limes.charging"
 
 const (
 	// sqlMarkCharge sets settingCharging to $1, local to the transaction,
-	// with the charge's writes.
+	// with the call's writes.
 	sqlMarkCharge = `SELECT set_config('` + settingCharging + `', $1, true)`
 
 	// sqlChargeStillOpen fails, dividing by zero, unless the transaction is
 	// still the one sqlMarkCharge marked $1: one that does not fail lets the
-	// COMMIT queued after it commit the charge, and one that does aborts it.
+	// COMMIT queued after it commit the call, and one that does aborts it.
 	// The divisor reads a setting, never folded into a constant, so the
 	// statement fails only when it runs.
 	sqlChargeStillOpen = `SELECT 1 / (coalesce(current_setting('` + settingCharging + `', true), '') = $1)::int`
@@ -216,24 +221,54 @@ const (
 	sqlStateDivisionByZero = "22012"
 )
 
-// endCharged ends a charge whose writes were sent, marked mark, before
-// onCharged ran: it refuses one whose transaction onCharged ended with SQL
+// callback is the caller's callback over a call's writes — onCharged or
+// onRefunded, bound to the receipt it is handed.
+type callback func(ctx context.Context) error
+
+// writeThenCall writes c and then, and runs call, if any, once they are
+// sent, so that what call writes sees them. Without call the writes carry
+// COMMIT when last (writeLast). With it they go without, marked mark as the
+// transaction's (sqlMarkCharge); COMMIT goes after call, in one batch with
+// the check that call left the transaction open (endCallback): one round
+// trip more. The order shortens no lock: the counters and the tenant's
+// aggregate are locked before the writes and held to COMMIT either way.
+func (c *counters) writeThenCall(ctx context.Context, tx pgx.Tx, now time.Time, writeTenant, last bool, mark string, call callback, then []heldStmt) error {
+	if call == nil {
+		return c.writeBatch(ctx, tx, now, writeTenant, last, then)
+	}
+	then = append(then, heldStmt{sql: sqlMarkCharge, args: []any{mark}})
+	if err := c.writeBatch(ctx, tx, now, writeTenant, false, then); err != nil {
+		return err
+	}
+	callbackCtx, end := withTx(ctx, tx)
+	err := func() error {
+		defer end()
+		return call(callbackCtx)
+	}()
+	if err != nil {
+		return err
+	}
+	return endCallback(ctx, tx, mark, last)
+}
+
+// endCallback ends a call whose writes were sent, marked mark, before its
+// callback ran: it refuses one whose transaction the callback ended with SQL
 // of its own — COMMIT, ROLLBACK, or either followed by BEGIN in the same
 // statement — rather than through the Tx, which refuses, and otherwise
 // sends COMMIT when last, in one batch with the check (sqlChargeStillOpen).
 //
-// The charge's writes went before onCharged, so its COMMIT committed them
+// The call's writes went before the callback, so its COMMIT committed them
 // and its ROLLBACK undid them, under locks it no longer held: which one ran
 // is not known to the store, and the call fails as meter.ErrOutcomeUnknown
 // too. One that left the transaction failed, without ending it, committed
 // nothing.
-func endCharged(ctx context.Context, tx pgx.Tx, mark string, last bool) error {
+func endCallback(ctx context.Context, tx pgx.Tx, mark string, last bool) error {
 	switch status := tx.Conn().PgConn().TxStatus(); status {
 	case txStatusInTransaction:
 	case txStatusIdle:
-		return errs.Errorf("%w: %w: onCharged ended it", meter.ErrOutcomeUnknown, ErrChargeTransaction)
+		return errs.Errorf("%w: %w: the callback ended it", meter.ErrOutcomeUnknown, ErrChargeTransaction)
 	default:
-		return fmt.Errorf("%w: onCharged left it failed (status %q)", ErrChargeTransaction, status)
+		return fmt.Errorf("%w: the callback left it failed (status %q)", ErrChargeTransaction, status)
 	}
 	b := &pgx.Batch{}
 	b.Queue(sqlChargeStillOpen, mark)
@@ -242,7 +277,7 @@ func endCharged(ctx context.Context, tx pgx.Tx, mark string, last bool) error {
 	_, err := br.Exec()
 	if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == sqlStateDivisionByZero {
 		_ = br.Close() // its error is the check's, answered: COMMIT did not run
-		return errs.Errorf("%w: %w: onCharged ended it and began another", meter.ErrOutcomeUnknown, ErrChargeTransaction)
+		return errs.Errorf("%w: %w: the callback ended it and began another", meter.ErrOutcomeUnknown, ErrChargeTransaction)
 	}
 	err = errors.Join(err, br.Close())
 	if committing {
@@ -251,12 +286,12 @@ func endCharged(ctx context.Context, tx pgx.Tx, mark string, last bool) error {
 	return err
 }
 
-// closedRow is a QueryRow on a transaction onCharged no longer holds.
+// closedRow is a QueryRow on a transaction the callback no longer holds.
 type closedRow struct{ err error }
 
 func (r closedRow) Scan(...any) error { return r.err }
 
-// closedBatch is a SendBatch on a transaction onCharged no longer holds.
+// closedBatch is a SendBatch on a transaction the callback no longer holds.
 type closedBatch struct{ err error }
 
 func (b closedBatch) Exec() (pgconn.CommandTag, error) { return pgconn.CommandTag{}, b.err }

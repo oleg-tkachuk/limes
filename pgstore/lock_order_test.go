@@ -63,7 +63,7 @@ func TestRefundLocksTheLedgerLast(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := f.usage.Refund(mine, meter.RefundRequest{ChargeID: charged.ChargeID, Remaining: true})
+		_, err := f.usage.Refund(mine, meter.RefundRequest{ChargeID: charged.ChargeID, Remaining: true}, nil)
 		done <- err
 	}()
 	awaitLockWait(t)

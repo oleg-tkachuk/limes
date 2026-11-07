@@ -262,7 +262,7 @@ func soakWorker(soakCtx, ctx context.Context, usage *UsageStore, chain []uuid.UU
 				continue
 			}
 			k := rng.IntN(len(charges))
-			res, err := usage.Refund(ctx, meter.RefundRequest{ChargeID: charges[k].ChargeID, Remaining: true})
+			res, err := usage.Refund(ctx, meter.RefundRequest{ChargeID: charges[k].ChargeID, Remaining: true}, nil)
 			if err != nil {
 				return fmt.Errorf("Refund: %w", err)
 			}

@@ -21,8 +21,9 @@ import (
 	"github.com/oleg-tkachuk/limes/meter"
 )
 
-// Refund returns spend from one ledger entry to the counters it debited.
-func (s *UsageStore) Refund(ctx context.Context, req meter.RefundRequest) (meter.RefundReceipt, error) {
+// Refund returns spend from one ledger entry to the counters it debited,
+// running onRefunded once the refund's writes are sent, before COMMIT.
+func (s *UsageStore) Refund(ctx context.Context, req meter.RefundRequest, onRefunded func(ctx context.Context, r meter.Refunded) error) (meter.RefundReceipt, error) {
 	if err := req.Validate(); err != nil {
 		return meter.RefundReceipt{}, err
 	}
@@ -33,7 +34,7 @@ func (s *UsageStore) Refund(ctx context.Context, req meter.RefundRequest) (meter
 			if err != nil {
 				return err
 			}
-			receipt = meter.RefundReceipt{ChargeID: e.ID, TenantID: e.TenantID, UnitCode: e.UnitCode}
+			receipt = meter.RefundReceipt{ChargeID: e.ID, TenantID: e.TenantID, UnitCode: e.UnitCode, RefundID: req.RefundID}
 			if r, keyed, err := prior.answer(req, receipt); keyed || err != nil {
 				receipt = r
 				return err
@@ -42,6 +43,7 @@ func (s *UsageStore) Refund(ctx context.Context, req meter.RefundRequest) (meter
 			if err != nil {
 				return err
 			}
+			receipt.Amount = amount
 			var then []heldStmt
 			if req.RefundID != uuid.Nil() {
 				then = append(then, heldStmt{sql: sqlInsertRefund, args: []any{
@@ -50,14 +52,13 @@ func (s *UsageStore) Refund(ctx context.Context, req meter.RefundRequest) (meter
 			}
 			switch {
 			case amount != 0:
-				err = s.refund(ctx, tx, c, e, amount, then...)
+				err = s.refund(ctx, tx, c, e, amount, refundedCallback(onRefunded, receipt), then)
 			case len(then) > 0:
 				err = (&counters{}).writeLast(ctx, tx, s.clock(), false, then...)
 			}
 			if err != nil {
 				return refundKeyConflict(err, req.RefundID)
 			}
-			receipt.Amount = amount
 			return nil
 		})
 	})
@@ -193,12 +194,22 @@ func refundAmount(e ledgerEntry, req meter.RefundRequest) (limes.Nanos, error) {
 	return req.Amount, nil
 }
 
+// refundedCallback is onRefunded bound to receipt, the refund's; nil when
+// onRefunded is.
+func refundedCallback(onRefunded func(context.Context, meter.Refunded) error, receipt meter.RefundReceipt) callback {
+	if onRefunded == nil {
+		return nil
+	}
+	return func(ctx context.Context) error { return onRefunded(ctx, meter.Refunded{Receipt: receipt}) }
+}
+
 // refund gives amount of the charge e back to every counter in c that spent
-// it, and records it on the charge, then sends then, in the call's last
-// batch (writeLast). A charge of a period since closed is history: the
-// current period's spend never counted it, so it has nothing to give back.
-func (s *UsageStore) refund(ctx context.Context, tx pgx.Tx, c *counters, e ledgerEntry, amount limes.Nanos, then ...heldStmt) error {
-	if leased, err := s.refundLeased(ctx, tx, c, e, amount, then); leased || err != nil {
+// it, and records it on the charge, then sends then, and runs call over
+// them, as the call's last statements (writeThenCall). A charge of a period
+// since closed is history: the current period's spend never counted it, so
+// it has nothing to give back.
+func (s *UsageStore) refund(ctx context.Context, tx pgx.Tx, c *counters, e ledgerEntry, amount limes.Nanos, call callback, then []heldStmt) error {
+	if leased, err := s.refundLeased(ctx, tx, c, e, amount, call, then); leased || err != nil {
 		return err
 	}
 	for _, u := range c.usage {
@@ -216,7 +227,7 @@ func (s *UsageStore) refund(ctx context.Context, tx pgx.Tx, c *counters, e ledge
 		}
 	}
 	refunded := heldStmt{sql: sqlRefunded, args: []any{e.ID, int64(amount)}}
-	return c.writeLast(ctx, tx, s.clock(), refundTenant, append([]heldStmt{refunded}, then...)...)
+	return c.writeThenCall(ctx, tx, s.clock(), refundTenant, true, e.ID.String(), call, append([]heldStmt{refunded}, then...))
 }
 
 const sqlRefunded = `UPDATE limes.charges SET refunded = refunded + $2 WHERE id = $1`

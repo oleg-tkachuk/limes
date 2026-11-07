@@ -44,10 +44,10 @@ func TestAnotherTenantsIDConflicts(t *testing.T) {
 		t.Fatal(err)
 	}
 	refundID := uuid.New()
-	if _, err := f.usage.Refund(theirs, meter.RefundRequest{ChargeID: theirCharge.ChargeID, Remaining: true, RefundID: refundID}); err != nil {
+	if _, err := f.usage.Refund(theirs, meter.RefundRequest{ChargeID: theirCharge.ChargeID, Remaining: true, RefundID: refundID}, nil); err != nil {
 		t.Fatal(err)
 	}
-	rr, err := f.usage.Refund(mine, meter.RefundRequest{ChargeID: myCharge.ChargeID, Remaining: true, RefundID: refundID})
+	rr, err := f.usage.Refund(mine, meter.RefundRequest{ChargeID: myCharge.ChargeID, Remaining: true, RefundID: refundID}, nil)
 	if !errors.Is(err, meter.ErrRefundConflict) {
 		t.Errorf("Refund under another tenant's refund id = %+v, %v; want ErrRefundConflict", rr, err)
 	}

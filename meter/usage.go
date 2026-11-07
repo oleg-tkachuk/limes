@@ -206,10 +206,33 @@ type BudgetMeter interface {
 	// as long as its charge does in the ledger (MinChargeRetention), and
 	// goes with it. Without one, a partial refund sent twice refunds twice.
 	//
+	// onRefunded runs inside the refund, atomically with it, as onCharged
+	// runs inside a charge: once the refund's writes are made, before they
+	// commit, with a context carrying the store's transaction (read through
+	// the store's own accessor, pgstore.TxFrom) and the receipt the call
+	// will return (Refunded), so a side effect such as an outbox event
+	// commits with the refund. pgstore writes the charge's refunded amount,
+	// and a keyed refund's record, before onRefunded runs; memstore after.
+	// An error from it leaves every counter, the charge's refunded amount
+	// and the RefundID untouched, and is returned. Pass nil to skip it. It
+	// must not call back into the Meter, and is short and touches only the
+	// store's database, through the transaction it is handed, for the
+	// reasons given under Charge. A store that retries a transaction it
+	// lost to a deadlock runs it again on the retry, the first run having
+	// rolled back with its refund.
+	//
+	// onRefunded does not run on a replay under req.RefundID, nor when
+	// nothing is refunded (Remaining, once nothing remains): a keyed refund
+	// of nothing is still recorded, so its retry replays and runs none
+	// either. A call that returns ErrOutcomeUnknown is retried under the
+	// same RefundID: a first attempt that committed wrote its side effect
+	// with it, and the retry replays without running onRefunded; one that
+	// did not commit wrote nothing, and the retry refunds and runs it.
+	//
 	// For a cost only known afterwards, prefer Reserve/Settle: a
 	// reservation lapses on its own if the caller never settles it, where
 	// an estimate charged up front stays charged.
-	Refund(ctx context.Context, req RefundRequest) (RefundReceipt, error)
+	Refund(ctx context.Context, req RefundRequest, onRefunded func(ctx context.Context, r Refunded) error) (RefundReceipt, error)
 
 	// Reserve holds req.Amount against the capability, each ancestor and
 	// the tenant aggregate, checking every ceiling against spend plus
@@ -558,7 +581,21 @@ type RefundReceipt struct {
 	// TenantID and UnitCode are the charge's.
 	TenantID uuid.UUID
 	UnitCode string
+	// RefundID is the request's: the refund's own id, zero for an unkeyed
+	// refund.
+	RefundID uuid.UUID
 	_        noCompare
+}
+
+// Refunded is what Meter.Refund hands onRefunded: the refund it runs
+// inside, before the call commits it. The transaction it commits on
+// travels in onRefunded's context, read through the store's own accessor.
+type Refunded struct {
+	// Receipt is the receipt the call returns once the refund commits.
+	// Amount is above zero, as a refund of nothing runs no onRefunded, and
+	// Replayed is never set, as a replay runs none either.
+	Receipt RefundReceipt
+	_       noCompare
 }
 
 // DefaultReservationTTL is how long a reservation lasts when the request

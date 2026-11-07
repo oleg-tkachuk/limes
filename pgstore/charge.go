@@ -389,32 +389,15 @@ func (s *UsageStore) commitCharge(ctx context.Context, tx pgx.Tx, c *counters, s
 }
 
 // writeCharged writes c and then, the charge of receipt, and runs the
-// caller's onCharged, if any, once they are sent, so that what onCharged
-// writes — an outbox row with a foreign key to the ledger — sees the
-// charge's row. Without onCharged the writes carry COMMIT when last
-// (writeLast). With it they go without, marked as the transaction's
-// (sqlMarkCharge); COMMIT goes after onCharged, in one batch with the check
-// that onCharged left the transaction open (endCharged): one round trip
-// more. The order shortens no lock: the counters and the tenant's aggregate
-// are locked before the writes and held to COMMIT either way.
+// caller's onCharged, if any, once they are sent (writeThenCall), so that
+// what onCharged writes — an outbox row with a foreign key to the ledger —
+// sees the charge's row.
 func (c *counters) writeCharged(ctx context.Context, tx pgx.Tx, now time.Time, writeTenant, last bool, receipt meter.ChargeReceipt, onCharged func(context.Context, meter.Charged) error, then ...heldStmt) error {
-	if onCharged == nil {
-		return c.writeBatch(ctx, tx, now, writeTenant, last, then)
+	var call callback
+	if onCharged != nil {
+		call = func(ctx context.Context) error { return onCharged(ctx, meter.Charged{Receipt: receipt}) }
 	}
-	mark := receipt.ChargeID.String()
-	then = append(then, heldStmt{sql: sqlMarkCharge, args: []any{mark}})
-	if err := c.writeBatch(ctx, tx, now, writeTenant, false, then); err != nil {
-		return err
-	}
-	callbackCtx, end := withTx(ctx, tx)
-	err := func() error {
-		defer end()
-		return onCharged(callbackCtx, meter.Charged{Receipt: receipt})
-	}()
-	if err != nil {
-		return err
-	}
-	return endCharged(ctx, tx, mark, last)
+	return c.writeThenCall(ctx, tx, now, writeTenant, last, receipt.ChargeID.String(), call, then)
 }
 
 // spend adds spec's amount to every counter in c it is spent on — the

@@ -204,7 +204,7 @@ func TestRowSecurityKeepsRefundsApart(t *testing.T) {
 			"in part":      {ChargeID: charged.ChargeID, Amount: 1},
 			"what remains": {ChargeID: charged.ChargeID, Remaining: true},
 		} {
-			if _, err := f.usage.Refund(other, req); !errors.Is(err, meter.ErrChargeNotFound) {
+			if _, err := f.usage.Refund(other, req, nil); !errors.Is(err, meter.ErrChargeNotFound) {
 				t.Errorf("%s: Refund %s: err = %v, want ErrChargeNotFound", name, kind, err)
 			}
 		}
@@ -412,7 +412,7 @@ func TestReadOnlyScopeReadsEveryTenantAndWritesNone(t *testing.T) {
 				return s.usage.Release(s.ctx, meter.ReleaseRequest{Subject: subject, ReservationID: held.ID})
 			},
 			"Refund": func() error {
-				_, err := s.usage.Refund(s.ctx, meter.RefundRequest{ChargeID: charged.ChargeID, Remaining: true})
+				_, err := s.usage.Refund(s.ctx, meter.RefundRequest{ChargeID: charged.ChargeID, Remaining: true}, nil)
 				return err
 			},
 			"SetTenantBudget": func() error {
@@ -482,7 +482,7 @@ func TestReadOnlyPoliciesOfEveryTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A keyed refund leaves a row of refunds.
-	if _, err := f.usage.Refund(WithTenant(t.Context(), f.mine), meter.RefundRequest{ChargeID: charged.ChargeID, Remaining: true, RefundID: uuid.New()}); err != nil {
+	if _, err := f.usage.Refund(WithTenant(t.Context(), f.mine), meter.RefundRequest{ChargeID: charged.ChargeID, Remaining: true, RefundID: uuid.New()}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.usage.Reserve(WithTenant(t.Context(), f.mine), meter.ReserveRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1}); err != nil {
