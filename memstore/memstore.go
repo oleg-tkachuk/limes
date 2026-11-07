@@ -88,7 +88,8 @@ type Store struct {
 }
 
 // UsageStore implements meter.UsageStore — request and spend counters. It
-// has no transactions, so onCharged runs on the caller's context.
+// has no transactions, so onCharged and onRefunded run on the caller's
+// context.
 type UsageStore struct {
 	mu sync.Mutex
 
@@ -1860,8 +1861,9 @@ func (s *UsageStore) ReleaseExpired(_ context.Context, req meter.ReleaseExpiredR
 	return meter.ReleaseExpiredResult{Released: int64(len(due)), SettledLeases: settled}, nil
 }
 
-// Refund returns spend from one ledger entry to the counters it debited.
-func (s *UsageStore) Refund(_ context.Context, req meter.RefundRequest) (meter.RefundReceipt, error) {
+// Refund returns spend from one ledger entry to the counters it debited,
+// running onRefunded on the caller's context before anything is changed.
+func (s *UsageStore) Refund(ctx context.Context, req meter.RefundRequest, onRefunded func(ctx context.Context, r meter.Refunded) error) (meter.RefundReceipt, error) {
 	if err := req.Validate(); err != nil {
 		return meter.RefundReceipt{}, err
 	}
@@ -1873,7 +1875,7 @@ func (s *UsageStore) Refund(_ context.Context, req meter.RefundRequest) (meter.R
 		return meter.RefundReceipt{}, meter.ErrChargeNotFound
 	}
 	e := &s.ledger[i]
-	receipt := meter.RefundReceipt{ChargeID: e.ID, TenantID: e.TenantID, UnitCode: e.UnitCode}
+	receipt := meter.RefundReceipt{ChargeID: e.ID, TenantID: e.TenantID, UnitCode: e.UnitCode, RefundID: req.RefundID}
 	if r, keyed, err := s.refundedLocked(req, receipt); keyed {
 		return r, err
 	}
@@ -1881,7 +1883,15 @@ func (s *UsageStore) Refund(_ context.Context, req meter.RefundRequest) (meter.R
 	if err != nil {
 		return meter.RefundReceipt{}, err
 	}
+	receipt.Amount = amount
 	if amount > 0 {
+		// the caller's side effect, before anything is changed: its error
+		// leaves nothing to undo
+		if onRefunded != nil {
+			if err := onRefunded(ctx, meter.Refunded{Receipt: receipt}); err != nil {
+				return meter.RefundReceipt{}, err
+			}
+		}
 		s.refundLocked(e, amount)
 	}
 	if req.RefundID != uuid.Nil() {
@@ -1891,7 +1901,6 @@ func (s *UsageStore) Refund(_ context.Context, req meter.RefundRequest) (meter.R
 		e.refunds[req.RefundID] = keyedRefund{amount: req.Amount, remaining: req.Remaining, refunded: amount}
 		s.byRefund[req.RefundID] = i
 	}
-	receipt.Amount = amount
 	return receipt, nil
 }
 

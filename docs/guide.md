@@ -608,8 +608,8 @@ it is `ErrRequestLimitExceeded`.
 `receipt.ChargeID` names the ledger row. Refund against it:
 
 ```go
-usage.Refund(ctx, meter.RefundRequest{ChargeID: receipt.ChargeID, Amount: limes.MustParseAmount("0.10")}) // partial
-usage.Refund(ctx, meter.RefundRequest{ChargeID: receipt.ChargeID, Remaining: true})                       // the rest
+usage.Refund(ctx, meter.RefundRequest{ChargeID: receipt.ChargeID, Amount: limes.MustParseAmount("0.10")}, nil) // partial
+usage.Refund(ctx, meter.RefundRequest{ChargeID: receipt.ChargeID, Remaining: true}, nil)                       // the rest
 ```
 
 A refund returns spend to every counter the charge took it from — except the
@@ -736,6 +736,24 @@ read it back yet; the receipt is what it has.
 store may hold its counters while the callback runs. The module never names
 the transaction's type — the store puts it in the callback's context and its
 own accessor reads it — which is why this library has no database dependency.
+
+`Refund` takes a callback of its own, on the same terms: it runs inside the
+refund's transaction, once the refund's writes are made and before they
+commit, and its error rolls the refund back whole. It is handed the
+receipt the call will return, so an outbox event names the charge, the
+amount actually refunded and the refund's `RefundID`:
+
+```go
+usage.Refund(ctx, req, func(ctx context.Context, r meter.Refunded) error {
+    tx, _ := pgstore.TxFrom(ctx) // commits with the refund
+    return myOutbox.Enqueue(ctx, tx, r.Receipt.ChargeID, r.Receipt.Amount)
+})
+```
+
+It does not run when nothing is refunded (`Remaining` once nothing is
+left), nor on a replay under a `RefundID`: a keyed refund whose answer was
+lost (`ErrOutcomeUnknown`) is retried under the same id, and either replays
+— its event committed with it — or refunds and runs the callback then.
 
 ## Charge a cost reported after the fact
 
@@ -1016,7 +1034,7 @@ store's clock, for the checks at an expiry's exact instant) and
 `ErrTenantDeleted` checks). Both take `ScopesTenants` and `ReadOnlyCtx`,
 a context that reads every tenant's rows and writes none: the suites then
 check that every write under it is `ErrScopeMismatch`, changes nothing and,
-in `metertest`, runs no `onCharged`.
+in `metertest`, runs no `onCharged` or `onRefunded`.
 
 The checks include charges racing one ceiling, so run them against the
 database itself: a store that reads a counter and writes it back outside one
@@ -1479,7 +1497,8 @@ scope that does not admit that tenant returns `ErrScopeMismatch`, never
 (`GetRecord`, `Revoke`, `Refund`, `GetUsage`, `GetCharge`, …) cannot
 be checked so, and answers a row out of scope as not found.
 `onCharged` runs on the store's own transaction, which `TxFrom` reads from
-its context and which is `onCharged`'s only while it runs: kept past it, a
+its context and which is `onCharged`'s only while it runs — and so does a
+refund's `onRefunded`, on the same terms: kept past it, a
 call fails with `pgx.ErrTxClosed`. It is the store's to end — `Commit` or
 `Rollback` on it returns `ErrChargeTransaction`, and a charge whose
 transaction `onCharged` ended with SQL of its own (`COMMIT`, `ROLLBACK`, or

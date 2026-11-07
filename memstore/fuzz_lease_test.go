@@ -283,7 +283,7 @@ func FuzzLeases(f *testing.F) {
 					break
 				}
 				c := &m.charges[len(m.charges)-1-int(amount-1)%len(m.charges)]
-				r, err := u.Refund(ctx, meter.RefundRequest{ChargeID: c.id, Remaining: true})
+				r, err := u.Refund(ctx, meter.RefundRequest{ChargeID: c.id, Remaining: true}, nil)
 				if c.mayBeGone && errors.Is(err, meter.ErrChargeNotFound) {
 					// Purged: nothing to give back, and nothing changes.
 					c.left = 0

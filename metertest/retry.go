@@ -151,20 +151,20 @@ func (f fixture) keyedCharged(t *testing.T) meter.ChargeReceipt {
 func checkRefundReplaysItsID(t *testing.T, f fixture) {
 	c := f.keyedCharged(t)
 	part := meter.RefundRequest{ChargeID: c.ChargeID, Amount: keyedPart, RefundID: uuid.New()}
-	first, err := f.Usage.Refund(f.Ctx, part)
+	first, err := f.Usage.Refund(f.Ctx, part, nil)
 	expect.Must(t, err == nil && first.Amount == keyedPart && !first.Replayed, "keyed refund = %+v, %v; want %v returned", first, err, keyedPart)
-	again, err := f.Usage.Refund(f.Ctx, part)
+	again, err := f.Usage.Refund(f.Ctx, part, nil)
 	expect.Must(t, err == nil && again.Replayed && again.Amount == keyedPart && again.ChargeID == c.ChargeID && again.UnitCode == unit && again.TenantID == f.Tenant,
 		"keyed refund again = %+v, %v; want the first receipt replayed", again, err)
 	expect.That(t, f.spent(t, f.child) == keyedCharge-keyedPart, "child spent %v after a replayed refund, want %v", f.spent(t, f.child), keyedCharge-keyedPart)
 	rest := meter.RefundRequest{ChargeID: c.ChargeID, Remaining: true, RefundID: uuid.New()}
-	all, err := f.Usage.Refund(f.Ctx, rest)
+	all, err := f.Usage.Refund(f.Ctx, rest, nil)
 	expect.Must(t, err == nil && all.Amount == keyedCharge-keyedPart, "keyed refund of the rest = %+v, %v", all, err)
-	all, err = f.Usage.Refund(f.Ctx, rest)
+	all, err = f.Usage.Refund(f.Ctx, rest, nil)
 	expect.That(t, err == nil && all.Replayed && all.Amount == keyedCharge-keyedPart, "keyed refund of the rest again = %+v, %v; want what it returned, replayed", all, err)
 	unkeyed := f.keyedCharged(t)
 	for range 2 {
-		_, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: unkeyed.ChargeID, Amount: keyedPart})
+		_, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: unkeyed.ChargeID, Amount: keyedPart}, nil)
 		expect.Must(t, err == nil, "unkeyed refund: %v", err)
 	}
 	expect.That(t, f.spent(t, f.child) == keyedCharge-2*keyedPart, "child spent %v after two unkeyed refunds, want %v", f.spent(t, f.child), keyedCharge-2*keyedPart)
@@ -175,7 +175,7 @@ func checkRefundReplaysItsID(t *testing.T, f fixture) {
 func checkRefundIDConflicts(t *testing.T, f fixture) {
 	c, other := f.keyedCharged(t), f.keyedCharged(t)
 	id := uuid.New()
-	_, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: c.ChargeID, Amount: keyedPart, RefundID: id})
+	_, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: c.ChargeID, Amount: keyedPart, RefundID: id}, nil)
 	expect.Must(t, err == nil, "keyed refund: %v", err)
 	for name, req := range map[string]meter.RefundRequest{
 		"another amount":     {ChargeID: c.ChargeID, Amount: 2 * keyedPart, RefundID: id},
@@ -183,7 +183,7 @@ func checkRefundIDConflicts(t *testing.T, f fixture) {
 		"another charge":     {ChargeID: other.ChargeID, Amount: keyedPart, RefundID: id},
 		"another charge all": {ChargeID: other.ChargeID, Remaining: true, RefundID: id},
 	} {
-		r, err := f.Usage.Refund(f.Ctx, req)
+		r, err := f.Usage.Refund(f.Ctx, req, nil)
 		expect.That(t, errors.Is(err, meter.ErrRefundConflict) && errors.Is(err, limes.ErrConflict), "refund under %s for %s = %+v, %v; want ErrRefundConflict, a conflict", id, name, r, err)
 	}
 	for _, charge := range []uuid.UUID{c.ChargeID, other.ChargeID} {
@@ -205,13 +205,13 @@ func checkRefundIDGoesWithItsCharge(t *testing.T, f fixture) {
 	}
 	c := f.keyedCharged(t)
 	id := uuid.New()
-	_, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: c.ChargeID, Amount: keyedPart, RefundID: id})
+	_, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: c.ChargeID, Amount: keyedPart, RefundID: id}, nil)
 	expect.Must(t, err == nil, "keyed refund: %v", err)
 	f.Advance(meter.MinChargeRetention + purgeStep)
 	n := purgeCharges(t, f, housekeeping, meter.PurgeChargesRequest{})
 	expect.Must(t, n == 1, "%d charges purged, want the one refunded", n)
 	later := f.keyedCharged(t)
-	r, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: later.ChargeID, Amount: keyedPart, RefundID: id})
+	r, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: later.ChargeID, Amount: keyedPart, RefundID: id}, nil)
 	expect.That(t, err == nil && !r.Replayed && r.Amount == keyedPart, "refund under the id of a purged charge's refund = %+v, %v; want a fresh refund", r, err)
 }
 
@@ -232,9 +232,9 @@ func checkRefundIDGoesWithItsTenant(t *testing.T, f fixture) {
 	expect.Must(t, err == nil, "charge of another tenant: %v", err)
 	c := f.keyedCharged(t)
 	id := uuid.New()
-	_, err = f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: c.ChargeID, Amount: keyedPart, RefundID: id})
+	_, err = f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: c.ChargeID, Amount: keyedPart, RefundID: id}, nil)
 	expect.Must(t, err == nil, "keyed refund: %v", err)
 	expect.Must(t, eraser.EraseTenantUsage(f.Ctx, meter.EraseTenantUsageRequest{TenantID: f.Tenant}) == nil, "EraseTenantUsage")
-	r, err := f.Usage.Refund(theirCtx, meter.RefundRequest{ChargeID: theirs.ChargeID, Amount: keyedPart, RefundID: id})
+	r, err := f.Usage.Refund(theirCtx, meter.RefundRequest{ChargeID: theirs.ChargeID, Amount: keyedPart, RefundID: id}, nil)
 	expect.That(t, err == nil && !r.Replayed && r.Amount == keyedPart, "refund under the id of an erased tenant's refund = %+v, %v; want a fresh refund", r, err)
 }

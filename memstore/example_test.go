@@ -282,12 +282,12 @@ func ExampleUsageStore_Refund() {
 		log.Fatal(err)
 	}
 
-	part, err := e.usage.Refund(ctx, meter.RefundRequest{ChargeID: receipt.ChargeID, Amount: limes.MustParseAmount("1")})
+	part, err := e.usage.Refund(ctx, meter.RefundRequest{ChargeID: receipt.ChargeID, Amount: limes.MustParseAmount("1")}, nil)
 	fmt.Println(err, part.Amount)
-	rest, err := e.usage.Refund(ctx, meter.RefundRequest{ChargeID: receipt.ChargeID, Remaining: true})
+	rest, err := e.usage.Refund(ctx, meter.RefundRequest{ChargeID: receipt.ChargeID, Remaining: true}, nil)
 	fmt.Println(err, rest.Amount)
 
-	_, err = e.usage.Refund(ctx, meter.RefundRequest{ChargeID: receipt.ChargeID, Amount: 1})
+	_, err = e.usage.Refund(ctx, meter.RefundRequest{ChargeID: receipt.ChargeID, Amount: 1}, nil)
 	fmt.Println(errors.Is(err, meter.ErrRefundExceedsCharge))
 	// Output:
 	// <nil> 1

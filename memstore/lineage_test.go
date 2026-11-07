@@ -80,7 +80,7 @@ func TestChildrenCannotSpendPastTheirParentsBudget(t *testing.T) {
 	}
 
 	// A refund returns spend to the parent too, re-opening room for siblings.
-	if _, err := u.Refund(ctx, meter.RefundRequest{ChargeID: first.ChargeID, Remaining: true}); err != nil {
+	if _, err := u.Refund(ctx, meter.RefundRequest{ChargeID: first.ChargeID, Remaining: true}, nil); err != nil {
 		t.Fatalf("Refund: %v", err)
 	}
 	root, _ = u.GetUsage(ctx, rootID)

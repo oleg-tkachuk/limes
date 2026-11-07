@@ -14,7 +14,7 @@
 //
 // The checks cover what a charge does at its ceilings and when it arrives
 // again: rejection that moves nothing — by a Biscuit copy's, the capability's,
-// an ancestor's or the tenant's ceiling, by a failed onCharged, under
+// an ancestor's or the tenant's ceiling, by a failed onCharged or onRefunded, under
 // concurrent charges, siblings' and grandchildren's among them — idempotency on ExternalRef and on a settled
 // reservation, also once the capability is gone (Env.DeleteCapability), on
 // a ReservationID and on a RefundID, which goes with its charge, ChargeByRef,
@@ -440,6 +440,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{Name: "LeaseIsSettledOnlyInItsTenant", Run: checkLeaseIsSettledOnlyInItsTenant},
 		{Name: "EraseTenantUsageEndsOnlyItsLeases", Run: checkEraseTenantUsageEndsOnlyItsLeases},
 		{Name: "ALeasedChargeRunsOnCharged", Run: checkALeasedChargeRunsOnCharged},
+		{Name: "ALeasedRefundRunsOnRefunded", Run: checkALeasedRefundRunsOnRefunded},
 		{Name: "ARequestLeaseCreatesNoTenantBudget", Run: checkARequestLeaseCreatesNoTenantBudget},
 		{Name: "TenantUnitMovesOnlyWhileNothingCounts", Run: checkTenantUnitMovesOnlyWhileNothingCounts},
 		{Name: "ReleaseMatchingReleasesTheHoldsOfRevokedMatches", Run: checkReleaseMatching},
@@ -501,6 +502,10 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{Name: "TheTenantCeilingBoundsEveryCapability", Run: checkTenantCeiling},
 		{Name: "AFailedCallbackMovesNothing", Run: checkCallbackRollback},
 		{Name: "TheCallbackSeesTheReceipt", Run: checkCallbackSeesTheReceipt},
+		{Name: "AFailedRefundCallbackMovesNothing", Run: checkRefundCallbackRollback},
+		{Name: "TheRefundCallbackSeesTheReceipt", Run: checkRefundCallbackSeesTheReceipt},
+		{Name: "AReplayedRefundRunsNoCallback", Run: checkRefundCallbackSkipsAReplay},
+		{Name: "ARefundOfNothingRunsNoCallback", Run: checkRefundCallbackSkipsNothing},
 		{Name: "BumpCountsTheChain", Run: checkBump},
 		{Name: "RefundReturnsToEveryCounter", Run: checkRefund},
 		{Name: "AHoldCountsAgainstCharges", Run: checkHoldBlocksCharge},
@@ -707,7 +712,7 @@ func checkChargeByRef(t *testing.T, f fixture) {
 	const actor = "reporter"
 	r, err := f.charge(meter.ChargeRequest{Amount: 3 * one, ExternalRef: "call-1", Op: chargedOp, Actor: actor}, nil)
 	expect.Must(t, err == nil, "%v", err)
-	_, err = f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: r.ChargeID, Amount: one})
+	_, err = f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: r.ChargeID, Amount: one}, nil)
 	expect.Must(t, err == nil, "%v", err)
 	got, err := f.Usage.ChargeByRef(f.Ctx, meter.ChargeByRefRequest{CapabilityID: f.child, ExternalRef: "call-1"})
 	want := meter.ChargeRecord{
@@ -932,14 +937,14 @@ func checkRefundAcrossReset(t *testing.T, f fixture) {
 	expect.Must(t, err == nil, "reset: %v", err)
 	after, err := f.charge(meter.ChargeRequest{Amount: amount}, nil)
 	expect.Must(t, err == nil, "%v", err)
-	r, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: before.ChargeID, Remaining: true})
+	r, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: before.ChargeID, Remaining: true}, nil)
 	expect.Must(t, err == nil && r.Amount == amount, "refund of the earlier period's charge = %+v, %v; want %v", r, err, amount)
 	got := f.tenantSpent(t)
 	expect.That(t, got == amount, "tenant spent %v in the new period, want %v: the refund came out of a period that never counted it", got, amount)
 	got = f.spent(t, f.child)
 	expect.That(t, got == amount, "child spent %v, want %v: the refund still returns to the capability", got, amount)
 	// A charge of the new period returns to it.
-	_, err = f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: after.ChargeID, Remaining: true})
+	_, err = f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: after.ChargeID, Remaining: true}, nil)
 	expect.Must(t, err == nil, "%v", err)
 	got = f.tenantSpent(t)
 	expect.That(t, got == 0, "tenant spent %v after refunding the new period's charge, want 0", got)
@@ -962,7 +967,7 @@ func checkRefundAfterRestart(t *testing.T, f fixture) {
 	}
 	refund := func(r meter.ChargeReceipt, amount limes.Nanos) {
 		t.Helper()
-		got, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: r.ChargeID, Remaining: true})
+		got, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: r.ChargeID, Remaining: true}, nil)
 		expect.Must(t, err == nil && got.Amount == amount, "refund = %+v, %v; want %v", got, err, amount)
 	}
 	restart := func(id uuid.UUID) {
@@ -1011,7 +1016,7 @@ func checkRefundAfterRestartAcrossHousekeeping(t *testing.T, f fixture) {
 		_, err = f.charge(meter.ChargeRequest{Amount: after}, nil)
 		expect.Must(t, err == nil, "%v", err)
 		housekeeping(t)
-		r, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: first.ChargeID, Remaining: true})
+		r, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: first.ChargeID, Remaining: true}, nil)
 		expect.Must(t, err == nil && r.Amount == before, "refund = %+v, %v; want %v", r, err, before)
 		got := f.spent(t, f.child)
 		expect.That(t, got == after, "child spent %v after the refund, want %v: the refund reached the counters restarted since its charge", got, after)
@@ -1327,7 +1332,7 @@ func checkRefundExactRemainder(t *testing.T, f fixture) {
 	receipt, err := f.charge(meter.ChargeRequest{Amount: charged}, nil)
 	expect.Must(t, err == nil, "%v", err)
 	refund := func(amount limes.Nanos) (meter.RefundReceipt, error) {
-		return f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: receipt.ChargeID, Amount: amount})
+		return f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: receipt.ChargeID, Amount: amount}, nil)
 	}
 	_, err = refund(first)
 	expect.Must(t, err == nil, "%v", err)
@@ -1730,7 +1735,7 @@ func checkCopySharedID(t *testing.T, f fixture) {
 	expect.Must(t, err == nil, "the other capability's charge under the shared id: %v", err)
 	_, err = f.Usage.Charge(f.Ctx, meter.ChargeRequest{Subject: mine, Amount: one}, nil)
 	expect.That(t, err == nil, "a charge within the copy's own budget: err = %v, want it admitted", err)
-	_, err = f.Usage.Refund(theirCtx, meter.RefundRequest{ChargeID: theirCharge.ChargeID, Amount: one})
+	_, err = f.Usage.Refund(theirCtx, meter.RefundRequest{ChargeID: theirCharge.ChargeID, Amount: one}, nil)
 	expect.Must(t, err == nil, "%v", err)
 	err = f.Usage.DeleteUsage(theirCtx, meter.DeleteUsageRequest{CapabilityID: theirCap})
 	expect.Must(t, err == nil, "%v", err)
@@ -2403,7 +2408,7 @@ func checkCopySettleRefund(t *testing.T, f fixture) {
 	expect.Must(t, err == nil, "%v", err)
 	settled, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: subject, ReservationID: r.ID, Amount: 3 * one}, nil)
 	expect.Must(t, err == nil, "%v", err)
-	_, err = f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: settled.ChargeID, Amount: one})
+	_, err = f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: settled.ChargeID, Amount: one}, nil)
 	expect.Must(t, err == nil, "%v", err)
 	res, err := reader.CopyUsage(f.Ctx, meter.CopyUsageRequest{CapabilityID: f.child, RevocationIDs: [][]byte{copyID}})
 	got := res.Copies
@@ -2515,7 +2520,7 @@ func checkRefund(t *testing.T, f fixture) {
 	expect.Must(t, err == nil, "%v", err)
 	expect.That(t, r.TenantID == f.Tenant && r.UnitCode == unit, "charge receipt names tenant %s in %q, want %s in %q", r.TenantID, r.UnitCode, f.Tenant, unit)
 	refund := func(amount limes.Nanos) (meter.RefundReceipt, error) {
-		return f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: r.ChargeID, Amount: amount})
+		return f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: r.ChargeID, Amount: amount}, nil)
 	}
 	got, err := refund(one)
 	expect.Must(t, err == nil && got.Amount == one && got.ChargeID == r.ChargeID && got.TenantID == f.Tenant && got.UnitCode == unit, "partial refund = %+v, %v; want 1 of charge %s, tenant %s in %q", got, err, r.ChargeID, f.Tenant, unit)
@@ -2523,7 +2528,7 @@ func checkRefund(t *testing.T, f fixture) {
 	expect.That(t, errors.Is(err, meter.ErrRefundExceedsCharge), "refunding past what is left: err = %v, want ErrRefundExceedsCharge", err)
 	checkRefundRefusesMalformed(t, f, r.ChargeID)
 	for range 2 { // the rest, then nothing: a full refund is idempotent
-		_, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: r.ChargeID, Remaining: true})
+		_, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: r.ChargeID, Remaining: true}, nil)
 		expect.Must(t, err == nil, "full refund: %v", err)
 	}
 	expect.That(t, f.spent(t, f.child) == 0 && f.spent(t, f.root) == 0 && f.tenantSpent(t) == 0, "a full refund left spend on a counter the charge moved")
@@ -2537,10 +2542,10 @@ func checkRefundRefusesMalformed(t *testing.T, f fixture, charge uuid.UUID) {
 		"neither an amount nor Remaining": {ChargeID: charge},
 		"an amount and Remaining":         {ChargeID: charge, Amount: one, Remaining: true},
 	} {
-		_, err := f.Usage.Refund(f.Ctx, req)
+		_, err := f.Usage.Refund(f.Ctx, req, nil)
 		expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "refund of %s: err = %v, want ErrInvalidRequest", name, err)
 	}
-	_, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: uuid.New(), Remaining: true})
+	_, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: uuid.New(), Remaining: true}, nil)
 	expect.That(t, errors.Is(err, meter.ErrChargeNotFound), "refund of an unknown charge: err = %v, want ErrChargeNotFound", err)
 }
 
@@ -3159,8 +3164,8 @@ func checkScopeMismatch(t *testing.T, f fixture) {
 
 // A read-only scope reads Tenant's usage and writes none: every call that
 // writes, housekeeping included, is refused as out of scope rather than let
-// through as no rows, runs no onCharged, and moves no counter, hold or
-// ceiling.
+// through as no rows, runs no onCharged or onRefunded, and moves no
+// counter, hold or ceiling.
 func checkReadOnlyScope(t *testing.T, f fixture) {
 	ro := f.ReadOnlyCtx
 	if ro == nil {
@@ -3174,6 +3179,10 @@ func checkReadOnlyScope(t *testing.T, f fixture) {
 	expect.Must(t, err == nil, "GetUsage under the read-only scope: %v", err)
 	ran := false
 	onCharged := func(context.Context, meter.Charged) error {
+		ran = true
+		return nil
+	}
+	onRefunded := func(context.Context, meter.Refunded) error {
 		ran = true
 		return nil
 	}
@@ -3198,7 +3207,7 @@ func checkReadOnlyScope(t *testing.T, f fixture) {
 			return f.Usage.Release(ro, meter.ReleaseRequest{Subject: f.childSubject(), ReservationID: held.ID})
 		},
 		"Refund": func() error {
-			_, err := f.Usage.Refund(ro, meter.RefundRequest{ChargeID: charged.ChargeID, Remaining: true})
+			_, err := f.Usage.Refund(ro, meter.RefundRequest{ChargeID: charged.ChargeID, Remaining: true}, onRefunded)
 			return err
 		},
 		"SetTenantBudget": func() error {
@@ -3226,7 +3235,7 @@ func checkReadOnlyScope(t *testing.T, f fixture) {
 		err := write()
 		expect.That(t, errors.Is(err, limes.ErrScopeMismatch), "%s under the read-only scope: err = %v, want ErrScopeMismatch", name, err)
 	}
-	expect.That(t, !(ran), "a write under the read-only scope ran onCharged")
+	expect.That(t, !(ran), "a write under the read-only scope ran a callback")
 	after, err := f.Usage.GetUsage(f.Ctx, f.child)
 	expect.Must(t, err == nil, "usage: %v", err)
 	expect.That(t, reflect.DeepEqual(after, before), "usage after the refused calls = %+v, want %+v", after, before)
@@ -3415,7 +3424,7 @@ func seedSumCharges(t *testing.T, f fixture) uuid.UUID {
 		r, err := f.charge(c, nil)
 		expect.Must(t, err == nil, "charge: %v", err)
 		if c.Op == limes.OpPut {
-			_, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: r.ChargeID, Amount: one})
+			_, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: r.ChargeID, Amount: one}, nil)
 			expect.Must(t, err == nil, "refund: %v", err)
 		}
 	}
@@ -3622,7 +3631,7 @@ func checkSumChargesOrderByAmount(t *testing.T, f fixture) {
 		if refund == 0 {
 			return
 		}
-		_, err = f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: r.ChargeID, Amount: refund})
+		_, err = f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: r.ChargeID, Amount: refund}, nil)
 		expect.Must(t, err == nil, "refund: %v", err)
 	}
 	from, to := f.sumPeriod()
@@ -3799,7 +3808,7 @@ func checkSumChargesLateRefund(t *testing.T, f fixture) {
 	r, err := f.charge(meter.ChargeRequest{Amount: 3 * one}, nil)
 	expect.Must(t, err == nil, "charge: %v", err)
 	f.Advance(midnight.Sub(from))
-	_, err = f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: r.ChargeID, Amount: one})
+	_, err = f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: r.ChargeID, Amount: one}, nil)
 	expect.Must(t, err == nil, "refund the next day: %v", err)
 	page, err := f.Ledger.SumCharges(f.Ctx, meter.SumChargesRequest{
 		TenantID: f.Tenant, From: from, To: midnight.Add(time.Second), Bucket: meter.ChargeBucketDay,
@@ -3987,6 +3996,6 @@ func checkPurgedPromises(t *testing.T, f fixture, p purgedCharges) {
 		_, err := f.Usage.GetCharge(p.otherCtx, p.otherCharge)
 		expect.That(t, err == nil, "another tenant's charge after a purge under Tenant's scope: %v; want it kept", err)
 	}
-	_, err = f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: p.second.ChargeID, Remaining: true})
+	_, err = f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: p.second.ChargeID, Remaining: true}, nil)
 	expect.That(t, errors.Is(err, meter.ErrChargeNotFound), "Refund of a purged charge: err = %v, want ErrChargeNotFound", err)
 }

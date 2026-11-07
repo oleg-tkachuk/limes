@@ -172,7 +172,7 @@ func checkLeaseRefund(t *testing.T, f fixture) {
 	f.lease(t, l, child, leased)
 	first, err := f.chargeOf(child, leaseCharge)
 	expect.Must(t, err == nil, "first charge: %v", err)
-	_, err = f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: first.ChargeID, Remaining: true})
+	_, err = f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: first.ChargeID, Remaining: true}, nil)
 	expect.Must(t, err == nil, "refund under the open lease: %v", err)
 	open, err := l.GetLease(f.Ctx, f.child)
 	expect.That(t, err == nil && open.Spent == 0, "the lease after a refund = %+v, %v; want nothing spent", open, err)
@@ -182,7 +182,7 @@ func checkLeaseRefund(t *testing.T, f fixture) {
 	expect.Must(t, err == nil, "second charge: %v", err)
 	_, err = l.SettleLease(f.Ctx, meter.SettleLeaseRequest{Subject: child})
 	expect.Must(t, err == nil, "settle: %v", err)
-	_, err = f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: second.ChargeID, Amount: one})
+	_, err = f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: second.ChargeID, Amount: one}, nil)
 	expect.Must(t, err == nil, "refund once settled: %v", err)
 	want := leaseCharge - one
 	for name, got := range map[string]limes.Nanos{"the child": f.usageOf(t, f.child).SpentAmount, "the root": f.usageOf(t, f.root).SpentAmount, "the tenant": f.tenantOf(t).SpentAmount} {
@@ -283,7 +283,7 @@ func checkLeaseRefundAfterRestart(t *testing.T, f fixture) {
 	}
 	refund := func(r meter.ChargeReceipt) {
 		t.Helper()
-		got, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: r.ChargeID, Remaining: true})
+		got, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: r.ChargeID, Remaining: true}, nil)
 		expect.Must(t, err == nil && got.Amount == leaseCharge, "refund = %+v, %v; want %v", got, err, leaseCharge)
 	}
 	counted := func(when string, root, child, tenant limes.Nanos) {
@@ -499,7 +499,7 @@ func checkLeaseRefundOfADescendantsCharge(t *testing.T, f fixture) {
 	}
 	refund := func(r meter.ChargeReceipt) {
 		t.Helper()
-		_, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: r.ChargeID, Remaining: true})
+		_, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: r.ChargeID, Remaining: true}, nil)
 		expect.Must(t, err == nil, "refund: %v", err)
 	}
 	first, second := charge(leaseCharge), charge(leaseCharge)
@@ -529,7 +529,7 @@ func checkLeaseRefundSkipsALeaseOpenedSince(t *testing.T, f fixture) {
 	_, err = l.SettleLease(f.Ctx, meter.SettleLeaseRequest{Subject: child})
 	expect.Must(t, err == nil, "settle: %v", err)
 	f.lease(t, l, child, leased)
-	_, err = f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: charged.ChargeID, Remaining: true})
+	_, err = f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: charged.ChargeID, Remaining: true}, nil)
 	expect.Must(t, err == nil, "refund: %v", err)
 	for name, got := range map[string]limes.Nanos{"the child": f.usageOf(t, f.child).SpentAmount, "the root": f.usageOf(t, f.root).SpentAmount, "the tenant": f.tenantOf(t).SpentAmount} {
 		expect.That(t, got == 0, "%s spent %v after a refund of the settled lease's charge, want nothing", name, got)
