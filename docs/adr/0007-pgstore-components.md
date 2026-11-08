@@ -1,6 +1,6 @@
 # ADR-0007: Split the meter by what a consumer uses, and pgstore along it
 
-**Status:** Accepted, amended on 2026-11-05 (decision 5)
+**Status:** Accepted, amended on 2026-11-05 (decision 5) and on 2026-11-08 (below)
 **Date:** 2026-10-29
 **Deciders:** Oleg Tkachuk
 **Relates to:** [ADR-0001](0001-architecture-before-1-0.md)
@@ -209,3 +209,34 @@ split, and not designed here.
 - pgstore requires PostgreSQL 15 or later.
 - `docs/migration.md` notes, under the pgstore minor that moved it, the
   import that replaces `pgstore.Migrate`.
+
+## Amendment, 2026-11-08
+
+The meter's hold on a lineage stays `FOR KEY SHARE`, with its cost stated.
+Calls overlapping on one record each add a key-share lock to it, and
+PostgreSQL records two or more lockers of a row as a MultiXact: on a hot
+root, about one per call. Calls of one tree are already serialised on the
+root's counters (`FOR UPDATE`), so the rate is bounded by that row's write
+rate, and autovacuum freezes the MultiXacts from `limes.capabilities`, the
+only table that takes them; under sustained load that is an aggressive
+vacuum of the records table, and `pg_multixact` grows with the queue depth.
+
+Rejected:
+
+- **A shared advisory lock per record**, Purge taking it exclusively. No
+  MultiXact and no heap write, but up to `MaxDelegationDepth`+1 (65)
+  lock-table slots per call, against a default `max_locks_per_transaction`
+  of 64; a re-read of the lineage after the locks, since the walk's
+  snapshot predates them; and every statement that deletes a record must
+  take the lock, where a row lock binds any delete, an operator's included.
+- **The tenant's advisory lock, taken exclusively by Purge.** No per-call
+  cost, but a Purge batch would stop every metered call of each tenant it
+  touches.
+- **The key-share lock taken after the counters' `FOR UPDATE`.** One holder
+  per record at a time, but the ceilings would be read unlocked, a record
+  purged between the walk and the lock would have to cut a chain already
+  locked, and calls under a lease, which do not lock the root's counters,
+  would overlap on the record anyway.
+
+`TestOverlappingMeteredCallsHoldTheirRootForKeyShare` holds the lock mode:
+a MultiXact of overlapping calls names each of them as a key-share locker.
