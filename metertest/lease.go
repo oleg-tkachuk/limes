@@ -120,18 +120,19 @@ func checkLeaseIsHeldToEveryCeiling(t *testing.T, f fixture) {
 
 // A charge past what the lease holds is refused with ErrLeaseExhausted, a
 // kind of ErrBudgetExceeded, and charges nothing; topped up, the lease
-// covers it.
+// spent whole is settled and one of the top-up opened, which covers it.
 func checkLeaseExhaustedAndToppedUp(t *testing.T, f fixture) {
 	l := f.leaser(t)
 	child := f.childSubject()
-	f.lease(t, l, child, leased)
+	first := f.lease(t, l, child, leased)
 	_, err := f.chargeOf(child, leased)
 	expect.Must(t, err == nil, "a charge of the whole lease: %v", err)
 	_, err = f.chargeOf(child, one)
 	expect.That(t, errors.Is(err, meter.ErrLeaseExhausted) && errors.Is(err, limes.ErrBudgetExceeded), "a charge past the lease: %v, want ErrLeaseExhausted, an ErrBudgetExceeded", err)
 	expect.That(t, f.usageOf(t, f.child).SpentAmount == leased, "the child spent %v after a refused charge, want %v", f.usageOf(t, f.child).SpentAmount, leased)
 	topped := f.lease(t, l, child, leaseTopUp)
-	expect.That(t, topped.Amount == leased+leaseTopUp && topped.Spent == leased, "a top-up = %+v, want %v leased, %v spent", topped, leased+leaseTopUp, leased)
+	expect.That(t, topped.ID != first.ID && topped.Amount == leaseTopUp && topped.Spent == 0, "a top-up = %+v, want a new lease of %v, nothing spent", topped, leaseTopUp)
+	expect.That(t, f.usageOf(t, f.root).SpentAmount == leased, "the root spent %v once the exhausted lease was topped up, want %v", f.usageOf(t, f.root).SpentAmount, leased)
 	_, err = f.chargeOf(child, one)
 	expect.That(t, err == nil, "a charge once topped up: %v", err)
 }

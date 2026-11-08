@@ -86,6 +86,17 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
   _, err := usage.EraseTenantUsage(ctx, meter.EraseTenantUsageRequest{TenantID: tenant})
   ```
 
+- `UsageStore.Lease` on a capability whose lease is open settles that
+  lease and opens a new one, in the same transaction under the locks
+  `SettleLease` takes, as `meter.Leaser.Lease` in limes `v0.172.0` now
+  states; it added to the open lease, keeping its id. The returned
+  `meter.Lease` has a new `ID`, an `Amount` and `Requests` of what the old
+  lease had left plus the request's, nothing spent, and `ExpiresAt` the
+  request's `TTL` from now. An open lease of a period the tenant has since
+  closed is settled the same way, carrying what it had left into the
+  current period, where it was settled in a transaction of its own and
+  its remainder released.
+
 ## v0.172.0
 
 - `meter.TenantUsageEraser.EraseTenantUsage` returns
@@ -104,6 +115,30 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
   err := eraser.EraseTenantUsage(ctx, meter.EraseTenantUsageRequest{TenantID: tenant})
   // after
   erased, err := eraser.EraseTenantUsage(ctx, meter.EraseTenantUsageRequest{TenantID: tenant})
+  ```
+
+- `meter.Leaser.Lease` on a subject whose lease is open — a top-up —
+  settles that lease and opens a new one, atomically, where it added to
+  the open lease and kept its id. What the old lease spent is charged to
+  the ancestors and the tenant, so their `SpentAmount` lags by at most one
+  lease, as ADR-0017 states, rather than for as long as top-ups keep a
+  lease open. The returned `meter.Lease` has a new `ID`; its `Amount` and
+  `Requests` are what the old lease had left plus the request's, with
+  nothing spent, and it lasts `LeaseRequest.TTL` from the top-up, where a
+  top-up lasted until the later of the two ends. A refund of a charge
+  taken before the top-up goes to the chain the settlement charged, one
+  taken after it to the new lease. A caller that kept a lease's `ID`
+  across a top-up reads it from the top-up's result, and one that added
+  up `Amount` across top-ups reads the new lease's instead. A store of
+  your own settles and reopens on a top-up, which `metertest` checks:
+
+  ```go
+  // before: one lease, its id kept
+  l, _ := leaser.Lease(ctx, meter.LeaseRequest{Subject: s, Amount: 10})
+  l, _ = leaser.Lease(ctx, meter.LeaseRequest{Subject: s, Amount: 5}) // l.Amount == 10 + 5
+  // after: settled and reopened
+  l, _ := leaser.Lease(ctx, meter.LeaseRequest{Subject: s, Amount: 10})
+  l, _ = leaser.Lease(ctx, meter.LeaseRequest{Subject: s, Amount: 5}) // a new l.ID; l.Amount == 10 - spent + 5
   ```
 
 ## exchange/v0.22.0
