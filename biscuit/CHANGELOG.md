@@ -2,6 +2,16 @@
 
 Every release of the biscuit module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.1.31](https://github.com/oleg-tkachuk/limes/compare/biscuit%2Fv0.1.30...biscuit%2Fv0.1.31) (2026-11-08)
+
+### Bug Fixes
+
+* **biscuit:** refuse an attenuation a block cannot carry ([27848c0](https://github.com/oleg-tkachuk/limes/commit/27848c0b21b4b2b6c497d2a27c32217d9a6b41a3))
+
+### Dependencies
+
+* require limes v0.172.0
+
 ## [0.1.30](https://github.com/oleg-tkachuk/limes/compare/biscuit%2Fv0.1.29...biscuit%2Fv0.1.30) (2026-11-03)
 
 ### Dependencies

@@ -2,6 +2,40 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.172.0](https://github.com/oleg-tkachuk/limes/compare/v0.171.0...v0.172.0) (2026-11-08)
+
+### ⚠ BREAKING CHANGES
+
+* **issuer:** answer a store's mint refusal as the mint's, not revoked
+* **store:** make the store and check request structs incomparable
+* **verifier:** require a revocation record by default
+* **meter:** return what EraseTenantUsage removed
+* **meter:** settle a lease on a top-up and open a new one
+
+### Features
+
+* **cache:** answer RevocationLineage from the revocation cache ([b63c30a](https://github.com/oleg-tkachuk/limes/commit/b63c30a46c7b9182a0d59685565b44cf6131054f))
+* **meter:** return what EraseTenantUsage removed ([bb07650](https://github.com/oleg-tkachuk/limes/commit/bb0765080e15373ab9ac9cba932d9ffce02f5012))
+* **store:** make the store and check request structs incomparable ([e718899](https://github.com/oleg-tkachuk/limes/commit/e7188994f2482ac1403915b6b715c4cd06da0cf6))
+* **verifier:** require a revocation record by default ([df16552](https://github.com/oleg-tkachuk/limes/commit/df16552def663640bea30cc68d086ec3b44eba62))
+
+### Bug Fixes
+
+* **issuer:** answer a store's mint refusal as the mint's, not revoked ([5ea3ed1](https://github.com/oleg-tkachuk/limes/commit/5ea3ed1613937124e6781a33a1a1852e907e8dda))
+* **meter:** settle a lease on a top-up and open a new one ([e2ee312](https://github.com/oleg-tkachuk/limes/commit/e2ee31281d5c2526217aca064b2a77e3acd6cb3f))
+
+### Defaults
+
+* removed: `limes.VerifierConfig.RequireRecord`
+
+### Codes
+
+* added: `delegation_depth_exceeded`, `tenant_gone`
+
+### Contract
+
+* list every interface a consumer implements as frozen
+
 ## [0.171.0](https://github.com/oleg-tkachuk/limes/compare/v0.170.0...v0.171.0) (2026-11-07)
 
 ### ⚠ BREAKING CHANGES

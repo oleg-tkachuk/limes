@@ -2,6 +2,26 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.71.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.70.0...pgstore%2Fv0.71.0) (2026-11-08)
+
+### ⚠ BREAKING CHANGES
+
+* **pgstore:** return and log what EraseTenantUsage removed
+* **pgstore:** settle a topped-up lease in the top-up's transaction
+
+### Features
+
+* **pgstore:** return and log what EraseTenantUsage removed ([9abfb2f](https://github.com/oleg-tkachuk/limes/commit/9abfb2f2d1e1539ef9735318d887d81513e856d0))
+
+### Bug Fixes
+
+* **pgstore:** retry a call whose lease moved up to a bound ([21b86b5](https://github.com/oleg-tkachuk/limes/commit/21b86b5501a1c30d7e78f9d543b0428a26e1399c))
+* **pgstore:** settle a topped-up lease in the top-up's transaction ([79c7c70](https://github.com/oleg-tkachuk/limes/commit/79c7c70276c5d4ea0b8417dbdb18cd10735babee))
+
+### Dependencies
+
+* require limes v0.172.0
+
 ## [0.70.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.69.1...pgstore%2Fv0.70.0) (2026-11-07)
 
 ### ⚠ BREAKING CHANGES
