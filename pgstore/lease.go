@@ -499,7 +499,8 @@ func (s *UsageStore) SettleLease(ctx context.Context, req meter.SettleLeaseReque
 }
 
 // settle settles capID's lease in a transaction of its own, scoped to its
-// tenant, run again once should the lease move while it was locked.
+// tenant, run again should the lease move while it was locked
+// (retryLeaseMoved).
 func (s *UsageStore) settle(ctx context.Context, capID, tenantID uuid.UUID) (meter.Lease, error) {
 	var out meter.Lease
 	attempt := func() error {
@@ -511,10 +512,7 @@ func (s *UsageStore) settle(ctx context.Context, capID, tenantID uuid.UUID) (met
 			})
 		})
 	}
-	err := attempt()
-	if errors.Is(err, errLeaseMoved) {
-		err = attempt()
-	}
+	err := s.retryLeaseMoved(ctx, retriedSettleLease, capID, attempt)
 	return out, err
 }
 

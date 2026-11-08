@@ -96,6 +96,11 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
   closed is settled the same way, carrying what it had left into the
   current period, where it was settled in a transaction of its own and
   its remainder released.
+- A `Charge`, `Bump` or `SettleLease` whose lease moved between its read
+  and its lock — a top-up now moves it — runs again up to five times,
+  where it ran again once and then answered `limes.ErrInternal`. Past
+  that it answers `limes.ErrConflict`, which a caller may retry, and logs
+  a warning.
 
 ## v0.172.0
 
