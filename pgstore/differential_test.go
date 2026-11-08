@@ -327,7 +327,8 @@ func diffEraseOther(side *diffSide, other, capID uuid.UUID, expires time.Time) e
 	if _, err := side.usage.Charge(ctx, meter.ChargeRequest{Subject: subject, Amount: diffUnit}, nil); err != nil {
 		return err
 	}
-	return side.eraser.EraseTenantUsage(ctx, meter.EraseTenantUsageRequest{TenantID: other})
+	_, err := side.eraser.EraseTenantUsage(ctx, meter.EraseTenantUsageRequest{TenantID: other})
+	return err
 }
 
 // diffApply runs step s on side and returns its error.

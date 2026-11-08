@@ -431,7 +431,8 @@ func TestReadOnlyScopeReadsEveryTenantAndWritesNone(t *testing.T) {
 			},
 			"DeleteUsage": func() error { return s.usage.DeleteUsage(s.ctx, meter.DeleteUsageRequest{CapabilityID: f.child.ID}) },
 			"EraseTenantUsage": func() error {
-				return s.usage.EraseTenantUsage(s.ctx, meter.EraseTenantUsageRequest{TenantID: f.mine})
+				_, err := s.usage.EraseTenantUsage(s.ctx, meter.EraseTenantUsageRequest{TenantID: f.mine})
+				return err
 			},
 		} {
 			if err := write(); !errors.Is(err, limes.ErrScopeMismatch) {
@@ -489,7 +490,7 @@ func TestReadOnlyPoliciesOfEveryTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The other tenant's erase leaves its mark, a row of erased_tenants.
-	if err := f.usage.EraseTenantUsage(WithTenant(t.Context(), f.theirs), meter.EraseTenantUsageRequest{TenantID: f.theirs}); err != nil {
+	if _, err := f.usage.EraseTenantUsage(WithTenant(t.Context(), f.theirs), meter.EraseTenantUsageRequest{TenantID: f.theirs}); err != nil {
 		t.Fatal(err)
 	}
 	err = pgx.BeginFunc(t.Context(), app, func(tx pgx.Tx) error {
