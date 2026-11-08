@@ -48,8 +48,8 @@ or be marked breaking by hand.
 | `limes.RevocationCacheConfig` | `Logger` | `slog.Default()` |  |
 | `limes.RevocationCacheConfig` | `Now` | `time.Now` |  |
 | `limes.VerifierConfig` | `Keys` | required |  |
-| `limes.VerifierConfig` | `Revocations` | required |  |
-| `limes.VerifierConfig` | `RequireRecord` | off | A capability `Revocations` has no record of reads as not revoked, and verifies. |
+| `limes.VerifierConfig` | `Revocations` | required | A `RevocationLineageLookup`, unless `AllowUnrecorded` is set. |
+| `limes.VerifierConfig` | `AllowUnrecorded` | off | A capability `Revocations` has no record of is refused with `ErrUnrecorded`, and `Revocations` must be a `RevocationLineageLookup` (a `RevocationCache` over one included), or `NewVerifier` refuses it. A lookup on a lagging replica refuses a fresh token until its record arrives. |
 | `limes.VerifierConfig` | `TrustedIssuers` | required |  |
 | `limes.VerifierConfig` | `KeyIssuers` | none | No kid is bound: taken with one trusted issuer, refused with several unless `SharedKeys` is set. |
 | `limes.VerifierConfig` | `SharedKeys` | off |  |

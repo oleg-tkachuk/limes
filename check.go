@@ -38,6 +38,7 @@ type CheckRequest struct {
 	// taint tracking leaves it false — AllowTaintedRead then protects
 	// nothing, which is the consumer's to disclose.
 	ResourceTainted bool
+	_               noCompare
 }
 
 // Mutating reports whether the operation may change state, resolving its

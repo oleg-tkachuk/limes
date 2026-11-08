@@ -17,6 +17,10 @@ func (tooDeepStore) IsRevoked(context.Context, uuid.UUID) (bool, error) {
 	return false, ErrDelegationTooDeep
 }
 
+func (tooDeepStore) RevocationLineage(context.Context, uuid.UUID) (RevocationAnswer, error) {
+	return RevocationAnswer{}, ErrDelegationTooDeep
+}
+
 // Every refusal names the module's prefix once, however many limes errors it
 // wraps: a caller reads one "limes: ", never "limes: …: limes: …".
 func TestRefusalsNameThePrefixOnce(t *testing.T) {

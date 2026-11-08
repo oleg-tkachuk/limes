@@ -33,7 +33,9 @@ func resign(t *testing.T, priv ed25519.PrivateKey, header map[string]any, claims
 func verifierFor(t *testing.T, pub ed25519.PublicKey, cfg VerifierConfig) *Verifier {
 	t.Helper()
 	cfg.Keys = staticKeys(t, map[string]ed25519.PublicKey{testKID: pub})
-	cfg.Revocations = newMemStore()
+	// A token signed here by hand, or by an issuer over a stub of its own,
+	// has no record in this one.
+	cfg.Revocations, cfg.AllowUnrecorded = newMemStore(), true
 	if cfg.TrustedIssuers == nil {
 		cfg.TrustedIssuers = []string{"iss"}
 	}

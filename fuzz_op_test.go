@@ -78,7 +78,8 @@ func FuzzOpValidate(f *testing.F) {
 	if err != nil {
 		f.Fatal(err)
 	}
-	verifier, err := limes.NewVerifier(limes.VerifierConfig{Keys: keys, Revocations: discardStore{}, TrustedIssuers: []string{fuzzOpIssuer}})
+	// discardStore keeps no record, so nothing it issued is on record.
+	verifier, err := limes.NewVerifier(limes.VerifierConfig{Keys: keys, Revocations: discardStore{}, AllowUnrecorded: true, TrustedIssuers: []string{fuzzOpIssuer}})
 	if err != nil {
 		f.Fatal(err)
 	}

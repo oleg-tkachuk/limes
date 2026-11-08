@@ -72,7 +72,7 @@ func TestRetiredButPublishedKeyStillVerifies(t *testing.T) {
 	}
 
 	verifier, err := NewVerifier(VerifierConfig{
-		Keys: resolver, Revocations: revLookup{},
+		Keys: resolver, Revocations: revLookup{}, AllowUnrecorded: true,
 		TrustedIssuers: []string{goldenIssuer}, Now: goldenClock,
 	})
 	if err != nil {
@@ -139,7 +139,7 @@ func TestUntrustedIssuerRejected(t *testing.T) {
 
 	verifier, err := NewVerifier(VerifierConfig{
 		Keys:        staticKeys(t, map[string]ed25519.PublicKey{goldenKID: pub}),
-		Revocations: revLookup{}, TrustedIssuers: []string{"some-other-issuer"}, Now: goldenClock,
+		Revocations: revLookup{}, AllowUnrecorded: true, TrustedIssuers: []string{"some-other-issuer"}, Now: goldenClock,
 	})
 	if err != nil {
 		t.Fatalf("verifier: %v", err)
@@ -240,7 +240,7 @@ func verifyGoldenUnder(t *testing.T, token string, keys map[string]ed25519.Publi
 	t.Helper()
 	verifier, err := NewVerifier(VerifierConfig{
 		Keys:        staticKeys(t, keys),
-		Revocations: revLookup{}, TrustedIssuers: []string{goldenIssuer}, Now: goldenClock,
+		Revocations: revLookup{}, AllowUnrecorded: true, TrustedIssuers: []string{goldenIssuer}, Now: goldenClock,
 	})
 	if err != nil {
 		t.Fatalf("verifier: %v", err)

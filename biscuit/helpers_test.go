@@ -102,8 +102,8 @@ type stack struct {
 }
 
 // newStack is a stack over priv, signing as kid for issuerName, on the
-// clock now.
-func newStack(t testing.TB, priv ed25519.PrivateKey, kid, issuerName string, now func() time.Time, lookup limes.BiscuitRevocationLookup) stack {
+// clock now; allowUnrecorded accepts a capability its store has no record of.
+func newStack(t testing.TB, priv ed25519.PrivateKey, kid, issuerName string, now func() time.Time, lookup limes.BiscuitRevocationLookup, allowUnrecorded bool) stack {
 	t.Helper()
 	records, err := memstore.NewStore(memstore.StoreConfig{Now: now})
 	if err != nil {
@@ -121,8 +121,8 @@ func newStack(t testing.TB, priv ed25519.PrivateKey, kid, issuerName string, now
 		lookup = records
 	}
 	verifier, err := limes.NewVerifier(limes.VerifierConfig{
-		Keys:           staticKeys(t, map[string]ed25519.PublicKey{kid: priv.Public().(ed25519.PublicKey)}),
-		Revocations:    records,
+		Keys:        staticKeys(t, map[string]ed25519.PublicKey{kid: priv.Public().(ed25519.PublicKey)}),
+		Revocations: records, AllowUnrecorded: allowUnrecorded,
 		TrustedIssuers: []string{issuerName},
 		Now:            now,
 		Biscuit:        &limes.BiscuitConfig{Revocations: lookup, Form: Form(), MeterCopies: true},
@@ -163,7 +163,7 @@ func biscuitFixture(t testing.TB) (stack, limes.Capability, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := newStack(t, priv, jwks.KeyIDPrefix+"test", testIssuer, time.Now, nil)
+	s := newStack(t, priv, jwks.KeyIDPrefix+"test", testIssuer, time.Now, nil, false)
 	cap, token := s.seal(t, limes.IssueRequest{ClientID: testClientID,
 		IssuedBy: limes.Principal{Subject: "op"},
 		Subject:  limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
@@ -184,7 +184,8 @@ func goldenStack(t testing.TB, lookup limes.BiscuitRevocationLookup) stack {
 	if lookup == nil {
 		lookup = revLookup{}
 	}
-	return newStack(t, ed25519.NewKeyFromSeed(goldenSeed[:]), goldenKID, goldenIssuer, goldenClock, lookup)
+	// The fixtures were minted by a process whose records are gone.
+	return newStack(t, ed25519.NewKeyFromSeed(goldenSeed[:]), goldenKID, goldenIssuer, goldenClock, lookup, true)
 }
 
 // ceilingIs reports whether got is set, to want.

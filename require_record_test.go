@@ -14,7 +14,7 @@ import (
 	"github.com/oleg-tkachuk/limes/memstore"
 )
 
-// recordTestTTL is the revocation cache's TTL in the RequireRecord tests,
+// recordTestTTL is the revocation cache's TTL in the record check tests,
 // and recordTestSyncedTTL its bound while a signal listens: far longer, so
 // a test tells which of the two an answer was held for.
 const (
@@ -79,7 +79,7 @@ func (f recordFixture) issue(t *testing.T) (uuid.UUID, string) {
 func (f recordFixture) verifier(t *testing.T, lookup limes.RevocationLookup, require bool) *limes.Verifier {
 	t.Helper()
 	v, err := limes.NewVerifier(limes.VerifierConfig{
-		Keys: f.keys, Revocations: lookup, TrustedIssuers: []string{exampleIssuerName}, RequireRecord: require,
+		Keys: f.keys, Revocations: lookup, TrustedIssuers: []string{exampleIssuerName}, AllowUnrecorded: !require,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -113,7 +113,7 @@ func (c *countingLineage) RevocationLineage(ctx context.Context, id uuid.UUID) (
 	return c.Store.RevocationLineage(ctx, id)
 }
 
-// A capability the lookup has no record of verifies without RequireRecord —
+// A capability the lookup has no record of verifies with AllowUnrecorded —
 // as before it — and is refused with it, as unrecorded and not as revoked,
 // through the store itself and through a cache over it alike.
 func TestRequireRecordRefusesACapabilityNotOnRecord(t *testing.T) {
@@ -127,12 +127,12 @@ func TestRequireRecordRefusesACapabilityNotOnRecord(t *testing.T) {
 	for name, lookup := range lookups {
 		t.Run(name, func(t *testing.T) {
 			if err := f.verify(f.verifier(t, lookup(), false), f.token); err != nil {
-				t.Fatalf("without RequireRecord: %v, want accepted", err)
+				t.Fatalf("with AllowUnrecorded: %v, want accepted", err)
 			}
 			v := f.verifier(t, lookup(), true)
 			err := f.verify(v, f.token)
 			if !errors.Is(err, limes.ErrUnrecorded) || errors.Is(err, limes.ErrRevoked) || !errors.Is(err, limes.ErrUnauthenticated) {
-				t.Fatalf("with RequireRecord: %v, want ErrUnrecorded, unauthenticated and not revoked", err)
+				t.Fatalf("without AllowUnrecorded: %v, want ErrUnrecorded, unauthenticated and not revoked", err)
 			}
 			if reason, ok := limes.ReasonOf(err); !ok || reason != limes.ReasonUnrecorded || reason.Permanent() {
 				t.Errorf("ReasonOf = %q, %v; want %q, not permanent", reason, ok, limes.ReasonUnrecorded)
@@ -147,7 +147,7 @@ func TestRequireRecordRefusesACapabilityNotOnRecord(t *testing.T) {
 	}
 }
 
-// A capability on record answers as before under RequireRecord: accepted
+// A capability on record answers as before without AllowUnrecorded: accepted
 // while live, refused as revoked once revoked, through a cache as well.
 func TestRequireRecordKeepsTheAnswerOfARecord(t *testing.T) {
 	ctx := context.Background()
@@ -169,33 +169,46 @@ func TestRequireRecordKeepsTheAnswerOfARecord(t *testing.T) {
 	}
 }
 
-// RequireRecord over a lookup that cannot tell a capability not on record
-// from one not revoked is refused at construction, rather than not kept.
-func TestRequireRecordRefusesALookupThatCannotTell(t *testing.T) {
+// The default config, over a lookup that cannot tell a capability not on
+// record from one not revoked, is refused at construction rather than left
+// unable to keep the record check; AllowUnrecorded accepts it.
+func TestRecordCheckRefusesALookupThatCannotTell(t *testing.T) {
 	f := newRecordFixture(t)
 	plain := isRevokedOnly{f.records}
 	lookups := map[string]limes.RevocationLookup{
-		"a lookup with IsRevoked alone":  plain,
-		"a cache over such a lookup":     newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: plain}),
-		"a lookup of yours over a cache": isRevokedOnlyOver{newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: f.records})},
+		"a lookup with IsRevoked alone": plain,
+		"a cache over such a lookup":    newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: plain}),
 	}
 	for name, lookup := range lookups {
 		t.Run(name, func(t *testing.T) {
 			cfg := limes.VerifierConfig{Keys: f.keys, Revocations: lookup, TrustedIssuers: []string{exampleIssuerName}}
-			if _, err := limes.NewVerifier(cfg); err != nil {
-				t.Fatalf("without RequireRecord: %v", err)
-			}
-			cfg.RequireRecord = true
 			if _, err := limes.NewVerifier(cfg); !errors.Is(err, limes.ErrInvalidConfig) {
-				t.Errorf("with RequireRecord: %v, want ErrInvalidConfig", err)
+				t.Errorf("by default: %v, want ErrInvalidConfig", err)
+			}
+			cfg.AllowUnrecorded = true
+			if _, err := limes.NewVerifier(cfg); err != nil {
+				t.Fatalf("with AllowUnrecorded: %v", err)
 			}
 		})
 	}
 }
 
-// isRevokedOnlyOver is a type of the consumer's own wrapping a cache, which
-// the verifier does not see through.
-type isRevokedOnlyOver struct{ *limes.RevocationCache }
+// The zero value of VerifierConfig requires a record: a capability the
+// lookup has no record of is refused, not read as not revoked.
+func TestRecordIsRequiredByDefault(t *testing.T) {
+	f := newRecordFixture(t)
+	v, err := limes.NewVerifier(limes.VerifierConfig{Keys: f.keys, Revocations: f.blind, TrustedIssuers: []string{exampleIssuerName}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.verify(v, f.token); !errors.Is(err, limes.ErrUnrecorded) {
+		t.Errorf("a capability not on record, by default: %v, want ErrUnrecorded", err)
+	}
+}
+
+// lookupOverCache is a type of the consumer's own wrapping a cache, which
+// promotes the cache's RevocationLineage and so keeps the record check.
+type lookupOverCache struct{ *limes.RevocationCache }
 
 // A cache keeps the answer that a capability is not on record for its TTL —
 // not for the SyncedTTL a listening signal allows, as no signal says when a

@@ -12,7 +12,8 @@ func TestWhichStructsCompare(t *testing.T) {
 	for _, ty := range []reflect.Type{
 		reflect.TypeFor[Revocation](), reflect.TypeFor[Problem](), reflect.TypeFor[Principal](),
 		reflect.TypeFor[AgentPrincipal](), reflect.TypeFor[PurgeResult](), reflect.TypeFor[EraseTenantResult](),
-		reflect.TypeFor[RecordCount](),
+		reflect.TypeFor[RecordCount](), reflect.TypeFor[RevokeRequest](), reflect.TypeFor[PurgeRequest](),
+		reflect.TypeFor[ListByPrincipalRequest](), reflect.TypeFor[CheckRequest](),
 	} {
 		if ty.Comparable() {
 			t.Errorf("%s is comparable; a field added in 1.x could break a caller's ==", ty.Name())

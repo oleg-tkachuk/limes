@@ -253,7 +253,8 @@ lookups (`revocation_unavailable`), a store whose pages handed back a cursor alr
 fetched (`cursor_repeated`), which a walk begun again can get past once
 whatever moved its listing settles, and a revocation upstream that names
 no lineage (`no_revocation_lineage`), which `NewRevocationCache` refuses
-at startup until the upstream it is given does; and a store whose answer to
+at startup until the upstream it is given does, and a verifier requiring a
+record answers when its lookup wraps a cache over such an upstream; and a store whose answer to
 a commit was lost (`outcome_unknown`), which a keyed call sent again
 settles. Every `unauthenticated` code is
 a credential no longer good or never proven — expired, revoked, a bad

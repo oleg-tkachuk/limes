@@ -105,10 +105,38 @@ newest release, and once it is at v1 every release of its major, against
 limes as it is (`task verify:nested-internals`), and names the internal
 symbol a change broke.
 
-`meter.UsageStore`, which a consumer implements, keeps its method set for
-the whole of v1, and so does each interface it is made of: a method added
-to one breaks every store written against it.
+Every interface a consumer implements keeps its method set for the whole
+of v1 ([ADR-0001](adr/0001-architecture-before-1-0.md)): a method added to
+one breaks every implementation written against it. They are:
+
+- the store contracts: `limes.Store` and each interface it is made of
+  (`IssuanceStore`, `RecordReader`, `RevocationStore`), `CapabilityLister`,
+  `RevocationLookup`, `RevocationLineageLookup`, `BiscuitRevocationLookup`,
+  `BiscuitRevocationStore`, `BulkRevoker`, `TenantRecordEraser`,
+  `RecordCensus`, `RecordLister`, `RecordListingReader`, `RecordReporter`
+  and `ExchangeStore`;
+- the verifier's and the issuer's plug-ins: `KeyResolver`, `TokenForm`,
+  `ContextSigner` and `RevocationSignalTarget`, and `dpop.ReplayCache` and
+  `dpop.Nonces`;
+- the meter's: `meter.UsageStore` and each interface it is made of
+  (`Meter`, with `RequestCounter` and `BudgetMeter`, `MeterReader`,
+  `TenantBudgets`, `UsageHousekeeping`), `meter.LedgerReader` and
+  `meter.LedgerHousekeeping`, and the optional `meter.Leaser`,
+  `meter.CopyUsageReader`, `meter.TenantUsageEraser`,
+  `meter.TenantBudgetLister`, `meter.TenantReservationLister`,
+  `meter.MatchingReleaser` and `meter.FeatureGate`.
+
 A capability added later arrives as an interface of its own, optional,
 which a caller discovers by a type assertion on the store, as
 `meter.Leaser`, `meter.CopyUsageReader` and `meter.TenantUsageEraser`
 are; a store without it goes on compiling and serving everything else.
+
+Two of their terms are settled as they stand, by decision rather than by
+oversight. `Store.ListByPrincipal` stays a required method of `Store`,
+not an optional interface beside it: every store lists a principal's
+capabilities, which is what a caller holding only a `Store` relies on. And a `meter.ReserveRequest.ReservationID` keys one hold only
+while that hold, or the charge that settled it, is on record: once the
+hold is released — by `Release`, by `ReleaseExpired` past its expiry, or
+with its capability's usage — the same id may hold anew, as
+`meter.UsageStore.Reserve` says. A caller that must never reuse an id
+mints a fresh one per hold.

@@ -558,6 +558,13 @@ func (s slowRevocations) IsRevoked(ctx context.Context, id uuid.UUID) (bool, err
 	return s.RevocationLookup.IsRevoked(ctx, id)
 }
 
+// RevocationLineage answers as its lookup's does, after slowStoreDelay: the
+// default verifier asks it in place of IsRevoked.
+func (s slowRevocations) RevocationLineage(ctx context.Context, id uuid.UUID) (RevocationAnswer, error) {
+	time.Sleep(slowStoreDelay)
+	return s.RevocationLookup.(RevocationLineageLookup).RevocationLineage(ctx, id)
+}
+
 // wantDuration fails the test unless rec logs a duration of at least
 // slowStoreDelay.
 func wantDuration(t *testing.T, what string, rec map[string]any) {

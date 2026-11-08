@@ -21,7 +21,7 @@ import (
 //	│   └── ErrAuthSchemeMismatch
 //	├── ErrRevoked
 //	│   └── ErrDelegationTooDeep, ErrTenantErased
-//	├── ErrUnrecorded        no record (VerifierConfig.RequireRecord)
+//	├── ErrUnrecorded        no record (unless VerifierConfig.AllowUnrecorded)
 //	└── ErrExpired, ErrNotYetValid, ErrAudienceMismatch
 //	ErrCaveatViolation       a caveat refuses the operation (403)
 //	ErrBudgetExceeded, ErrTenantBudgetExceeded, ErrRequestLimitExceeded
@@ -70,7 +70,7 @@ var (
 	ErrDelegationTooDeep error = &familyError{"limes: delegation chain too deep", ErrRevoked}
 	ErrAudienceMismatch  error = &familyError{"limes: audience mismatch", ErrUnauthenticated}
 	// ErrUnrecorded — a capability the revocation lookup has no record of,
-	// refused under VerifierConfig.RequireRecord rather than read as not
+	// refused unless VerifierConfig.AllowUnrecorded is set, rather than read as not
 	// revoked: a lookup that cannot see the record could not see its
 	// revocation either. It is not ErrRevoked, so an operator tells a
 	// lookup blind to an issuer's records, or a store restored from an older

@@ -39,8 +39,8 @@ func checkRetiredRefused(t *testing.T, file string) {
 	}
 	priv := ed25519.NewKeyFromSeed(goldenSeed[:])
 	verifier, err := NewVerifier(VerifierConfig{
-		Keys:           staticKeys(t, map[string]ed25519.PublicKey{goldenKID: priv.Public().(ed25519.PublicKey)}),
-		Revocations:    revLookup{},
+		Keys:        staticKeys(t, map[string]ed25519.PublicKey{goldenKID: priv.Public().(ed25519.PublicKey)}),
+		Revocations: revLookup{}, AllowUnrecorded: true,
 		TrustedIssuers: []string{goldenIssuer},
 		Now:            goldenClock,
 	})
@@ -63,8 +63,8 @@ func TestGoldenTokenStillVerifies(t *testing.T) {
 	pub := priv.Public().(ed25519.PublicKey)
 
 	verifier, err := NewVerifier(VerifierConfig{
-		Keys:           staticKeys(t, map[string]ed25519.PublicKey{goldenKID: pub}),
-		Revocations:    revLookup{},
+		Keys:        staticKeys(t, map[string]ed25519.PublicKey{goldenKID: pub}),
+		Revocations: revLookup{}, AllowUnrecorded: true,
 		TrustedIssuers: []string{goldenIssuer},
 		// Pinned to the issuance instant so nbf/exp stay inside the window
 		// forever — the fixture tests format, not lifetime.
@@ -129,8 +129,8 @@ func TestGoldenTokenRejectsWrongAudience(t *testing.T) {
 	pub := priv.Public().(ed25519.PublicKey)
 
 	verifier, err := NewVerifier(VerifierConfig{
-		Keys:           staticKeys(t, map[string]ed25519.PublicKey{goldenKID: pub}),
-		Revocations:    revLookup{},
+		Keys:        staticKeys(t, map[string]ed25519.PublicKey{goldenKID: pub}),
+		Revocations: revLookup{}, AllowUnrecorded: true,
 		TrustedIssuers: []string{goldenIssuer},
 		Now:            goldenClock,
 	})

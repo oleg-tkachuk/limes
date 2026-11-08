@@ -128,7 +128,8 @@ func TestNodeFixtureIsCurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 	v, err := limes.NewVerifier(limes.VerifierConfig{
-		Keys: keys, Revocations: notRevoked{}, TrustedIssuers: []string{fx.Issuer},
+		// The fixture's records are gone with the process that wrote it.
+		Keys: keys, Revocations: notRevoked{}, AllowUnrecorded: true, TrustedIssuers: []string{fx.Issuer},
 		Now: func() time.Time { return time.Unix(fx.VerifyAt, 0) },
 	})
 	if err != nil {

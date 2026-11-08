@@ -49,7 +49,7 @@ func validCapability() Capability {
 // will not sign them, and the verifier will not accept a token carrying them,
 // however it was signed. A negative limit would otherwise read as none.
 func TestCaveatsOutsideTheRulesAreNeitherSignedNorAccepted(t *testing.T) {
-	issuer, v, _, _ := buildIssuerVerifier(t)
+	issuer, v, store, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
 	spoil := map[string]func(*Caveats){
 		"a negative request limit":    func(c *Caveats) { c.Requests = RequestCeiling{Max: -7} },
@@ -71,7 +71,13 @@ func TestCaveatsOutsideTheRulesAreNeitherSignedNorAccepted(t *testing.T) {
 			t.Errorf("Verify of a token with %s: err = %v, want ErrInvalidToken and not ErrInvalidRequest", name, err)
 		}
 	}
-	if _, err := v.Verify(ctx, VerifyRequest{Token: signUnchecked(t, issuer.signer, validCapability()), Audience: audienceData}); err != nil {
+	// Signed past the issuer, so recorded by hand: the verifier requires a
+	// record.
+	wellFormed := validCapability()
+	if err := store.Insert(ctx, InsertRequest{Capability: wellFormed}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.Verify(ctx, VerifyRequest{Token: signUnchecked(t, issuer.signer, wellFormed), Audience: audienceData}); err != nil {
 		t.Errorf("Verify of a well-formed token signed the same way: %v", err)
 	}
 }

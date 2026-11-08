@@ -143,7 +143,8 @@ func TestGenerateGoldenToken(t *testing.T) {
 	t.Logf("wrote %s (%d bytes)", out, len(token))
 }
 
-// revLookup revokes nothing, for verifiers over the fixtures.
+// revLookup revokes nothing, for verifiers over the fixtures. It holds no
+// record of them, so a verifier over it sets AllowUnrecorded.
 type revLookup struct{}
 
 func (revLookup) IsRevoked(context.Context, uuid.UUID) (bool, error) { return false, nil }
