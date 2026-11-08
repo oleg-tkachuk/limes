@@ -21,6 +21,10 @@ type failingLookup struct {
 
 func (l failingLookup) IsRevoked(context.Context, uuid.UUID) (bool, error) { return false, l.err }
 
+func (l failingLookup) RevocationLineage(context.Context, uuid.UUID) (RevocationAnswer, error) {
+	return RevocationAnswer{}, l.err
+}
+
 // A revocation lookup that fails refuses the token as unavailable — 503, to
 // retry, its cause kept — as the issuer's keys out of reach are; one whose
 // failure is a code of limes's already keeps that code.

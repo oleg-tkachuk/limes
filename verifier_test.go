@@ -49,6 +49,18 @@ func (m *memStore) IsRevoked(_ context.Context, id uuid.UUID) (bool, error) {
 	m.revCalls.Add(1)
 	return m.revoked[id], nil
 }
+
+// RevocationLineage answers as IsRevoked does, and an id neither inserted
+// nor revoked as ErrNotFound, so the default verifier's record check runs
+// over the stub. It records no lineage, so names no ancestors.
+// Each call counts in revCalls, as IsRevoked's does.
+func (m *memStore) RevocationLineage(_ context.Context, id uuid.UUID) (RevocationAnswer, error) {
+	m.revCalls.Add(1)
+	if _, ok := m.caps[id]; !ok && !m.revoked[id] {
+		return RevocationAnswer{}, ErrNotFound
+	}
+	return RevocationAnswer{Revoked: m.revoked[id]}, nil
+}
 func (m *memStore) Revoke(_ context.Context, args RevokeRequest) (RevokeResult, error) {
 	already := m.revoked[args.CapabilityID]
 	m.revoked[args.CapabilityID] = true

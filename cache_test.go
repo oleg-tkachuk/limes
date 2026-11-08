@@ -66,7 +66,8 @@ func TestRevocationCacheSweep(t *testing.T) {
 	ctx := context.Background()
 	now := time.Unix(1_800_000_000, 0)
 	clock := func() time.Time { return now }
-	c := newRevocationCache(t, RevocationCacheConfig{Capabilities: newMemStore(), Biscuits: &countingBiscuitLookup{}, TTL: cacheTTL, Now: clock})
+	// A plain lookup: every answer is a capability's, none an unrecorded one.
+	c := newRevocationCache(t, RevocationCacheConfig{Capabilities: plainLookup{newMemStore()}, Biscuits: &countingBiscuitLookup{}, TTL: cacheTTL, Now: clock})
 
 	_, _ = c.IsRevoked(ctx, uuid.New())
 	_, _ = c.IsBiscuitRevoked(ctx, [][]byte{[]byte("old")})
@@ -442,4 +443,12 @@ func TestRevocationCacheStats(t *testing.T) {
 	if got.Clears != 1 || got.Capabilities.Entries != 0 || got.Biscuits.Entries != 0 || got.Capabilities.Hits != 1 {
 		t.Errorf("after Clear: %+v, want 1 clear, no entries, the counts kept", got)
 	}
+}
+
+// plainLookup is a RevocationLookup with IsRevoked alone, hiding the
+// lineage of the lookup it wraps.
+type plainLookup struct{ lookup RevocationLookup }
+
+func (p plainLookup) IsRevoked(ctx context.Context, id uuid.UUID) (bool, error) {
+	return p.lookup.IsRevoked(ctx, id)
 }

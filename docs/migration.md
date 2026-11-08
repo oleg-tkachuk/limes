@@ -170,6 +170,36 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
   l, _ = leaser.Lease(ctx, meter.LeaseRequest{Subject: s, Amount: 5}) // a new l.ID; l.Amount == 10 - spent + 5
   ```
 
+- A verifier requires a revocation record by default.
+  `VerifierConfig.RequireRecord bool` is now `AllowUnrecorded bool`, with
+  the meaning inverted: the zero value refuses a capability the lookup has
+  no record of with `ErrUnrecorded` (401, not permanent), where it was read
+  as not revoked. `NewVerifier` now refuses, with `ErrInvalidConfig`, a
+  `Revocations` that cannot tell a capability not on record from one not
+  revoked — one that is no `RevocationLineageLookup`, or a
+  `RevocationCache` over one — unless `AllowUnrecorded` is set.
+  memstore's and pgstore's `Store`, and a `RevocationCache` over either,
+  need no change. A verifier reading a lagging replica now refuses a fresh
+  token until its record arrives; set `AllowUnrecorded` to accept it as
+  before:
+
+  ```go
+  // before: no record required
+  limes.VerifierConfig{Keys: keys, Revocations: lookup, TrustedIssuers: issuers}
+  // after: the same behaviour
+  limes.VerifierConfig{Keys: keys, Revocations: lookup, TrustedIssuers: issuers, AllowUnrecorded: true}
+
+  // before: a record required
+  limes.VerifierConfig{Keys: keys, Revocations: lookup, TrustedIssuers: issuers, RequireRecord: true}
+  // after
+  limes.VerifierConfig{Keys: keys, Revocations: lookup, TrustedIssuers: issuers}
+  ```
+
+  `*RevocationCache` is now a `RevocationLineageLookup` itself, so a type
+  of yours that embeds or forwards to a cache keeps the record check; over
+  a cache whose upstream names no lineage, its `RevocationLineage` returns
+  `ErrNoRevocationLineage`.
+
 ## exchange/v0.22.0
 
 - `jwtverify.RemoteKeys` takes only an https URL with a host, and refuses

@@ -34,11 +34,11 @@ type RevocationLineageLookup interface {
 	// RevocationLineage answers as IsRevoked does, and names the ancestors
 	// of id still on record that the answer read: every one, when id is
 	// not revoked. An id not on record is ErrNotFound: the cache answers
-	// it not revoked, as IsRevoked does — or, to a verifier under
-	// VerifierConfig.RequireRecord, not on record — and keeps that answer
+	// it not revoked, as IsRevoked does — or, to a verifier without
+	// VerifierConfig.AllowUnrecorded, not on record — and keeps that answer
 	// for TTL apart from the others. One that answers such an id not
 	// revoked instead is cached as any other, and defeats
-	// VerifierConfig.RequireRecord without a word: NewVerifier cannot tell
+	// the record check without a word: NewVerifier cannot tell
 	// it from one that keeps this contract, which storetest checks.
 	RevocationLineage(ctx context.Context, id uuid.UUID) (RevocationAnswer, error)
 }

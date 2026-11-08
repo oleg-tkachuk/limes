@@ -16,6 +16,10 @@ type downLookup struct{}
 
 func (downLookup) IsRevoked(context.Context, uuid.UUID) (bool, error) { return false, errLookupDown }
 
+func (downLookup) RevocationLineage(context.Context, uuid.UUID) (RevocationAnswer, error) {
+	return RevocationAnswer{}, errLookupDown
+}
+
 // A revocation store that cannot answer refuses the token: an unanswered
 // lookup is never read as "not revoked".
 func TestVerifyFailsClosedWhenRevocationCannotBeChecked(t *testing.T) {
@@ -44,13 +48,18 @@ func TestVerifyFailsClosedWhenRevocationCannotBeChecked(t *testing.T) {
 // included: a token is accepted from NotBefore − Leeway to ExpiresAt +
 // Leeway, and refused outside it.
 func TestVerifyWindowEdges(t *testing.T) {
-	issuer, v, _, _ := buildIssuerVerifier(t)
+	issuer, v, store, _ := buildIssuerVerifier(t)
 	start := time.Unix(1_800_000_000, 0).UTC()
 	c := validCapability()
 	c.Issuer = issuer.issuerName
 	c.IssuedAt, c.NotBefore, c.ExpiresAt = start, start.Add(time.Hour), start.Add(2*time.Hour)
 	token, err := issuer.signer.sign(context.Background(), c)
 	if err != nil {
+		t.Fatal(err)
+	}
+	// Signed past the issuer, so recorded by hand: the verifier requires a
+	// record.
+	if err := store.Insert(context.Background(), InsertRequest{Capability: c}); err != nil {
 		t.Fatal(err)
 	}
 	leeway := v.cfg.Leeway

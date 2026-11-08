@@ -20,6 +20,10 @@ func (downRevocations) IsRevoked(context.Context, uuid.UUID) (bool, error) {
 	return false, errRevocationsDown
 }
 
+func (downRevocations) RevocationLineage(context.Context, uuid.UUID) (RevocationAnswer, error) {
+	return RevocationAnswer{}, errRevocationsDown
+}
+
 // An active token is introspected whatever audience it names and whether or
 // not a key it is bound to was proved; the answer carries its capability.
 func TestIntrospectActive(t *testing.T) {
@@ -102,7 +106,7 @@ func TestIntrospectOutageIsNotInactive(t *testing.T) {
 		t.Fatal(err)
 	}
 	v, err := NewVerifier(VerifierConfig{
-		Keys: staticKeys(t, map[string]ed25519.PublicKey{testKID: pub}), Revocations: downRevocations{}, TrustedIssuers: []string{"iss"},
+		Keys: staticKeys(t, map[string]ed25519.PublicKey{testKID: pub}), Revocations: downRevocations{}, AllowUnrecorded: true, TrustedIssuers: []string{"iss"},
 	})
 	if err != nil {
 		t.Fatal(err)

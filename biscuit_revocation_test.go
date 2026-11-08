@@ -191,8 +191,8 @@ func TestBiscuitRevocationLookupFailsClosed(t *testing.T) {
 func TestVerifierNeedsBiscuitRevocationsToAcceptBiscuits(t *testing.T) {
 	pub, _, _ := ed25519.GenerateKey(nil)
 	cfg := VerifierConfig{
-		Keys:           staticKeys(t, map[string]ed25519.PublicKey{testKID: pub}),
-		Revocations:    revLookup{},
+		Keys:        staticKeys(t, map[string]ed25519.PublicKey{testKID: pub}),
+		Revocations: revLookup{}, AllowUnrecorded: true,
 		TrustedIssuers: []string{"limes-test"},
 		Biscuit:        &BiscuitConfig{},
 	}
@@ -211,8 +211,8 @@ func TestVerifierKeepsItsOwnBiscuitConfig(t *testing.T) {
 	pub, _, _ := ed25519.GenerateKey(nil)
 	biscuit := &BiscuitConfig{Revocations: revLookup{}, Form: fakeForm{}}
 	v, err := NewVerifier(VerifierConfig{
-		Keys:           staticKeys(t, map[string]ed25519.PublicKey{testKID: pub}),
-		Revocations:    revLookup{},
+		Keys:        staticKeys(t, map[string]ed25519.PublicKey{testKID: pub}),
+		Revocations: revLookup{}, AllowUnrecorded: true,
 		TrustedIssuers: []string{"limes-test"},
 		Biscuit:        biscuit,
 	})
