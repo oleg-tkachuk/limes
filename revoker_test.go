@@ -387,27 +387,106 @@ func TestRevokerClearsTheCache(t *testing.T) {
 	}
 }
 
-// A failed revocation clears nothing: the answers the cache holds stand.
-func TestRevokerClearsNothingOnFailure(t *testing.T) {
+// committedThenFailed is a store that carries a revocation out and then
+// returns err, as one whose commit landed before its caller's context ended
+// or its connection dropped.
+type committedThenFailed struct {
+	*fakeRevocations
+	err error
+}
+
+func (c committedThenFailed) Revoke(ctx context.Context, req RevokeRequest) (RevokeResult, error) {
+	res, _ := c.fakeRevocations.Revoke(ctx, req)
+	return res, c.err
+}
+
+func (c committedThenFailed) RevokeMatching(ctx context.Context, req RevokeMatchingRequest) (RevokeMatchingResult, error) {
+	res, _ := c.fakeRevocations.RevokeMatching(ctx, req)
+	return res, c.err
+}
+
+func (c committedThenFailed) RevokeBiscuit(ctx context.Context, req RevokeBiscuitRequest) (RevokeBiscuitResult, error) {
+	res, _ := c.fakeRevocations.RevokeBiscuit(ctx, req)
+	return res, c.err
+}
+
+// A store call that returns an error may still have written, so the
+// revoker clears what it may have outdated, and says so in its log line:
+// the cached "not revoked" answer is not served past it, through each
+// method, whether the error is a failure or a refusal.
+func TestRevokerClearsTheCacheOnError(t *testing.T) {
+	ctx := context.Background()
+	for name, storeErr := range map[string]error{
+		"failed":  context.Canceled,
+		"refused": notOnRecord(uuid.New()),
+	} {
+		id := uuid.New()
+		for _, call := range revokerCalls(id, uuid.New()) {
+			t.Run(name+"/"+string(call.op), func(t *testing.T) {
+				fake := newFakeRevocations()
+				fake.matched = id
+				store := committedThenFailed{fakeRevocations: fake, err: storeErr}
+				cache, err := NewRevocationCache(RevocationCacheConfig{Capabilities: fake, Biscuits: fake, TTL: revokerCacheTTL, Logger: slog.New(slog.DiscardHandler)})
+				if err != nil {
+					t.Fatal(err)
+				}
+				var logs logCapture
+				r := newTestRevoker(t, RevokerConfig{Store: store, Bulk: store, Biscuits: store, Cache: cache, Logger: logs.logger()})
+				revoked := func() bool {
+					t.Helper()
+					got, err := cache.IsRevoked(ctx, id)
+					if call.op == RevokerOperationRevokeBiscuit {
+						got, err = cache.IsBiscuitRevoked(ctx, [][]byte{testBiscuitCopy(id).revocationID})
+					}
+					if err != nil {
+						t.Fatal(err)
+					}
+					return got
+				}
+				if revoked() {
+					t.Fatal("revoked before the revocation")
+				}
+				if _, err := call.run(ctx, r); !errors.Is(err, storeErr) {
+					t.Fatalf("err = %v, want the store's %v", err, storeErr)
+				}
+				if !revoked() {
+					t.Error("the cache served its answer from before a revocation the store committed")
+				}
+				wantAttrs(t, string(call.op), logs.only(t), map[string]any{logKeyCacheCleared: true})
+			})
+		}
+	}
+}
+
+// Without a cache, a store's error is logged without a word of one.
+func TestRevokerWithoutACacheSaysNothingOfOne(t *testing.T) {
+	store := newFakeRevocations()
+	store.err = errors.New("connection reset")
+	var logs logCapture
+	r := newTestRevoker(t, RevokerConfig{Store: store, Logger: logs.logger()})
+	if _, err := r.Revoke(context.Background(), RevokeRequest{CapabilityID: uuid.New()}); err == nil {
+		t.Fatal("Revoke succeeded over a failing store")
+	}
+	wantAttrs(t, "revoke", logs.only(t), map[string]any{logKeyCacheCleared: nil})
+}
+
+// A method whose store the revoker was not given called no store, so it
+// clears nothing.
+func TestRevokerWithoutAFeatureClearsNothing(t *testing.T) {
 	ctx := context.Background()
 	store := newFakeRevocations()
 	cache, err := NewRevocationCache(RevocationCacheConfig{Capabilities: store, TTL: revokerCacheTTL})
 	if err != nil {
 		t.Fatal(err)
 	}
-	id := uuid.New()
-	if _, err := cache.IsRevoked(ctx, id); err != nil {
-		t.Fatal(err)
-	}
-	store.err = errors.New("connection reset")
-	r := newTestRevoker(t, RevokerConfig{Store: store, Bulk: store, Biscuits: store, Cache: cache, Logger: slog.New(slog.DiscardHandler)})
-	for _, call := range revokerCalls(id, uuid.New()) {
-		if _, err := call.run(ctx, r); err == nil {
-			t.Fatalf("%s succeeded over a failing store", call.op)
+	r := newTestRevoker(t, RevokerConfig{Store: store, Cache: cache, Logger: slog.New(slog.DiscardHandler)})
+	for _, call := range revokerCalls(uuid.New(), uuid.New())[1:] {
+		if _, err := call.run(ctx, r); !errors.Is(err, ErrInvalidConfig) {
+			t.Fatalf("%s = %v, want ErrInvalidConfig", call.op, err)
 		}
 	}
-	if stats := cache.Stats(); stats.Clears != 0 {
-		t.Errorf("the cache was cleared %d times after failures", stats.Clears)
+	if st := cache.Stats(); st.Clears != 0 {
+		t.Errorf("the cache was cleared %d times without a store call", st.Clears)
 	}
 }
 

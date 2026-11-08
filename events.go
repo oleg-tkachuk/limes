@@ -28,7 +28,8 @@ const (
 	logKeyAge        = "age"
 
 	// The revoker's: who revoked and why, what a revoke found and wrote,
-	// and the selectors of a bulk revoke.
+	// the selectors of a bulk revoke, and a cache cleared after a store
+	// error.
 	logKeyActor          = "actor"
 	logKeyNote           = "note"
 	logKeyCascade        = "cascade"
@@ -43,6 +44,7 @@ const (
 	logKeyRun            = "run"
 	logKeySubjectIssuer  = "subject_issuer"
 	logKeyDuration       = "duration"
+	logKeyCacheCleared   = "cache_cleared"
 )
 
 // IssuerOperation names what an Issuer was asked to do, in its log lines
