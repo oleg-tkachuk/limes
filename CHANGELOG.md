@@ -2,6 +2,18 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.172.1](https://github.com/oleg-tkachuk/limes/compare/v0.172.0...v0.172.1) (2026-11-08)
+
+### Bug Fixes
+
+* **jwks:** log each background fetch of a remote key set ([5e3b820](https://github.com/oleg-tkachuk/limes/commit/5e3b820f9a26f910bfbb4b021cd52fd8f101a4ca))
+* **jwks:** refuse an unparsable RemoteConfig.URL as ErrInvalidConfig ([2fcd502](https://github.com/oleg-tkachuk/limes/commit/2fcd5023a6abb1b806f061105123ba978df2dd3a))
+* **revoker:** clear the cache when the store returns an error ([b2a3e29](https://github.com/oleg-tkachuk/limes/commit/b2a3e29137e3a9a53cb8c19db59fb1683c5d8ebc))
+
+### Performance Improvements
+
+* **cache:** make Forget proportional to the keys it forgets ([147e403](https://github.com/oleg-tkachuk/limes/commit/147e4035656093d0de24982f33a2063442fba6a7))
+
 ## [0.172.0](https://github.com/oleg-tkachuk/limes/compare/v0.171.0...v0.172.0) (2026-11-08)
 
 ### ⚠ BREAKING CHANGES
