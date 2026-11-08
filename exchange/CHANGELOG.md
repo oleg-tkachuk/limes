@@ -2,6 +2,26 @@
 
 Every release of the exchange module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.22.0](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.21.0...exchange%2Fv0.22.0) (2026-11-08)
+
+### ⚠ BREAKING CHANGES
+
+* **exchange:** fetch an identity provider's keys only over https
+* **exchange:** return jwtverify.DefaultAlgorithms as a fresh copy
+
+### Bug Fixes
+
+* **exchange:** fetch an identity provider's keys only over https ([8f010d2](https://github.com/oleg-tkachuk/limes/commit/8f010d2b94fe72ee5fec4ab87be12602be2885db))
+
+### Code Refactoring
+
+* **exchange:** return jwtverify.DefaultAlgorithms as a fresh copy ([48222ef](https://github.com/oleg-tkachuk/limes/commit/48222ef74ae755523abb1652cbacab82c972a907))
+
+### Defaults
+
+* removed: `jwtverify.DefaultAlgorithms`
+* changed: `jwtverify.Config.Algorithms` — `DefaultAlgorithms` → `DefaultAlgorithms()`
+
 ## [0.21.0](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.20.0...exchange%2Fv0.21.0) (2026-11-06)
 
 ### ⚠ BREAKING CHANGES
