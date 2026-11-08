@@ -34,8 +34,9 @@ func checkSize(token string) error {
 var ErrInvalidKey = fmt.Errorf("%w: inspect: not an Ed25519 public key", limes.ErrInvalidRequest)
 
 // Decode reads a compact token's claims without checking its signature. A
-// token it cannot read — one whose header names another alg than Ed25519
-// (RFC 9864), EdDSA included, as a verifier refuses it — or one longer than
+// token it cannot read — one whose header names an alg other than Ed25519
+// by either of its names, the fully-specified Ed25519 of RFC 9864 or the
+// EdDSA it deprecates, as a verifier refuses it — or one longer than
 // MaxTokenBytes, is limes.ErrInvalidToken, as VerifySignature reports one.
 func Decode(token string) (limes.Capability, error) {
 	if err := checkSize(token); err != nil {

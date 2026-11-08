@@ -3,11 +3,11 @@
 // them from its own table; the exchange's carry their whole answer, and
 // register it, so a code of theirs needs no release of limes.
 //
-// It is a frozen surface. The nested modules (exchange, biscuit,
-// redisreplay, pgstore) import it from production code, and a released
-// version of each must still build against every later limes of the same
-// major: nothing here is removed, renamed or changed in signature. CI holds
-// it so (task verify:nested-internals, .github/ci/nested-internals.ts).
+// It is a frozen surface. The exchange module imports it from production
+// code, and a released version must still build against every later limes
+// of the same major: nothing here is removed, renamed or changed in
+// signature. CI holds it so (task verify:nested-internals,
+// .github/ci/nested-internals.ts).
 package errcode
 
 import "sync"
