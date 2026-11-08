@@ -2279,28 +2279,45 @@ func (s *UsageStore) forgetAncestorLocked(gone func(uuid.UUID) bool) {
 }
 
 // EraseTenantUsage implements meter.TenantUsageEraser: it drops the
-// tenant's holds, counters, copies' counters, ledger entries and aggregate.
-func (s *UsageStore) EraseTenantUsage(_ context.Context, req meter.EraseTenantUsageRequest) error {
+// tenant's holds, counters, copies' counters, ledger entries and aggregate,
+// and counts what it dropped.
+func (s *UsageStore) EraseTenantUsage(_ context.Context, req meter.EraseTenantUsageRequest) (meter.EraseTenantUsageResult, error) {
 	if err := req.Validate(); err != nil {
-		return err
+		return meter.EraseTenantUsageResult{}, err
 	}
 	tenant := req.TenantID
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	var out meter.EraseTenantUsageResult
 	mine := func(capID uuid.UUID) bool { return s.tenantOf[capID] == tenant }
-	maps.DeleteFunc(s.holds, func(_ uuid.UUID, h hold) bool { return h.tenantID == tenant })
+	maps.DeleteFunc(s.holds, func(_ uuid.UUID, h hold) bool {
+		if h.tenantID != tenant {
+			return false
+		}
+		out.Holds++
+		return true
+	})
 	maps.DeleteFunc(s.leases, func(_ uuid.UUID, l lease) bool { return l.tenantID == tenant })
+	for k := range s.copies {
+		if mine(k.capID) {
+			out.Copies++
+		}
+	}
 	s.dropCopiesLocked(mine)
 	for id := range s.usage {
 		if mine(id) {
 			s.dropUsageLocked(id)
+			out.Counters++
 		}
 	}
-	s.rebuildLedgerLocked(slices.DeleteFunc(s.ledger, func(e ledgerEntry) bool { return e.TenantID == tenant }))
+	before := len(s.ledger)
+	kept := slices.DeleteFunc(s.ledger, func(e ledgerEntry) bool { return e.TenantID == tenant })
+	out.Charges = int64(before - len(kept))
+	s.rebuildLedgerLocked(kept)
 	delete(s.budgets, tenant)
 	delete(s.periods, tenant)
 	s.records.markErased(tenant)
-	return nil
+	return out, nil
 }
 
 // notErasedLocked refuses a tenant EraseTenantUsage removed. s.mu must be

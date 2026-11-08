@@ -372,7 +372,7 @@ func eraseAnotherTenant(ctx context.Context, t *testing.T, u *UsageStore, expire
 	if _, err := u.Charge(ctx, meter.ChargeRequest{Subject: subject, Amount: unit}, nil); err != nil {
 		t.Fatalf("step %d: another tenant's charge: %v", step, err)
 	}
-	if err := u.EraseTenantUsage(ctx, meter.EraseTenantUsageRequest{TenantID: other}); err != nil {
+	if _, err := u.EraseTenantUsage(ctx, meter.EraseTenantUsageRequest{TenantID: other}); err != nil {
 		t.Fatalf("step %d: EraseTenantUsage: %v", step, err)
 	}
 }

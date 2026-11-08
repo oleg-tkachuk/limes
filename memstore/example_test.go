@@ -452,9 +452,12 @@ func ExampleUsageStore_EraseTenantUsage() {
 	e := newExampleEnv()
 	c := e.record("researcher", uuid.Nil())
 
-	fmt.Println(e.usage.EraseTenantUsage(ctx, meter.EraseTenantUsageRequest{TenantID: e.tenant}))
-	// Nothing of the tenant is counted, or issued, again.
 	_, err := e.usage.Bump(ctx, meter.BumpRequest{Subject: e.subject(c)})
+	fmt.Println(err)
+	erased, err := e.usage.EraseTenantUsage(ctx, meter.EraseTenantUsageRequest{TenantID: e.tenant})
+	fmt.Println(erased.Counters, err)
+	// Nothing of the tenant is counted, or issued, again.
+	_, err = e.usage.Bump(ctx, meter.BumpRequest{Subject: e.subject(c)})
 	fmt.Println(errors.Is(err, limes.ErrTenantErased))
 	err = e.records.Insert(ctx, limes.InsertRequest{Capability: limes.Capability{
 		ID: uuid.New(), IssuedAt: e.now, ExpiresAt: e.now.Add(exampleTTL),
@@ -464,6 +467,7 @@ func ExampleUsageStore_EraseTenantUsage() {
 	fmt.Println(errors.Is(err, limes.ErrTenantErased))
 	// Output:
 	// <nil>
+	// 1 <nil>
 	// true
 	// true
 }

@@ -70,6 +70,42 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## pgstore/v0.71.0
+
+- `UsageStore.EraseTenantUsage` returns `meter.EraseTenantUsageResult`
+  beside its error, as `meter.TenantUsageEraser` in limes `v0.172.0`,
+  which this release needs, now declares it: the rows each of its
+  statements removed — counters, copies' counters, holds and charges. It
+  logs them at INFO, and a call refused for another tenant's scope at
+  WARN:
+
+  ```go
+  // before
+  err := usage.EraseTenantUsage(ctx, meter.EraseTenantUsageRequest{TenantID: tenant})
+  // after
+  _, err := usage.EraseTenantUsage(ctx, meter.EraseTenantUsageRequest{TenantID: tenant})
+  ```
+
+## v0.172.0
+
+- `meter.TenantUsageEraser.EraseTenantUsage` returns
+  `meter.EraseTenantUsageResult` beside its error:
+  `EraseTenantUsage(ctx, req) (meter.EraseTenantUsageResult, error)`. The
+  interface is one of those [compatibility.md](compatibility.md) keeps
+  for the whole of v1, so it changes before 1.0: the result is where a
+  later minor reports whether an erase bounded to a batch left more, a
+  `Limit` and a `More` added to the request and the result rather than a
+  new method. Today it counts what the erase removed: `Counters`,
+  `Copies`, `Holds` and `Charges`. A store of your own returns them,
+  which `metertest` checks:
+
+  ```go
+  // before
+  err := eraser.EraseTenantUsage(ctx, meter.EraseTenantUsageRequest{TenantID: tenant})
+  // after
+  erased, err := eraser.EraseTenantUsage(ctx, meter.EraseTenantUsageRequest{TenantID: tenant})
+  ```
+
 ## exchange/v0.22.0
 
 - `jwtverify.RemoteKeys` takes only an https URL with a host, and refuses

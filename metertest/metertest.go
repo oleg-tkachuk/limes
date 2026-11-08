@@ -1048,7 +1048,8 @@ func checkRefundAfterRestartAcrossHousekeeping(t *testing.T, f fixture) {
 		_, err = f.Usage.Charge(theirCtx, meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: theirs, tenant: tenant}), Amount: one}, nil)
 		expect.Must(t, err == nil, "%v", err)
 		restartedThen(t, func(t *testing.T) {
-			expect.Must(t, eraser.EraseTenantUsage(theirCtx, meter.EraseTenantUsageRequest{TenantID: tenant}) == nil, "EraseTenantUsage")
+			_, err := eraser.EraseTenantUsage(theirCtx, meter.EraseTenantUsageRequest{TenantID: tenant})
+			expect.Must(t, err == nil, "EraseTenantUsage: %v", err)
 		})
 	})
 }
@@ -3228,7 +3229,8 @@ func checkReadOnlyScope(t *testing.T, f fixture) {
 	}
 	if eraser, ok := f.Usage.(meter.TenantUsageEraser); ok {
 		writes["EraseTenantUsage"] = func() error {
-			return eraser.EraseTenantUsage(ro, meter.EraseTenantUsageRequest{TenantID: f.Tenant})
+			_, err := eraser.EraseTenantUsage(ro, meter.EraseTenantUsageRequest{TenantID: f.Tenant})
+			return err
 		}
 	}
 	for name, write := range writes {
@@ -3275,13 +3277,14 @@ func checkEraseTenantUsage(t *testing.T, f fixture) {
 	expect.Must(t, err == nil, "reserve: %v", err)
 	req := meter.EraseTenantUsageRequest{TenantID: f.Tenant}
 	if f.ScopesTenants {
-		err := eraser.EraseTenantUsage(theirCtx, req)
+		_, err := eraser.EraseTenantUsage(theirCtx, req)
 		expect.That(t, errors.Is(err, limes.ErrScopeMismatch), "EraseTenantUsage under another tenant's context: err = %v, want ErrScopeMismatch", err)
 	}
-	err = eraser.EraseTenantUsage(f.Ctx, meter.EraseTenantUsageRequest{})
+	_, err = eraser.EraseTenantUsage(f.Ctx, meter.EraseTenantUsageRequest{})
 	expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "EraseTenantUsage naming no tenant: err = %v, want ErrInvalidRequest", err)
-	err = eraser.EraseTenantUsage(f.Ctx, req)
+	erased, err := eraser.EraseTenantUsage(f.Ctx, req)
 	expect.Must(t, err == nil, "EraseTenantUsage: %v", err)
+	checkErasedCounts(t, erased)
 	checkTenantUsageGone(t, f, charged.ChargeID, held.ID, copyID)
 	checkOtherTenantUsageKept(t, f, theirCtx, other, theirCap, theirCharge.ChargeID)
 	checkMeteringAfterErase(t, f)
@@ -3291,6 +3294,24 @@ func checkEraseTenantUsage(t *testing.T, f fixture) {
 	expect.That(t, errors.Is(err, meter.ErrTenantBudgetNotFound), "GetTenantBudget after metering an erased tenant: err = %v, want ErrTenantBudgetNotFound", err)
 	_, err = f.Usage.Bump(theirCtx, meter.BumpRequest{Subject: theirSubject})
 	expect.That(t, err == nil, "another tenant's request after the erase: %v", err)
+}
+
+// The fixture checkEraseTenantUsage erases: counters of the root and the
+// child, the child's one copy, one open hold and one charge.
+const (
+	erasedCounters = 2
+	erasedCopies   = 1
+	erasedHolds    = 1
+	erasedCharges  = 1
+)
+
+// checkErasedCounts holds an erase to reporting what it removed of
+// checkEraseTenantUsage's fixture.
+func checkErasedCounts(t *testing.T, got meter.EraseTenantUsageResult) {
+	expect.That(t, got.Counters == erasedCounters, "EraseTenantUsage removed the counters of %d capabilities, want %d", got.Counters, erasedCounters)
+	expect.That(t, got.Copies == erasedCopies, "EraseTenantUsage removed the counters of %d copies, want %d", got.Copies, erasedCopies)
+	expect.That(t, got.Holds == erasedHolds, "EraseTenantUsage removed %d holds, want %d", got.Holds, erasedHolds)
+	expect.That(t, got.Charges == erasedCharges, "EraseTenantUsage removed %d charges, want %d", got.Charges, erasedCharges)
 }
 
 // checkTenantUsageGone holds an erase to leaving nothing of the tenant's

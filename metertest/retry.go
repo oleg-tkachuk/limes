@@ -234,7 +234,8 @@ func checkRefundIDGoesWithItsTenant(t *testing.T, f fixture) {
 	id := uuid.New()
 	_, err = f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: c.ChargeID, Amount: keyedPart, RefundID: id}, nil)
 	expect.Must(t, err == nil, "keyed refund: %v", err)
-	expect.Must(t, eraser.EraseTenantUsage(f.Ctx, meter.EraseTenantUsageRequest{TenantID: f.Tenant}) == nil, "EraseTenantUsage")
+	_, err = eraser.EraseTenantUsage(f.Ctx, meter.EraseTenantUsageRequest{TenantID: f.Tenant})
+	expect.Must(t, err == nil, "EraseTenantUsage: %v", err)
 	r, err := f.Usage.Refund(theirCtx, meter.RefundRequest{ChargeID: theirs.ChargeID, Amount: keyedPart, RefundID: id}, nil)
 	expect.That(t, err == nil && !r.Replayed && r.Amount == keyedPart, "refund under the id of an erased tenant's refund = %+v, %v; want a fresh refund", r, err)
 }
