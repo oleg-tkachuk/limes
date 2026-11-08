@@ -150,10 +150,12 @@ LIMIT $2`
 	// sqlForgetLeaseAncestors drops $1, capabilities whose counters went,
 	// from the ancestors every lease is held against, the rows locked in id
 	// order: settling one later must not write a row of theirs created
-	// since.
+	// since. A row with no lease has no ancestors (sqlClearLease); naming
+	// that lets it read the partial index of the leases
+	// (usage_lease_expires), not every counter.
 	sqlForgetLeaseAncestors = `
 WITH held AS (
-    SELECT capability_id FROM limes.usage WHERE lease_ancestors && $1 ORDER BY capability_id FOR UPDATE
+    SELECT capability_id FROM limes.usage WHERE lease_id IS NOT NULL AND lease_ancestors && $1 ORDER BY capability_id FOR UPDATE
 )
 UPDATE limes.usage u
 SET lease_ancestors = ARRAY(SELECT a FROM unnest(u.lease_ancestors) WITH ORDINALITY AS t (a, n) WHERE a <> ALL ($1) ORDER BY n)
