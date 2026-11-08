@@ -47,9 +47,13 @@ const (
 )
 
 // DefaultAlgorithms are the asymmetric JWS algorithms a Verifier accepts
-// when its config names none. A symmetric one would let anyone holding the
-// key, the identity provider's other clients among them, mint tokens.
-var DefaultAlgorithms = []string{"RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "ES512", "EdDSA", "Ed25519"}
+// when its config names none, and the only ones a config may name. A
+// symmetric one would let anyone holding the key, the identity provider's
+// other clients among them, mint tokens. Each call returns a fresh slice:
+// changing it widens no Verifier's allow-list.
+func DefaultAlgorithms() []string {
+	return []string{"RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "ES512", "EdDSA", "Ed25519"}
+}
 
 // keyKind is the key type an algorithm verifies with and, for an elliptic
 // curve, the curve.
@@ -58,7 +62,7 @@ type keyKind struct {
 	curve jwa.EllipticCurveAlgorithm
 }
 
-// keyKinds are the keys each of DefaultAlgorithms verifies with (RFC 7518
+// keyKinds are the keys each of DefaultAlgorithms() verifies with (RFC 7518
 // §3, RFC 8037, RFC 9864). An algorithm's signature is checked only under a
 // key of its kind, never under one another algorithm would use.
 var keyKinds = map[string]keyKind{
@@ -84,7 +88,7 @@ type Config struct {
 	// ClientIDClaim is the claim naming the client. Empty: ClaimClientID.
 	// A provider that names it elsewhere ("azp") is read by naming it here.
 	ClientIDClaim string
-	// Algorithms are the JWS algorithms accepted. Empty: DefaultAlgorithms.
+	// Algorithms are the JWS algorithms accepted. Empty: DefaultAlgorithms().
 	Algorithms []string
 	// ClockSkew is how far exp, nbf and iat may be off the clock: the
 	// identity provider's clock is not the verifier's. Zero:
@@ -144,12 +148,13 @@ func New(cfg Config) (*Verifier, error) {
 	if cfg.ClientIDClaim == "" {
 		cfg.ClientIDClaim = ClaimClientID
 	}
+	supported := DefaultAlgorithms()
 	if len(cfg.Algorithms) == 0 {
-		cfg.Algorithms = DefaultAlgorithms
+		cfg.Algorithms = supported
 	}
 	for _, alg := range cfg.Algorithms {
-		if !slices.Contains(DefaultAlgorithms, alg) {
-			return nil, fmt.Errorf("%w: jwtverify: Config.Algorithms names %q, which is not one of %q", limes.ErrInvalidConfig, alg, DefaultAlgorithms)
+		if !slices.Contains(supported, alg) {
+			return nil, fmt.Errorf("%w: jwtverify: Config.Algorithms names %q, which is not one of %q", limes.ErrInvalidConfig, alg, supported)
 		}
 	}
 	if err := setClockSkew(&cfg); err != nil {

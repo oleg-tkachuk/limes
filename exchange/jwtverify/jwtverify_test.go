@@ -93,6 +93,27 @@ func TestVerifierHoldsItsAlgorithms(t *testing.T) {
 	}
 }
 
+// DefaultAlgorithms returns a fresh slice: a caller that changes it widens
+// neither the list the next call returns nor what a config may name. Each
+// algorithm on it has the kind of key it verifies with.
+func TestDefaultAlgorithmsIsACopy(t *testing.T) {
+	p := newIDP(t)
+	symmetric := jwa.HS256().String()
+	algs := DefaultAlgorithms()
+	algs[0] = symmetric
+	if slices.Contains(DefaultAlgorithms(), symmetric) {
+		t.Errorf("DefaultAlgorithms() = %q after a caller changed its slice", DefaultAlgorithms())
+	}
+	if _, err := New(Config{Issuer: idpIssuer, Keys: staticKeys(t, p.keys), Algorithms: []string{symmetric}}); err == nil {
+		t.Errorf("a verifier accepting %s was built after a caller changed DefaultAlgorithms()", symmetric)
+	}
+	for _, alg := range DefaultAlgorithms() {
+		if _, ok := keyKinds[alg]; !ok {
+			t.Errorf("%s has no key kind", alg)
+		}
+	}
+}
+
 // A provider that types its tokens JWT and names the client in azp is read
 // once its config says so.
 func TestVerifierReadsAProviderOfItsOwn(t *testing.T) {

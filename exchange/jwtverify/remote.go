@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"sync"
 	"time"
 
@@ -45,9 +44,13 @@ const (
 )
 
 // RemoteKeys is a KeySource of the JWK Set at rawURL, fetched in the
-// background every few minutes until ctx is done. client fetches it; nil:
-// jwk.DefaultHTTPClient, with a request timeout and no redirect to another
-// scheme. It does not wait for the first fetch. A token naming a kid the
+// background every few minutes until ctx is done. rawURL must be an https
+// URL with a host: over anything else whoever sits on the path chooses the
+// keys, and so the subject tokens the exchange accepts; any other is
+// limes.ErrInvalidConfig. client fetches it; nil: jwk.DefaultHTTPClient,
+// with a request timeout. Whatever the client's own redirect policy, a
+// redirect to another scheme or host is refused, on a copy of the client:
+// the caller's is left as it is. It does not wait for the first fetch. A token naming a kid the
 // set does not hold, or arriving while no usable set is held, fetches it
 // again at once, at most once per jwks.DefaultMinRefreshInterval. The last
 // set fetched is served while rawURL is out of reach, for at most
@@ -67,13 +70,15 @@ func newRemote(ctx context.Context, rawURL string, client *http.Client, now func
 	if rawURL == "" {
 		return nil, fmt.Errorf("%w: jwtverify: RemoteKeys: url required", limes.ErrInvalidConfig)
 	}
-	u, err := url.Parse(rawURL)
+	u, err := parseKeysURL(rawURL)
 	if err != nil {
-		return nil, errs.Errorf("%w: jwtverify: RemoteKeys: %w", limes.ErrInvalidConfig, err)
+		log.WarnContext(ctx, "jwtverify: refused the identity provider's JWKS URL", slog.Any("error", err))
+		return nil, err
 	}
 	if client == nil {
 		client = jwk.DefaultHTTPClient()
 	}
+	client = sameOrigin(client)
 	r := &remote{
 		url: rawURL, endpoint: u.Redacted(), now: now,
 		log:        log.With(slog.String("jwks_url", u.Redacted())),

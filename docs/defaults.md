@@ -190,7 +190,7 @@ or be marked breaking by hand.
 | `jwtverify.Config` | `Keys` | required |  |
 | `jwtverify.Config` | `Types` | `TypeAccessToken`, `TypeAccessTokenMedia` |  |
 | `jwtverify.Config` | `ClientIDClaim` | `ClaimClientID` |  |
-| `jwtverify.Config` | `Algorithms` | `DefaultAlgorithms` |  |
+| `jwtverify.Config` | `Algorithms` | `DefaultAlgorithms()` | `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `ES256`, `ES384`, `ES512`, `EdDSA`, `Ed25519`. |
 | `jwtverify.Config` | `ClockSkew` | `limes.DefaultLeeway` |  |
 | `jwtverify.Config` | `NoClockSkew` | off | `ClockSkew` applies. |
 | `jwtverify.Config` | `Now` | `time.Now` |  |
@@ -198,6 +198,5 @@ or be marked breaking by hand.
 | Constant | Value |
 |---|---|
 | `exchange.DefaultMaxBodyBytes` | `64 << 10` |
-| `jwtverify.DefaultAlgorithms` | `[]string{"RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "ES512", "EdDSA", "Ed25519"}` |
 
 otelmetric and biscuit take no `Config`.
