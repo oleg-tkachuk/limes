@@ -3,6 +3,7 @@ package limes
 import (
 	"context"
 	"errors"
+	"reflect"
 	"slices"
 	"testing"
 	"uuid"
@@ -182,7 +183,7 @@ func TestAllByPrincipalKeepsTheRequest(t *testing.T) {
 	for i, got := range l.reqs {
 		want := req
 		want.Cursor = l.asked[i]
-		if got != want {
+		if !reflect.DeepEqual(got, want) {
 			t.Errorf("page %d asked with %+v, want %+v", i, got, want)
 		}
 	}

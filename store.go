@@ -253,6 +253,7 @@ type RevokeRequest struct {
 	// CascadeChildren records a revocation entry for every descendant as
 	// well. Descendants stop verifying regardless; see Store.Revoke.
 	CascadeChildren bool
+	_               noCompare
 }
 
 // RevokeResult is what Store.Revoke did to the capability it names.
@@ -312,6 +313,7 @@ type PurgeRequest struct {
 	// Limit bounds the records removed. Zero: DefaultHousekeepingLimit; negative
 	// is refused.
 	Limit int
+	_     noCompare
 }
 
 // Validate refuses a retention shorter than MinPurgeRetention, other than
@@ -358,6 +360,7 @@ type ListByPrincipalRequest struct {
 	Cursor string
 	// Limit is the page size; see PageLimit.
 	Limit int
+	_     noCompare
 }
 
 // Validate reports whether the request names a principal. Every error

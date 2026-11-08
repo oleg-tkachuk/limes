@@ -199,6 +199,11 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
   of yours that embeds or forwards to a cache keeps the record check; over
   a cache whose upstream names no lineage, its `RevocationLineage` returns
   `ErrNoRevocationLineage`.
+- `RevokeRequest`, `PurgeRequest`, `ListByPrincipalRequest` and
+  `CheckRequest` are no longer comparable with `==`, as the other structs
+  that may gain a field in 1.x are not, so a slice or map field added later
+  breaks no caller. Compare them field by field, or with
+  `reflect.DeepEqual`; one used as a map key needs a key of your own.
 
 ## exchange/v0.22.0
 
