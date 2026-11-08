@@ -71,8 +71,11 @@ type VerifierConfig struct {
 	// capability as a JWT's. Revocations must then tell the two apart: a
 	// RevocationLineageLookup, as memstore's and pgstore's Store are, or a
 	// RevocationCache over one; NewVerifier refuses any other with
-	// ErrInvalidConfig. A type of yours that wraps such a cache is not seen
-	// through: pass the cache itself. A RevocationLineageLookup that
+	// ErrInvalidConfig. A type of yours that wraps a cache is seen as the
+	// RevocationLineageLookup it is: one forwarding RevocationLineage to
+	// the cache keeps the check, and over a cache whose upstream names no
+	// lineage every verification fails with ErrNoRevocationLineage, never
+	// passes. A RevocationLineageLookup that
 	// answers an id not on record as not revoked, against its contract,
 	// defeats the option unseen. An Issuer returns a token only once its
 	// record is written, so with the option on only a lookup that reads a
@@ -583,10 +586,8 @@ func (v *Verifier) isRevoked(ctx context.Context, id uuid.UUID) (bool, error) {
 	if !v.cfg.RequireRecord {
 		return v.cfg.Revocations.IsRevoked(ctx, id)
 	}
-	if c, ok := v.cfg.Revocations.(*RevocationCache); ok {
-		return c.revokedOnRecord(ctx, id)
-	}
-	// NewVerifier refused any other lookup under RequireRecord.
+	// NewVerifier refused any other lookup under RequireRecord; a
+	// RevocationCache is one.
 	a, err := v.cfg.Revocations.(RevocationLineageLookup).RevocationLineage(ctx, id)
 	return a.Revoked, err
 }

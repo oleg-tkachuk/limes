@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -869,5 +870,22 @@ func TestALongLookupIsQueuedByWhenItBegan(t *testing.T) {
 				t.Errorf("the quick answer was dropped: %d lookups, %v", calls.Load()-before, err)
 			}
 		})
+	}
+}
+
+// GetWithTags serves the tags an answer was read with: the lookup's on a
+// miss, the cached ones on a hit, a copy each time.
+func TestGetWithTagsServesTheAnswersTags(t *testing.T) {
+	c, _ := newCache(10)
+	var calls atomic.Int32
+	for round := range 2 {
+		revoked, tags, _, err := c.GetWithTags(t.Context(), "child", tagged(false, &calls, "parent", "root"))
+		if err != nil || revoked || !slices.Equal(tags, []string{"parent", "root"}) {
+			t.Fatalf("round %d: GetWithTags = %v, %v, %v; want live, tagged parent and root", round, revoked, tags, err)
+		}
+		tags[0] = "changed"
+	}
+	if calls.Load() != 1 {
+		t.Errorf("%d lookups, want 1: the second answer is the cache's", calls.Load())
 	}
 }

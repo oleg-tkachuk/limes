@@ -25,7 +25,7 @@ type RevocationLookup interface {
 }
 
 // RevocationLineageLookup is a RevocationLookup that also names the
-// ancestors an answer covers. A RevocationCache over one keeps them beside
+// ancestors an answer covers. A RevocationCache is one, and over one keeps them beside
 // each "not revoked" answer, so ClearRevoked drops only the answers a
 // revocation outdates rather than every one. memstore's Store and pgstore's
 // are each one.
@@ -354,40 +354,53 @@ func (c *RevocationCache) IsRevoked(ctx context.Context, id uuid.UUID) (bool, er
 		revoked, _, err := c.caps.Get(ctx, id, func(ctx context.Context) (bool, error) { return c.capabilities.IsRevoked(ctx, id) })
 		return revoked, err
 	}
-	revoked, err := c.revokedOnRecord(ctx, id)
+	a, err := c.RevocationLineage(ctx, id)
 	// Not on record: not revoked, as IsRevoked answers it.
 	if errors.Is(err, ErrNotFound) {
 		return false, nil
 	}
-	return revoked, err
+	return a.Revoked, err
 }
 
 // tellsUnrecorded reports whether the cache tells a capability not on record
 // from one not revoked: whether its upstream is a RevocationLineageLookup.
 func (c *RevocationCache) tellsUnrecorded() bool { return c.lineage != nil }
 
-// revokedOnRecord is IsRevoked over a lineage upstream, with ErrNotFound for
-// an id it has no record of, which it then answers from unrecorded for TTL
-// rather than ask the upstream again on every request.
-func (c *RevocationCache) revokedOnRecord(ctx context.Context, id uuid.UUID) (bool, error) {
+// RevocationLineage answers as its upstream's RevocationLineage does, from
+// the cache: a "not revoked" answer with the ancestors it was read with, and
+// an id the upstream has no record of as ErrNotFound, which it then answers
+// from unrecorded for TTL rather than ask the upstream again on every
+// request. A cache whose Capabilities is no RevocationLineageLookup names
+// no lineage, and returns ErrNoRevocationLineage rather than an answer that
+// could not tell an id not on record from one not revoked. So a cache, or a
+// decorator forwarding to one, is a RevocationLineageLookup to a verifier
+// that requires a record.
+func (c *RevocationCache) RevocationLineage(ctx context.Context, id uuid.UUID) (RevocationAnswer, error) {
 	if c.lineage == nil {
-		return false, broken("revocation cache over %T tells no capability not on record", c.capabilities)
+		return RevocationAnswer{}, fmt.Errorf("%w: revocation cache over %T", ErrNoRevocationLineage, c.capabilities)
 	}
 	key := []uuid.UUID{id}
 	// The epoch is read before the lookup: a Clear or ClearRevoked while it
 	// runs may be the record's revocation, and keeps the answer out.
 	_, missing, epoch := c.unrecorded.Cached(key)
 	if len(missing) == 0 {
-		return false, ErrNotFound
+		return RevocationAnswer{}, fmt.Errorf("%w: capability %s (cached)", ErrNotFound, id)
 	}
-	revoked, at, err := c.caps.GetTagged(ctx, id, func(ctx context.Context) (bool, []uuid.UUID, error) {
+	revoked, ancestors, at, err := c.caps.GetWithTags(ctx, id, func(ctx context.Context) (bool, []uuid.UUID, error) {
 		a, err := c.lineage.RevocationLineage(ctx, id)
 		return a.Revoked, a.Ancestors, err
 	})
 	if errors.Is(err, ErrNotFound) {
 		c.unrecorded.SeedLive(key, epoch, at)
 	}
-	return revoked, err
+	if err != nil {
+		return RevocationAnswer{}, err
+	}
+	if revoked {
+		// A revoked answer names no ancestors (RevocationAnswer).
+		return RevocationAnswer{Revoked: true}, nil
+	}
+	return RevocationAnswer{Ancestors: ancestors}, nil
 }
 
 // Clear drops every entry. A consumer that learns of a revocation from

@@ -289,41 +289,49 @@ func (c *Cache[K]) Get(ctx context.Context, key K, lookup func(context.Context) 
 // covers, its tags: Forget of any of them drops a "not revoked" answer
 // cached under key.
 func (c *Cache[K]) GetTagged(ctx context.Context, key K, lookup func(context.Context) (bool, []K, error)) (bool, time.Time, error) {
+	revoked, _, at, err := c.GetWithTags(ctx, key, lookup)
+	return revoked, at, err
+}
+
+// GetWithTags is GetTagged, also returning the tags of the answer it
+// serves: the lookup's, or those cached beside it. A revoked answer served
+// from a tag the cache holds revoked has none.
+func (c *Cache[K]) GetWithTags(ctx context.Context, key K, lookup func(context.Context) (bool, []K, error)) (bool, []K, time.Time, error) {
 	s := c.shardOf(key)
 	s.mu.RLock()
 	e, ok := s.entries[key]
 	s.mu.RUnlock()
 	if ok && c.fresh(e.at, c.cfg.Now()) {
 		c.countHit()
-		return e.revoked, e.at, nil
+		return e.revoked, slices.Clone(e.tags), e.at, nil
 	}
 	s.misses.Add(1)
-	revoked, at, err := c.get(ctx, s, key, lookup)
+	revoked, tags, at, err := c.get(ctx, s, key, lookup)
 	if err != nil {
-		return c.staleOr(ctx, s, key, revoked, at, err)
+		return c.staleOr(ctx, s, key, revoked, tags, at, err)
 	}
-	return revoked, at, nil
+	return revoked, tags, at, nil
 }
 
 // staleOr serves the answer key had before its lookup failed with err, if
 // it is no older than the TTL and MaxStale, and otherwise returns the
 // lookup's result: err is the upstream's answer, the caller has gone, or
 // there is no such answer.
-func (c *Cache[K]) staleOr(ctx context.Context, s *shard[K], key K, revoked bool, at time.Time, err error) (bool, time.Time, error) {
+func (c *Cache[K]) staleOr(ctx context.Context, s *shard[K], key K, revoked bool, tags []K, at time.Time, err error) (bool, []K, time.Time, error) {
 	if c.cfg.MaxStale == 0 || ctx.Err() != nil || (c.cfg.Answers != nil && c.cfg.Answers(err)) {
-		return revoked, at, err
+		return revoked, tags, at, err
 	}
 	s.mu.RLock()
 	e, ok := s.entries[key]
 	s.mu.RUnlock()
 	now := c.cfg.Now()
 	if !ok || !c.judge(now).kept(e.at) {
-		return revoked, at, err
+		return revoked, tags, at, err
 	}
 	// A live answer covers its tags; with a revocation let go to make room,
 	// the cache cannot say it still does.
 	if !e.revoked && len(e.tags) > 0 && c.revocationLost(now) {
-		return revoked, at, err
+		return revoked, tags, at, err
 	}
 	s.stale.Add(1)
 	if c.cfg.OnStale != nil {
@@ -332,20 +340,20 @@ func (c *Cache[K]) staleOr(ctx context.Context, s *shard[K], key K, revoked bool
 	// A live answer covers its tags too; one the cache holds revoked, read
 	// since, is not undone by it.
 	if !e.revoked && c.HeldRevoked(e.tags) {
-		return true, e.at, nil
+		return true, nil, e.at, nil
 	}
-	return e.revoked, e.at, nil
+	return e.revoked, slices.Clone(e.tags), e.at, nil
 }
 
 // get is Get past its first read, counting nothing more: a waiter that asks
 // again is still the one question.
-func (c *Cache[K]) get(ctx context.Context, s *shard[K], key K, lookup func(context.Context) (bool, []K, error)) (bool, time.Time, error) {
+func (c *Cache[K]) get(ctx context.Context, s *shard[K], key K, lookup func(context.Context) (bool, []K, error)) (bool, []K, time.Time, error) {
 	s.mu.Lock()
 	// Read again under the write lock: another caller may have cached it, or
 	// started its lookup, since.
 	if e, ok := s.entries[key]; ok && c.fresh(e.at, c.cfg.Now()) {
 		s.mu.Unlock()
-		return e.revoked, e.at, nil
+		return e.revoked, slices.Clone(e.tags), e.at, nil
 	}
 	if call, ok := s.inflight[key]; ok {
 		joined := c.seq.Load()
@@ -366,9 +374,9 @@ func (c *Cache[K]) get(ctx context.Context, s *shard[K], key K, lookup func(cont
 			if call.discarded && joined > call.seq && ctx.Err() == nil {
 				return c.get(ctx, s, key, lookup)
 			}
-			return call.revoked, call.at, call.err
+			return call.revoked, slices.Clone(call.tags), call.at, call.err
 		case <-ctx.Done():
-			return false, time.Time{}, ctx.Err()
+			return false, nil, time.Time{}, ctx.Err()
 		}
 	}
 	call := &lookupCall[K]{done: make(chan struct{}), err: errLookupAbandoned, at: c.cfg.Now(), seq: c.seq.Load()}
@@ -380,7 +388,7 @@ func (c *Cache[K]) get(ctx context.Context, s *shard[K], key K, lookup func(cont
 	// the key.
 	defer c.finish(s, key, call)
 	call.revoked, call.tags, call.err = lookup(ctx)
-	return call.revoked, call.at, call.err
+	return call.revoked, slices.Clone(call.tags), call.at, call.err
 }
 
 // Cached reads the fresh answers keys have: whether any of them is revoked,

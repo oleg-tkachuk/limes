@@ -175,9 +175,8 @@ func TestRequireRecordRefusesALookupThatCannotTell(t *testing.T) {
 	f := newRecordFixture(t)
 	plain := isRevokedOnly{f.records}
 	lookups := map[string]limes.RevocationLookup{
-		"a lookup with IsRevoked alone":  plain,
-		"a cache over such a lookup":     newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: plain}),
-		"a lookup of yours over a cache": isRevokedOnlyOver{newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: f.records})},
+		"a lookup with IsRevoked alone": plain,
+		"a cache over such a lookup":    newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: plain}),
 	}
 	for name, lookup := range lookups {
 		t.Run(name, func(t *testing.T) {
@@ -193,9 +192,9 @@ func TestRequireRecordRefusesALookupThatCannotTell(t *testing.T) {
 	}
 }
 
-// isRevokedOnlyOver is a type of the consumer's own wrapping a cache, which
-// the verifier does not see through.
-type isRevokedOnlyOver struct{ *limes.RevocationCache }
+// lookupOverCache is a type of the consumer's own wrapping a cache, which
+// promotes the cache's RevocationLineage and so keeps the record check.
+type lookupOverCache struct{ *limes.RevocationCache }
 
 // A cache keeps the answer that a capability is not on record for its TTL —
 // not for the SyncedTTL a listening signal allows, as no signal says when a
