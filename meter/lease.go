@@ -151,6 +151,16 @@ func (l Lease) RequestsRemaining() int64 {
 // resets the spend, before it does. A Refund of a charge taken under a
 // lease returns it to the lease while it is open, and to the chain once
 // it is settled.
+//
+// A store that reads a lease before it locks its counters may find the
+// lease moved in between: settled and reopened by a top-up, or settled by
+// SettleLease, ReleaseExpired or another path above. It runs the call again,
+// and past a bound of its own on how often refuses it as limes.ErrConflict,
+// having moved nothing, rather than run for as long as the lease keeps
+// moving. A Charge or a Bump under a lease, a Lease that settles an expired
+// one first, and SettleLease may return it; the call was rejected, so the
+// caller sends it again, keyed or not. pgstore does this; memstore never
+// returns it.
 type Leaser interface {
 	// Lease opens a lease of req.Amount and req.Requests on the subject,
 	// refusing what a Reserve of that amount, or as many Bumps, would
