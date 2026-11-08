@@ -125,7 +125,13 @@ SELECT id FROM chain ORDER BY depth`
 	// with FOR SHARE, metered calls overlapping one another would hold a
 	// record without a gap, and its revoke's mark would wait behind them for
 	// as long. A record deleted between the walk and its lock is not
-	// returned, and the chain is cut there (heldLineage).
+	// returned, and the chain is cut there (heldLineage). Calls overlapping
+	// on a record make a MultiXact of their key-share locks, about one per
+	// call on a hot root, which autovacuum freezes from the records table;
+	// an advisory lock per record instead would take up to
+	// limes.MaxDelegationDepth+1 lock-table slots per call and hold Purge
+	// to a convention Postgres does not enforce
+	// (docs/adr/0007-pgstore-components.md, amendment of 2026-11-08).
 	sqlLineageHeld = sqlChain + `
 SELECT l.id, chain.depth, l.requests, l.budget, l.copies
 FROM ` + lineageView + ` l JOIN chain ON l.id = chain.id
