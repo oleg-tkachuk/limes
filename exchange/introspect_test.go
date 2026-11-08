@@ -156,7 +156,8 @@ func TestIntrospectionOutage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v, err := limes.NewVerifier(limes.VerifierConfig{Keys: keys, Revocations: failingRevocations{}, TrustedIssuers: []string{limesIssuer}, Now: clock})
+	// The lookup answers nothing, record or not: the outage is the point.
+	v, err := limes.NewVerifier(limes.VerifierConfig{Keys: keys, Revocations: failingRevocations{}, AllowUnrecorded: true, TrustedIssuers: []string{limesIssuer}, Now: clock})
 	if err != nil {
 		t.Fatal(err)
 	}
