@@ -1,13 +1,14 @@
 // Package jose holds the JOSE pieces the module's packages share: the
-// algorithm and key identifiers, base64url, the compact serialisation, and
-// the public JWK with its RFC 7638 thumbprint. One definition each, so a
-// token, a proof and a key set spell them alike.
+// algorithm and key identifiers, base64url, the compact serialisation, the
+// Ed25519 signature check, and the public JWK — Ed25519 or P-256 — with its
+// RFC 7638 thumbprint. One definition each, so a token, a proof and a key
+// set spell them alike.
 //
-// It is a frozen surface. The nested modules (exchange, biscuit,
-// redisreplay, pgstore) import it from production code, and a released
-// version of each must still build against every later limes of the same
-// major: nothing here is removed, renamed or changed in signature. CI holds
-// it so (task verify:nested-internals, .github/ci/nested-internals.ts).
+// It is a frozen surface. The biscuit module imports it from production
+// code, and a released version must still build against every later limes
+// of the same major: nothing here is removed, renamed or changed in
+// signature. CI holds it so (task verify:nested-internals,
+// .github/ci/nested-internals.ts).
 package jose
 
 import (
