@@ -70,7 +70,7 @@ type tenantUsageEraser struct {
 	eraser meter.TenantUsageEraser
 }
 
-func (e tenantUsageEraser) EraseTenantUsage(ctx context.Context, req meter.EraseTenantUsageRequest) error {
+func (e tenantUsageEraser) EraseTenantUsage(ctx context.Context, req meter.EraseTenantUsageRequest) (meter.EraseTenantUsageResult, error) {
 	return e.eraser.EraseTenantUsage(ctx, req)
 }
 
