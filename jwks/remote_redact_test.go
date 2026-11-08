@@ -12,9 +12,9 @@ import (
 // password is the secret a key set URL carries in its userinfo.
 const password = "s3cret-in-the-url"
 
-// A password in the key set's URL is the operator's secret: no error names
-// it, whether NewRemote refuses the URL or a fetch from it fails, since an
-// error is what reaches a log.
+// A password in the key set's URL is the operator's secret: no error and no
+// log line names it, whether NewRemote refuses the URL or a fetch from it
+// fails.
 func TestRemoteErrorsRedactTheURLsPassword(t *testing.T) {
 	for name, u := range map[string]string{
 		"a URL that does not parse": "https://user:" + password + "@issuer.example/%zz",
@@ -35,7 +35,8 @@ func TestRemoteErrorsRedactTheURLsPassword(t *testing.T) {
 	}))
 	t.Cleanup(failing.Close)
 	u := strings.Replace(failing.URL, "https://", "https://user:"+password+"@", 1)
-	r, err := NewRemote(RemoteConfig{URL: u, Client: failing.Client()})
+	logger, logged := debugLog()
+	r, err := NewRemote(RemoteConfig{URL: u, Client: failing.Client(), Logger: logger})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,5 +49,11 @@ func TestRemoteErrorsRedactTheURLsPassword(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), failing.Listener.Addr().String()) {
 		t.Errorf("PublicKey = %q, does not name the endpoint", err)
+	}
+	if logged.Len() == 0 {
+		t.Error("the failed fetch logged nothing")
+	}
+	if strings.Contains(logged.String(), password) {
+		t.Errorf("the failed fetch logged %q, which names the password", logged)
 	}
 }

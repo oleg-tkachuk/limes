@@ -81,8 +81,10 @@ type RemoteConfig struct {
 	MaxDocumentBytes int
 	// Now is the clock; tests override.
 	Now func() time.Time
-	// Logger logs Block, Unblock and Refresh, and each kid refused for being
-	// blocked. Nil: slog.Default().
+	// Logger logs each fetch — a new or confirmed set at DEBUG, a failure
+	// at WARN while the held set is still served and at ERROR once none is —,
+	// a fetch skipped inside MinRefreshInterval at DEBUG, Block, Unblock and
+	// Refresh, and each kid refused for being blocked. Nil: slog.Default().
 	Logger *slog.Logger
 }
 
@@ -260,6 +262,22 @@ const (
 	logKeyKIDs     = "kids"
 	logKeyEndpoint = "endpoint"
 	logKeyError    = "error"
+	// logKeyKeyCount is how many keys the set holds after a fetch.
+	logKeyKeyCount = "keys"
+	// logKeyNotModified is a fetch the endpoint answered 304 Not Modified.
+	logKeyNotModified = "not_modified"
+	// logKeyFreshFor is how long a fetched set is used before the next fetch.
+	logKeyFreshFor = "fresh_for"
+	// logKeyHeldAge is how long ago the held set was last confirmed current.
+	logKeyHeldAge = "held_age"
+	// logKeyMaxStale is RemoteConfig.MaxStale: how long a held set is served
+	// while fetches fail.
+	logKeyMaxStale = "max_stale"
+	// logKeyRetryAfter is RemoteConfig.MinRefreshInterval: how soon after a
+	// fetch the next one may start.
+	logKeyRetryAfter = "retry_after"
+	// logKeySinceAttempt is how long ago the last fetch was attempted.
+	logKeySinceAttempt = "since_attempt"
 )
 
 // Block refuses kids from now on, as ErrUnknownKID, even while the held set
@@ -398,10 +416,13 @@ func (r *Remote) releaseFetch() { <-r.fetching }
 func (r *Remote) fetchHeld(ctx context.Context) <-chan struct{} {
 	now := r.cfg.Now()
 	r.mu.RLock()
-	recent := !r.lastAttempt.IsZero() && now.Sub(r.lastAttempt) < r.cfg.MinRefreshInterval
+	since := now.Sub(r.lastAttempt)
+	recent := !r.lastAttempt.IsZero() && since < r.cfg.MinRefreshInterval
 	r.mu.RUnlock()
 	if recent {
 		r.releaseFetch()
+		r.cfg.Logger.DebugContext(ctx, "jwks: fetch skipped: the last attempt is within MinRefreshInterval",
+			slog.String(logKeyEndpoint, r.endpoint), slog.Duration(logKeySinceAttempt, since), slog.Duration(logKeyRetryAfter, r.cfg.MinRefreshInterval))
 		return nil
 	}
 	return r.startFetch(ctx, now)
@@ -425,25 +446,60 @@ func (r *Remote) startFetch(ctx context.Context, now time.Time) <-chan struct{} 
 		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), DefaultFetchTimeout)
 		defer cancel()
 		keys, newETag, header, notModified, err := r.fetch(fetchCtx, etag)
-		r.record(now, keys, newETag, header, notModified, err)
+		out := r.record(now, keys, newETag, header, notModified, err)
+		r.logFetch(fetchCtx, out, err)
 	}()
 	return done
 }
 
-// record keeps what a fetch attempted at now found.
-func (r *Remote) record(now time.Time, keys map[string]ed25519.PublicKey, etag string, header http.Header, notModified bool, err error) {
+// fetchOutcome is what a fetch left the Remote holding, for its log line.
+type fetchOutcome struct {
+	keys        int
+	notModified bool
+	freshFor    time.Duration
+	// held is a failed fetch leaving a set within MaxStale to serve,
+	// confirmed current heldAge ago.
+	held    bool
+	heldAge time.Duration
+}
+
+// record keeps what a fetch attempted at now found, and returns what the
+// Remote holds after it.
+func (r *Remote) record(now time.Time, keys map[string]ed25519.PublicKey, etag string, header http.Header, notModified bool, err error) fetchOutcome {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.lastAttempt = now
 	r.lastErr = err
 	if err != nil {
-		return
+		age := now.Sub(r.fetchedAt)
+		return fetchOutcome{keys: len(r.keys), held: !r.fetchedAt.IsZero() && age <= r.cfg.MaxStale, heldAge: age}
 	}
 	r.fetchedAt = now
 	r.freshFor = r.freshness(header)
 	if !notModified {
 		r.keys = keys
 		r.etag = etag
+	}
+	return fetchOutcome{keys: len(r.keys), notModified: notModified, freshFor: r.freshFor}
+}
+
+// logFetch logs a fetch's outcome: a set fetched or confirmed at DEBUG; a
+// failure at WARN while the held set is still served, and at ERROR once
+// there is none to serve and the resolver fails closed. err names the
+// endpoint as net/http does, its password masked.
+func (r *Remote) logFetch(ctx context.Context, out fetchOutcome, err error) {
+	endpoint := slog.String(logKeyEndpoint, r.endpoint)
+	switch {
+	case err == nil:
+		r.cfg.Logger.DebugContext(ctx, "jwks: key set fetched", endpoint,
+			slog.Int(logKeyKeyCount, out.keys), slog.Bool(logKeyNotModified, out.notModified), slog.Duration(logKeyFreshFor, out.freshFor))
+	case out.held:
+		r.cfg.Logger.WarnContext(ctx, "jwks: key set fetch failed; serving the held set until it is MaxStale old", endpoint,
+			slog.Any(logKeyError, err), slog.Int(logKeyKeyCount, out.keys), slog.Duration(logKeyHeldAge, out.heldAge),
+			slog.Duration(logKeyMaxStale, r.cfg.MaxStale), slog.Duration(logKeyRetryAfter, r.cfg.MinRefreshInterval))
+	default:
+		r.cfg.Logger.ErrorContext(ctx, "jwks: key set fetch failed with no set to serve; refusing tokens until a fetch succeeds", endpoint,
+			slog.Any(logKeyError, err), slog.Duration(logKeyRetryAfter, r.cfg.MinRefreshInterval))
 	}
 }
 
