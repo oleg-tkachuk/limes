@@ -252,7 +252,7 @@ var errLeaseMoved = fmt.Errorf("%w: pgstore: a lease moved while the call locked
 
 // errLeaseStale is a Lease of a capability whose own lease expired, or
 // whose chain changed, since it opened: it is settled first, and a new one
-// opened.
+// opened — or, stale again, refused as errLeaseKeptStale (retryLostRace).
 var errLeaseStale = fmt.Errorf("%w: pgstore: a lease to settle before another opens", limes.ErrInternal)
 
 // chargeLeased is charge under holder's lease, seen read before the lock:
@@ -366,13 +366,18 @@ func (s *UsageStore) Lease(ctx context.Context, req meter.LeaseRequest) (meter.L
 			})
 		})
 	}
-	err := open()
-	if errors.Is(err, errLeaseStale) {
+	// A lease to settle first is settled in a transaction of its own, and
+	// the lease opened again.
+	settleFirst := func() error {
 		if _, err := s.settle(ctx, req.Subject.CapabilityID(), req.Subject.TenantID()); err != nil && !errors.Is(err, meter.ErrLeaseNotFound) {
-			return meter.Lease{}, err
+			return err
 		}
-		err = open()
+		return nil
 	}
+	err := s.retryLostRace(ctx, lostRace{
+		op: retriedLease, lost: errLeaseStale, gaveUp: errLeaseKeptStale,
+		about: []any{slog.String(logKeyCapability, req.Subject.CapabilityID().String())},
+	}, open, settleFirst)
 	return out, err
 }
 
