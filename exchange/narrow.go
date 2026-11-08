@@ -24,7 +24,8 @@ type NarrowRequest struct {
 	// SubjectToken is the capability narrowed. Required.
 	SubjectToken string
 	// Resources and Audiences are what the child is asked for; at least one
-	// of either, each within the parent's audience.
+	// of either, each within the parent's audience. Each resource is an
+	// absolute URI without a fragment, else refused with ErrInvalidTarget.
 	Resources, Audiences []string
 	// Scopes and AuthorizationDetails are handed to the policy.
 	Scopes               []string

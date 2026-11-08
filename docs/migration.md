@@ -70,6 +70,16 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## exchange/v0.23.0
+
+- `Exchanger.Exchange` and `Exchanger.Narrow` refuse a resource in
+  `Request.Resources` or `NarrowRequest.Resources` that is not an absolute
+  URI without a fragment (RFC 8707 §2) with `ErrInvalidTarget`, before the
+  subject token is verified, as the token endpoint already did. An
+  in-process caller handed such a resource to the policy. Pass each
+  resource as an absolute URI, for example `https://tools.example.com`
+  where it passed `tools`, and drop any `#fragment`.
+
 ## pgstore/v0.71.0
 
 - `UsageStore.EraseTenantUsage` returns `meter.EraseTenantUsageResult`

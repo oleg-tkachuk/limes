@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"slices"
+	"strings"
 	"time"
 	"uuid"
 
@@ -136,7 +138,8 @@ type Request struct {
 	SubjectToken string
 	// Resources are the RFC 8707 resources, and Audiences the RFC 8693
 	// audiences, the capability is asked for. At least one of either; the
-	// capability's audience is drawn from them.
+	// capability's audience is drawn from them. Each resource is an
+	// absolute URI without a fragment, else refused with ErrInvalidTarget.
 	Resources, Audiences []string
 	// Scopes are the scopes asked for.
 	Scopes []string
@@ -464,13 +467,31 @@ func checkExchangeRequest(req Request) error {
 }
 
 // requireTarget refuses a request asking for neither a resource nor an
-// audience: a capability is for somewhere.
+// audience, since a capability is for somewhere, or for a resource that is
+// no absolute URI without a fragment (checkResources).
 func requireTarget(resources, audiences []string) error {
 	if len(resources) == 0 && len(audiences) == 0 {
 		return fmt.Errorf("%w: a resource or an audience required", ErrInvalidTarget)
 	}
+	return checkResources(resources)
+}
+
+// checkResources refuses a resource that is no absolute URI without a
+// fragment (RFC 8707 §2): the token endpoint and an in-process caller of
+// Exchange or Narrow alike. An empty fragment counts, though url.Parse
+// drops it.
+func checkResources(resources []string) error {
+	for _, resource := range resources {
+		u, err := url.Parse(resource)
+		if err != nil || !u.IsAbs() || u.Fragment != "" || strings.Contains(resource, fragmentSeparator) {
+			return fmt.Errorf("%w: %s %q is not an absolute URI without a fragment", ErrInvalidTarget, paramResource, resource)
+		}
+	}
 	return nil
 }
+
+// fragmentSeparator begins a URI's fragment (RFC 3986 §3.5).
+const fragmentSeparator = "#"
 
 // verifySubject verifies req's subject token, and returns it with the time
 // it has left, refusing one issued for another client or about to expire.
