@@ -13,6 +13,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -90,8 +91,67 @@ func Attenuate(token string, a limes.Attenuation) (string, error) {
 	if err != nil {
 		return "", errs.Errorf("limes: append attenuation: %w", err)
 	}
-	return serializeBiscuit(next)
+	attenuated, err := serializeBiscuit(next)
+	if err != nil {
+		return "", err
+	}
+	// The block is read back as the verifier reads it: a restriction a
+	// later limes added to limes.Attenuation, which this release writes no
+	// fact for, would otherwise vanish from the copy without a word.
+	encoded, err := encodedAttenuation(attenuated)
+	if err != nil {
+		return "", err
+	}
+	if !sameAttenuation(a, encoded) {
+		return "", invalidRequest("the attenuation holds a restriction this release of the biscuit module cannot encode, which the block would drop")
+	}
+	return attenuated, nil
 }
+
+// encodedAttenuation is what the last block of token says, read as
+// unsealBiscuit reads each attenuation block.
+func encodedAttenuation(token string) (limes.Attenuation, error) {
+	_, container, err := decodeBiscuitContainer(token)
+	if err != nil {
+		return limes.Attenuation{}, err
+	}
+	blocks, err := decodeBiscuitBlocks(container)
+	if err != nil {
+		return limes.Attenuation{}, refuse(limes.ErrInvalidRequest, err)
+	}
+	f, err := readBlockFacts(blocks[len(blocks)-1])
+	if err != nil {
+		return limes.Attenuation{}, refuse(limes.ErrInvalidRequest, err)
+	}
+	return f.attenuation(), nil
+}
+
+// sameAttenuation reports whether a and b restrict a token alike, each in
+// the form a block carries it. It compares every field, those of a later
+// limes included: one this release does not know reads back zero, and so
+// differs from an a that set it.
+func sameAttenuation(a, b limes.Attenuation) bool {
+	return reflect.DeepEqual(canonicalAttenuation(a), canonicalAttenuation(b))
+}
+
+// canonicalAttenuation is a as a block carries it: an empty list is no
+// list, and an expiry is blockExpiry's.
+func canonicalAttenuation(a limes.Attenuation) limes.Attenuation {
+	v := reflect.ValueOf(&a).Elem()
+	for i := range v.NumField() {
+		if f := v.Field(i); f.Kind() == reflect.Slice && f.Len() == 0 && f.CanSet() {
+			f.SetZero()
+		}
+	}
+	if !a.ExpiresAt.IsZero() {
+		a.ExpiresAt = blockExpiry(a.ExpiresAt)
+	}
+	return a
+}
+
+// blockExpiry is t as a block's limes_expires carries it: a Biscuit date
+// counts whole seconds, in UTC.
+func blockExpiry(t time.Time) time.Time { return t.UTC().Truncate(time.Second) }
 
 // attenuationFacts are the facts of the block that carries a, which
 // checkAttenuation accepted.
@@ -103,7 +163,7 @@ func attenuationFacts(a limes.Attenuation) []biscuitgo.Fact {
 		stringFacts(biscuitFactPlane, a.Audience),
 	)
 	if !a.ExpiresAt.IsZero() {
-		facts = append(facts, biscuitFact(biscuitFactExpires, biscuitgo.Date(a.ExpiresAt.UTC().Truncate(time.Second))))
+		facts = append(facts, biscuitFact(biscuitFactExpires, biscuitgo.Date(blockExpiry(a.ExpiresAt))))
 	}
 	if a.ConfirmationJKT != "" {
 		facts = append(facts, biscuitFact(biscuitFactBind, biscuitgo.String(a.ConfirmationJKT)))
