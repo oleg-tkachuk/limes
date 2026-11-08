@@ -2,6 +2,20 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.71.1](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.71.0...pgstore%2Fv0.71.1) (2026-11-08)
+
+### Bug Fixes
+
+* **pgstore:** log and refuse as a conflict a call that keeps losing its race ([c308aea](https://github.com/oleg-tkachuk/limes/commit/c308aeaa5ce7dc447f3ac9809b37e44dbea342c7))
+
+### Performance Improvements
+
+* **pgstore:** read only leased counters when forgetting lease ancestors ([bd824e0](https://github.com/oleg-tkachuk/limes/commit/bd824e02836956c8f8ebed1a6949fd87c758759a))
+
+### Dependencies
+
+* require limes v0.172.1
+
 ## [0.71.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.70.0...pgstore%2Fv0.71.0) (2026-11-08)
 
 ### ⚠ BREAKING CHANGES
