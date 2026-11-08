@@ -20,7 +20,7 @@ import (
 //	├── ErrProofOfPossession the proof of possession is missing or wrong
 //	│   └── ErrAuthSchemeMismatch
 //	├── ErrRevoked
-//	│   └── ErrDelegationTooDeep
+//	│   └── ErrDelegationTooDeep, ErrTenantErased
 //	├── ErrUnrecorded        no record (VerifierConfig.RequireRecord)
 //	└── ErrExpired, ErrNotYetValid, ErrAudienceMismatch
 //	ErrCaveatViolation       a caveat refuses the operation (403)
@@ -29,8 +29,12 @@ import (
 //	ErrInvalidRequest        the request itself is malformed
 //	├── ErrInvalidCaveats, ErrInvalidAmount, ErrEffectConflict
 //	└── ErrMalformedAuthorization  the client's Authorization header (400)
+//	ErrDelegationTooWide, ErrDelegationDepthExceeded
+//	                         a delegation its parent cannot grant (403)
 //	ErrNotFound              what the request names is not on record
 //	└── meter.ErrChargeNotFound, meter.ErrUsageNotFound, …
+//	ErrUnknownTenant, ErrTenantDeleted, ErrTenantGone
+//	                         an issuance for a tenant not open for one
 //	ErrConflict              a well-formed request disagrees with what is on record
 //	└── ErrAlreadyExists, ErrUnitCodeMismatch, meter.ErrExternalRefConflict, …
 var (
@@ -53,13 +57,16 @@ var (
 	// ErrTenantErased is a metering call, or a Store.Insert, for a tenant
 	// whose usage EraseTenantUsage removed: nothing of it is recorded or
 	// counted again. Its capabilities were revoked with it, so it matches
-	// ErrRevoked.
+	// ErrRevoked. The Issuer answers a mint the store refuses with it as
+	// ErrTenantGone instead: no presented capability was refused.
 	ErrTenantErased error = &familyError{"limes: tenant erased", ErrRevoked}
 	// ErrDelegationTooDeep — a capability with more than MaxDelegationDepth
 	// ancestors on record. Its root lies past the bounded IsRevoked walk,
 	// so a revocation there would go unseen: it is refused as revoked,
-	// never accepted, and Delegate refuses to mint one. A store answers it
-	// as an error, which no revocation cache keeps.
+	// never accepted. A store answers it as an error, which no revocation
+	// cache keeps. Store.Insert refuses to record one with it, which
+	// Delegate answers as ErrDelegationDepthExceeded: the parent is live,
+	// only too deep to delegate from.
 	ErrDelegationTooDeep error = &familyError{"limes: delegation chain too deep", ErrRevoked}
 	ErrAudienceMismatch  error = &familyError{"limes: audience mismatch", ErrUnauthenticated}
 	// ErrUnrecorded — a capability the revocation lookup has no record of,
@@ -98,6 +105,13 @@ var (
 	ErrTenantBudgetExceeded = errors.New("limes: tenant aggregate budget exceeded")
 
 	ErrDelegationTooWide = errors.New("limes: child wider than parent")
+	// ErrDelegationDepthExceeded — a Delegate whose child would have more
+	// than MaxDelegationDepth ancestors. The parent stays valid; it is too
+	// deep in its chain to delegate from, so the delegation is refused
+	// (403) and nothing is recorded. It does not match ErrRevoked or
+	// ErrDelegationTooDeep, which are the verify path's answers to a
+	// lineage already too deep.
+	ErrDelegationDepthExceeded = errors.New("limes: delegation would exceed the maximum depth")
 	// ErrUnitCodeMismatch — two units that would have to be one: a
 	// delegated child declaring a unit_code other than its parent's, or an
 	// amount in a unit other than the one a counter (a capability's, an
@@ -132,6 +146,13 @@ var (
 	// so its rows may be restored, but nothing new is minted for it. The
 	// Store returns it.
 	ErrTenantDeleted = errors.New("limes: tenant deleted")
+	// ErrTenantGone is an issuance for a tenant whose usage EraseTenantUsage
+	// removed: nothing new is minted for it, and unlike ErrTenantDeleted
+	// nothing of it can be restored (410). The Issuer returns it where the
+	// Store refuses the record with ErrTenantErased, which it does not
+	// match: that sentinel is a revoked capability's, and a mint presents
+	// none.
+	ErrTenantGone = errors.New("limes: tenant gone")
 	// ErrScopeMismatch is a store call whose context is scoped to a tenant
 	// other than the one its request names — or to none — under a store
 	// that keeps each tenant's rows apart. The rows are there; the call may

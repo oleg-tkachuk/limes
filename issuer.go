@@ -3,6 +3,7 @@ package limes
 import (
 	"context"
 	"crypto/ed25519"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -214,7 +215,9 @@ type IssueResult struct {
 	_          noCompare
 }
 
-// Issue mints a top-level capability.
+// Issue mints a top-level capability. A tenant the store cannot mint for is
+// its refusal — ErrUnknownTenant, ErrTenantDeleted — or ErrTenantGone for
+// one whose usage was erased.
 func (i *Issuer) Issue(ctx context.Context, req IssueRequest) (IssueResult, error) {
 	start := time.Now()
 	res, err := result(i.issue(ctx, req))
@@ -406,9 +409,27 @@ func (i *Issuer) signAndRecord(ctx context.Context, c Capability, issuance Inser
 	}
 	issuance.Capability = c
 	if err := i.store.Insert(ctx, issuance); err != nil {
-		return "", errs.Errorf("limes: persist %s: %w", what, err)
+		return "", errs.Errorf("limes: persist %s: %w", what, mintRefusal(err))
 	}
 	return token, nil
+}
+
+// mintRefusal is a store's refusal to record a new capability as the
+// issuer answers it. ErrDelegationTooDeep and ErrTenantErased are the
+// store's answers for a lineage or a tenant no capability of which may be
+// on record; matched on the verify path they are revocations, but a mint
+// presents no capability, so they become the refusals of a delegation the
+// parent cannot grant (ErrDelegationDepthExceeded) and of a tenant gone
+// (ErrTenantGone). The store's error is kept as text only: wrapped, it
+// would match ErrRevoked again. Any other error is err.
+func mintRefusal(err error) error {
+	switch {
+	case errors.Is(err, ErrDelegationTooDeep):
+		return errs.Errorf("%w: past MaxDelegationDepth (%d): %v", ErrDelegationDepthExceeded, MaxDelegationDepth, err)
+	case errors.Is(err, ErrTenantErased):
+		return errs.Errorf("%w: %v", ErrTenantGone, err)
+	}
+	return err
 }
 
 // expiry resolves a requested TTL against the default. A negative TTL is a
@@ -514,7 +535,8 @@ type DelegateRequest struct {
 // another issuer named is ErrInvalidRequest: this issuer's store holds no
 // record of it, so revoking it there would never reach the child. A child
 // that would have more than MaxDelegationDepth ancestors is
-// ErrDelegationTooDeep, refused by Store.Insert before it is on record. A parent whose caveats do not allow
+// ErrDelegationDepthExceeded (403), refused by Store.Insert before it is on
+// record; the parent stays valid. A parent whose caveats do not allow
 // OpShare — the right to delegate — is ErrOpNotAllowed: delegating is the
 // share operation, and a capability granted without it may not have the
 // issuer mint a new principal any part of it.
@@ -567,7 +589,7 @@ func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability,
 	// is still caught here, before a token no verifier would accept leaves:
 	// the walk reaches past the bound only from a chain too deep.
 	if _, err := i.store.IsRevoked(ctx, child.ID); err != nil {
-		return Capability{}, "", revocationLookupFailed(fmt.Sprintf("delegate from parent %s", parent.ID), err)
+		return Capability{}, "", revocationLookupFailed(fmt.Sprintf("delegate from parent %s", parent.ID), mintRefusal(err))
 	}
 	return child, token, nil
 }

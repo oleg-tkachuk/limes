@@ -1255,8 +1255,11 @@ Revoking a capability revokes everything delegated from it, with or
 without the flag: `IsRevoked` answers for the whole chain. `CascadeChildren`
 also writes a revocation entry per descendant, so the audit trail names each
 capability that was stopped. A chain is at most `MaxDelegationDepth` (64)
-ancestors deep; past it `Delegate` returns `ErrDelegationTooDeep`, a kind of
-`ErrRevoked` (401), and no token.
+ancestors deep; past it `Delegate` returns `ErrDelegationDepthExceeded`
+(403, `delegation_depth_exceeded`) and no token. The parent stays valid:
+delegate from a shallower capability instead. A chain already deeper than
+the bound, which only a store that does not refuse one can hold, is refused
+at verification as `ErrDelegationTooDeep`, a kind of `ErrRevoked` (401).
 
 Records do not stay forever. A housekeeping job calls
 `Store.Purge(ctx, limes.PurgeRequest{ExpiredFor: retention})` on a timer, and
@@ -1818,7 +1821,8 @@ the tenant erased: a request verified before the erase, or a late cost of a
 record `Purge` has not taken yet, is refused `ErrTenantErased` (a kind of
 `ErrRevoked`) by `Bump`, `Charge`, `Reserve` and `SetTenantBudget` rather
 than counted again, and `Insert` refuses a new record of the tenant, which
-the erase's revocation would have missed. `PurgeOrphans` forgets the mark
+the erase's revocation would have missed: `Issue` and `Delegate` return that
+refusal as `ErrTenantGone` (410), no revocation. `PurgeOrphans` forgets the mark
 once none of the tenant's records is left; run between the two calls below,
 it lets a new root record in, which the records' erase then revokes.
 
@@ -1854,7 +1858,10 @@ from a failure: return
 `ErrUnknownTenant` for a tenant it does not hold and `ErrTenantDeleted` for one
 in the trash. A store that keeps each tenant's rows apart by the call's
 context returns `ErrScopeMismatch` for a call scoped to another tenant than
-the one its request names, rather than answer as if the rows were not there. `Issue` and `Delegate` pass them through, wrapped, beside
+the one its request names, rather than answer as if the rows were not there. `Issue` and `Delegate` pass them through, wrapped, but for
+two the store shares with the verify path: `ErrDelegationTooDeep` becomes
+`ErrDelegationDepthExceeded` and `ErrTenantErased` becomes `ErrTenantGone`,
+since a mint presents no capability to call revoked. Both sit beside
 `ErrInvalidRequest`, which every check on the request itself matches — a
 missing tenant id, an empty audience entry, a negative TTL or one ending within
 the second it is issued (a token's times are whole seconds), a `NotBefore` at

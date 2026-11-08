@@ -140,6 +140,16 @@ beside it where a challenge or an error detail wants one. An error that is
 no refusal — `not_found`, `conflict` — has a code and a category and no
 reason.
 
+`tenant_erased` and `delegation_too_deep` answer a presented capability:
+a metering call, a revocation lookup. Where a store gives the same answer to
+a mint — `Store.Insert` refusing a child past `MaxDelegationDepth`, or a
+record of an erased tenant — no capability was presented, and none of the
+caller's stopped working, so the `Issuer` answers it as the mint's refusal:
+`Delegate` returns `delegation_depth_exceeded` (403, `denied`; the parent
+stays valid, delegate from a shallower one), `Issue` and `Delegate` return
+`tenant_gone` (410, `not_found`). Neither matches `limes.ErrRevoked` nor
+has a reason, and the store's own error stays in the text only.
+
 ## Retrying
 
 - **A 5xx** is the server's to fix, or its upstream's.
@@ -294,10 +304,12 @@ unauthenticated code, not to its permission-denied one.
 | `cursor_mismatch` | 400 | `limes.ErrCursorMismatch` |  |  | The cursor is of another listing | `invalid` |
 | `invalid_request` | 400 | `limes.ErrInvalidRequest` |  |  | The request is invalid | `invalid` |
 | `delegation_too_wide` | 403 | `limes.ErrDelegationTooWide` |  |  | The delegation asks for more than its parent holds | `denied` |
+| `delegation_depth_exceeded` | 403 | `limes.ErrDelegationDepthExceeded` |  |  | The delegation would exceed the maximum chain depth | `denied` |
 | `unknown_kid` | 401 | `jwks.ErrUnknownKID` |  |  | The key id names no key | `unauthenticated` |
 | `not_found` | 404 | `limes.ErrNotFound` |  |  | Not found | `not_found` |
 | `unknown_tenant` | 404 | `limes.ErrUnknownTenant` |  |  | The tenant is unknown | `not_found` |
 | `tenant_deleted` | 410 | `limes.ErrTenantDeleted` |  |  | The tenant is deleted | `not_found` |
+| `tenant_gone` | 410 | `limes.ErrTenantGone` |  |  | The tenant is erased | `not_found` |
 | `scope_mismatch` | 500 | `limes.ErrScopeMismatch` |  |  | The call is scoped to another tenant than its request names | `internal` |
 | `proof_unsupported` | 500 | `limes.ErrProofUnsupported` |  |  | The capability is bound to a key and no proof is checked | `internal` |
 | `no_revocation_lineage` | 502 | `limes.ErrNoRevocationLineage` |  |  | The revocation upstream names no lineage | `unavailable` |
@@ -441,10 +453,12 @@ type means the same for the whole of v1.
 | <a id="cursor_mismatch"></a>`cursor_mismatch` | 400 | [limes's codes](#limess-codes) |
 | <a id="invalid_request"></a>`invalid_request` | 400 | [limes's codes](#limess-codes) |
 | <a id="delegation_too_wide"></a>`delegation_too_wide` | 403 | [limes's codes](#limess-codes) |
+| <a id="delegation_depth_exceeded"></a>`delegation_depth_exceeded` | 403 | [limes's codes](#limess-codes) |
 | <a id="unknown_kid"></a>`unknown_kid` | 401 | [limes's codes](#limess-codes) |
 | <a id="not_found"></a>`not_found` | 404 | [limes's codes](#limess-codes) |
 | <a id="unknown_tenant"></a>`unknown_tenant` | 404 | [limes's codes](#limess-codes) |
 | <a id="tenant_deleted"></a>`tenant_deleted` | 410 | [limes's codes](#limess-codes) |
+| <a id="tenant_gone"></a>`tenant_gone` | 410 | [limes's codes](#limess-codes) |
 | <a id="scope_mismatch"></a>`scope_mismatch` | 500 | [limes's codes](#limess-codes) |
 | <a id="proof_unsupported"></a>`proof_unsupported` | 500 | [limes's codes](#limess-codes) |
 | <a id="no_revocation_lineage"></a>`no_revocation_lineage` | 502 | [limes's codes](#limess-codes) |
