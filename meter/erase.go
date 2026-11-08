@@ -19,7 +19,9 @@ type TenantUsageEraser interface {
 	// the tenant again: Bump, Charge, Reserve and SetTenantBudget for it
 	// return ErrTenantErased, and so does the limes.Store's Insert. PurgeOrphans forgets the mark once none of the
 	// tenant's records is left, and with it any call that could be metered.
-	EraseTenantUsage(ctx context.Context, req EraseTenantUsageRequest) error
+	//
+	// It returns what it removed (EraseTenantUsageResult).
+	EraseTenantUsage(ctx context.Context, req EraseTenantUsageRequest) (EraseTenantUsageResult, error)
 }
 
 // EraseTenantUsageRequest names the tenant EraseTenantUsage erases.
@@ -33,4 +35,20 @@ func (r EraseTenantUsageRequest) Validate() error {
 		return invalidRequest("erase tenant usage: tenant id required")
 	}
 	return nil
+}
+
+// EraseTenantUsageResult is what one EraseTenantUsage removed. A store
+// erases a tenant in one call today; a later request that bounds an erase
+// to a batch reports here whether more is left.
+type EraseTenantUsageResult struct {
+	// Counters counts the capabilities whose counters it removed, and
+	// Copies the Biscuit copies whose own counters it removed.
+	Counters int64
+	Copies   int64
+	// Holds counts the open holds (Reserve) it removed; a lease goes with
+	// its capability's counters.
+	Holds int64
+	// Charges counts the entries of the charges ledger it removed.
+	Charges int64
+	_       noCompare
 }

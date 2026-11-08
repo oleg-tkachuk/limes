@@ -17,7 +17,7 @@ import (
 // the tenant can be metered then.
 func TestPurgeOrphansForgetsAnErasedTenantWithNoRecordLeft(t *testing.T) {
 	ctx, u, capID, tenant := newCopyFixture(t)
-	if err := u.EraseTenantUsage(ctx, meter.EraseTenantUsageRequest{TenantID: tenant}); err != nil {
+	if _, err := u.EraseTenantUsage(ctx, meter.EraseTenantUsageRequest{TenantID: tenant}); err != nil {
 		t.Fatal(err)
 	}
 	setBudget := func() error {

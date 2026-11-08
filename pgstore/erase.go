@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 	"uuid"
 
@@ -175,7 +176,7 @@ func (s *Store) EraseTenant(ctx context.Context, req limes.EraseTenantRequest, o
 		if out, err = s.eraseRecords(ctx, tx, req); err != nil {
 			return err
 		}
-		if err := eraseUsage(ctx, tx, meter.EraseTenantUsageRequest{TenantID: req.TenantID}); err != nil {
+		if _, err := eraseUsage(ctx, tx, meter.EraseTenantUsageRequest{TenantID: req.TenantID}); err != nil {
 			return err
 		}
 		if onErased != nil {
@@ -212,32 +213,76 @@ func (s *Store) eraseRecords(ctx context.Context, tx pgx.Tx, req limes.EraseTena
 
 // EraseTenantUsage implements meter.TenantUsageEraser: it marks the tenant
 // erased and removes its holds, aggregate, counters, copies' counters and
-// charges in one transaction scoped to the tenant (Config.CheckScope).
-func (s *UsageStore) EraseTenantUsage(ctx context.Context, req meter.EraseTenantUsageRequest) error {
+// charges in one transaction scoped to the tenant (Config.CheckScope),
+// counting the rows each statement removed.
+func (s *UsageStore) EraseTenantUsage(ctx context.Context, req meter.EraseTenantUsageRequest) (meter.EraseTenantUsageResult, error) {
 	if err := req.Validate(); err != nil {
-		return err
+		return meter.EraseTenantUsageResult{}, err
 	}
-	return s.inTenantTx(ctx, req.TenantID, func(tx pgx.Tx) error {
+	var out meter.EraseTenantUsageResult
+	err := s.inTenantTx(ctx, req.TenantID, func(tx pgx.Tx) error {
 		if err := markErased(ctx, tx, req.TenantID, s.clock()); err != nil {
 			return err
 		}
-		return eraseUsage(ctx, tx, req)
+		var err error
+		out, err = eraseUsage(ctx, tx, req)
+		return err
 	})
+	if err != nil {
+		// A call scoped to another tenant is refused, not failed.
+		level := slog.LevelError
+		if errors.Is(err, limes.ErrScopeMismatch) {
+			level = slog.LevelWarn
+		}
+		s.log.Log(ctx, level, "pgstore: erasing a tenant's usage did not commit",
+			slog.String(logKeyOp, opEraseTenantUsage), slog.String(logKeyTenant, req.TenantID.String()), slog.Any(logKeyError, err))
+		return meter.EraseTenantUsageResult{}, err
+	}
+	s.log.InfoContext(ctx, "pgstore: erased a tenant's usage",
+		slog.String(logKeyOp, opEraseTenantUsage), slog.String(logKeyTenant, req.TenantID.String()),
+		slog.Int64(logKeyCounters, out.Counters), slog.Int64(logKeyCopies, out.Copies),
+		slog.Int64(logKeyHolds, out.Holds), slog.Int64(logKeyCharges, out.Charges))
+	return out, nil
 }
 
+// opEraseTenantUsage names EraseTenantUsage on its log lines; logKeyTenant
+// is the tenant a line is about, and logKeyCounters, logKeyCopies,
+// logKeyHolds and logKeyCharges what an erase removed
+// (meter.EraseTenantUsageResult).
+const (
+	opEraseTenantUsage = "EraseTenantUsage"
+	logKeyTenant       = "tenant"
+	logKeyCounters     = "counters"
+	logKeyCopies       = "copies"
+	logKeyHolds        = "holds"
+	logKeyCharges      = "charges"
+)
+
 // eraseUsage locks the tenant's meter rows in the meter's order, then
-// removes them and the ledger.
-func eraseUsage(ctx context.Context, tx pgx.Tx, req meter.EraseTenantUsageRequest) error {
-	steps := []string{
-		sqlLockTenantHolds, sqlLockTenantUsage, sqlLockTenantCopies, sqlLockTenant,
-		sqlDeleteTenantHolds, sqlDeleteTenantBudget, sqlDeleteTenantUsage, sqlDeleteTenantCopies, sqlDeleteTenantCharges,
+// removes them and the ledger, and counts what each delete removed.
+func eraseUsage(ctx context.Context, tx pgx.Tx, req meter.EraseTenantUsageRequest) (meter.EraseTenantUsageResult, error) {
+	var out meter.EraseTenantUsageResult
+	steps := []struct {
+		sql     string
+		removed *int64
+	}{
+		{sql: sqlLockTenantHolds}, {sql: sqlLockTenantUsage}, {sql: sqlLockTenantCopies}, {sql: sqlLockTenant},
+		{sql: sqlDeleteTenantHolds, removed: &out.Holds},
+		{sql: sqlDeleteTenantBudget},
+		{sql: sqlDeleteTenantUsage, removed: &out.Counters},
+		{sql: sqlDeleteTenantCopies, removed: &out.Copies},
+		{sql: sqlDeleteTenantCharges, removed: &out.Charges},
 	}
-	for _, sql := range steps {
-		if _, err := tx.Exec(ctx, sql, req.TenantID); err != nil {
-			return err
+	for _, step := range steps {
+		tag, err := tx.Exec(ctx, step.sql, req.TenantID)
+		if err != nil {
+			return meter.EraseTenantUsageResult{}, err
+		}
+		if step.removed != nil {
+			*step.removed = tag.RowsAffected()
 		}
 	}
-	return nil
+	return out, nil
 }
 
 // lockAll runs a locking query for the tenant req names and drops its rows.
