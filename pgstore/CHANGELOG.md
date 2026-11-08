@@ -2,6 +2,20 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.70.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.69.1...pgstore%2Fv0.70.0) (2026-11-07)
+
+### ⚠ BREAKING CHANGES
+
+* **pgstore:** run onRefunded on the refund's transaction
+
+### Features
+
+* **pgstore:** run onRefunded on the refund's transaction ([30545de](https://github.com/oleg-tkachuk/limes/commit/30545de7dd93af368ae5c4f90581812d32fe1465))
+
+### Dependencies
+
+* require limes v0.171.0
+
 ## [0.69.1](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.69.0...pgstore%2Fv0.69.1) (2026-11-06)
 
 ### Dependencies

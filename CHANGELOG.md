@@ -2,6 +2,16 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.171.0](https://github.com/oleg-tkachuk/limes/compare/v0.170.0...v0.171.0) (2026-11-07)
+
+### ⚠ BREAKING CHANGES
+
+* **meter:** run a callback on the refund's transaction
+
+### Features
+
+* **meter:** run a callback on the refund's transaction ([f12589e](https://github.com/oleg-tkachuk/limes/commit/f12589e718c91580051c5913b6994a497422da7c))
+
 ## [0.170.0](https://github.com/oleg-tkachuk/limes/compare/v0.169.0...v0.170.0) (2026-11-06)
 
 ### Features
