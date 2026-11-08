@@ -962,7 +962,9 @@ A revocation's line names the capability, or a bulk revoke's tenant and
 selectors, with the request's `actor` and `note`, and what the store
 answered: `already_revoked` and the `prior` disposition, or how many it
 `revoked`, in which `tenants`, and whether there is `more`. A Biscuit copy is
-named by its capability alone. A `Revoker` built without the store a method
+named by its capability alone. A store call that returned an error may still
+have written, so a `Revoker` given a cache clears it as on success, and its
+line says `cache_cleared`. A `Revoker` built without the store a method
 needs (`RevokerConfig.Bulk`, `RevokerConfig.Biscuits`) fails that method
 with `ErrInvalidConfig`, logged at ERROR.
 

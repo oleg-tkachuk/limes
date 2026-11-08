@@ -44,13 +44,16 @@ type RevokerConfig struct {
 	Biscuits BiscuitRevocationStore
 
 	// Cache is this process's RevocationCache, cleared of what each
-	// revocation outdates as soon as the store has carried it out:
-	// ClearRevoked of the capability after Revoke, which reaches every
-	// descendant the cache holds an answer for; Clear after RevokeMatching,
-	// whose result names no capability, and after RevokeBiscuit, as a
-	// copy's revocation takes. It reaches no other process's cache: there,
-	// a revocation is seen through pgstore.RevocationWatcher or once the
-	// cache's TTL runs out. Nil: no cache is cleared.
+	// revocation outdates as soon as the store returns: ClearRevoked of the
+	// capability after Revoke, which reaches every descendant the cache
+	// holds an answer for; Clear after RevokeMatching, whose result names
+	// no capability, and after RevokeBiscuit, as a copy's revocation takes.
+	// A store that returns an error is cleared after too: a write may have
+	// committed before the error — a context ended, a connection lost on
+	// the commit — and a dropped answer costs only a lookup. It reaches no
+	// other process's cache: there, a revocation is seen through
+	// pgstore.RevocationWatcher or once the cache's TTL runs out. Nil: no
+	// cache is cleared.
 	Cache *RevocationCache
 
 	// Logger logs every revocation, naming capabilities by id and never
@@ -96,7 +99,8 @@ func NewRevoker(cfg RevokerConfig) (*Revoker, error) {
 }
 
 // Revoke revokes one capability through the store (RevocationStore.Revoke),
-// then drops what that outdates from the cache.
+// then drops what that outdates from the cache, whether or not the store
+// returned an error.
 func (r *Revoker) Revoke(ctx context.Context, req RevokeRequest) (RevokeResult, error) {
 	start := time.Now()
 	attrs := []slog.Attr{
@@ -106,12 +110,12 @@ func (r *Revoker) Revoke(ctx context.Context, req RevokeRequest) (RevokeResult, 
 		slog.Bool(logKeyCascade, req.CascadeChildren),
 	}
 	res, err := r.store.Revoke(ctx, req)
-	if err != nil {
-		r.refused(ctx, start, RevokerErrorEvent{Operation: RevokerOperationRevoke, CapabilityID: req.CapabilityID, Err: err}, attrs)
-		return res, err
-	}
 	if r.cache != nil {
 		r.cache.ClearRevoked(req.CapabilityID)
+	}
+	if err != nil {
+		r.refused(ctx, start, RevokerErrorEvent{Operation: RevokerOperationRevoke, CapabilityID: req.CapabilityID, Err: err}, r.withCacheCleared(attrs))
+		return res, err
 	}
 	attrs = append(attrs,
 		slog.Bool(logKeyAlreadyRevoked, res.AlreadyRevoked),
@@ -125,7 +129,8 @@ func (r *Revoker) Revoke(ctx context.Context, req RevokeRequest) (RevokeResult, 
 }
 
 // RevokeMatching revokes a batch of the capabilities matching req through
-// the BulkRevoker, then clears the cache. Without one it is ErrInvalidConfig.
+// the BulkRevoker, then clears the cache, whether or not it returned an
+// error. Without one it is ErrInvalidConfig.
 func (r *Revoker) RevokeMatching(ctx context.Context, req RevokeMatchingRequest) (RevokeMatchingResult, error) {
 	start := time.Now()
 	attrs := matchingAttrs(req)
@@ -134,12 +139,12 @@ func (r *Revoker) RevokeMatching(ctx context.Context, req RevokeMatchingRequest)
 		return RevokeMatchingResult{}, errNoRevokerBulk
 	}
 	res, err := r.bulk.RevokeMatching(ctx, req)
-	if err != nil {
-		r.refused(ctx, start, RevokerErrorEvent{Operation: RevokerOperationRevokeMatching, TenantID: req.TenantID, Err: err}, attrs)
-		return res, err
-	}
 	if r.cache != nil {
 		r.cache.Clear()
+	}
+	if err != nil {
+		r.refused(ctx, start, RevokerErrorEvent{Operation: RevokerOperationRevokeMatching, TenantID: req.TenantID, Err: err}, r.withCacheCleared(attrs))
+		return res, err
 	}
 	tenants := make([]string, len(res.Tenants))
 	for i, t := range res.Tenants {
@@ -158,7 +163,7 @@ func (r *Revoker) RevokeMatching(ctx context.Context, req RevokeMatchingRequest)
 }
 
 // RevokeBiscuit revokes one Biscuit copy through the BiscuitRevocationStore,
-// then clears the cache. Without one it is ErrInvalidConfig. The copy is
+// then clears the cache, whether or not it returned an error. Without one it is ErrInvalidConfig. The copy is
 // logged by its capability's id alone.
 func (r *Revoker) RevokeBiscuit(ctx context.Context, req RevokeBiscuitRequest) (RevokeBiscuitResult, error) {
 	start := time.Now()
@@ -173,12 +178,12 @@ func (r *Revoker) RevokeBiscuit(ctx context.Context, req RevokeBiscuitRequest) (
 		return RevokeBiscuitResult{}, errNoRevokerBiscuits
 	}
 	res, err := r.biscuits.RevokeBiscuit(ctx, req)
-	if err != nil {
-		r.refused(ctx, start, RevokerErrorEvent{Operation: RevokerOperationRevokeBiscuit, CapabilityID: id, Err: err}, attrs)
-		return res, err
-	}
 	if r.cache != nil {
 		r.cache.Clear()
+	}
+	if err != nil {
+		r.refused(ctx, start, RevokerErrorEvent{Operation: RevokerOperationRevokeBiscuit, CapabilityID: id, Err: err}, r.withCacheCleared(attrs))
+		return res, err
 	}
 	attrs = append(attrs, slog.Bool(logKeyAlreadyRevoked, res.AlreadyRevoked))
 	r.revoked(ctx, start, RevokedEvent{
@@ -186,6 +191,16 @@ func (r *Revoker) RevokeBiscuit(ctx context.Context, req RevokeBiscuitRequest) (
 		Actor: req.Actor, Note: req.Note, AlreadyRevoked: res.AlreadyRevoked,
 	}, attrs)
 	return res, nil
+}
+
+// withCacheCleared is attrs, saying that a store call that returned an
+// error still cleared the cache, when the revoker has one: whether the
+// call wrote is unknown, so what it may have outdated is dropped.
+func (r *Revoker) withCacheCleared(attrs []slog.Attr) []slog.Attr {
+	if r.cache == nil {
+		return attrs
+	}
+	return append(attrs, slog.Bool(logKeyCacheCleared, true))
 }
 
 // matchingAttrs name a RevokeMatching request: its tenant, or every tenant,
