@@ -388,15 +388,10 @@ func checkTokenTypes(form url.Values) error {
 }
 
 // checkTargets refuses a resource that is no absolute URI without a
-// fragment (RFC 8707 §2).
+// fragment (checkResources) before the client is authenticated, as
+// Exchange and Narrow refuse it after.
 func checkTargets(form url.Values) error {
-	for _, resource := range form[paramResource] {
-		u, err := url.Parse(resource)
-		if err != nil || !u.IsAbs() || u.Fragment != "" || strings.Contains(resource, "#") {
-			return fmt.Errorf("%w: %s %q is not an absolute URI without a fragment", ErrInvalidTarget, paramResource, resource)
-		}
-	}
-	return nil
+	return checkResources(form[paramResource])
 }
 
 // checkDetails refuses authorization_details that is not a JSON array of
