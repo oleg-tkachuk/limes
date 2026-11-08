@@ -342,8 +342,10 @@ func admitLeased(c *counters, req meter.ChargeRequest, unit string, below []ance
 
 // Lease implements meter.Leaser in one transaction scoped to the subject's
 // tenant: the chain's counters locked and the tenant's aggregate last, as a
-// Reserve locks them. A lease to settle first is settled in a transaction of
-// its own, and the lease opened in another.
+// Reserve locks them. An open lease topped up is settled in that
+// transaction, under those locks, and a new one opened; one to settle first
+// — expired, or its chain changed — is settled in a transaction of its own,
+// and the lease opened in another.
 func (s *UsageStore) Lease(ctx context.Context, req meter.LeaseRequest) (meter.Lease, error) {
 	if err := req.Validate(); err != nil {
 		return meter.Lease{}, err
@@ -398,11 +400,11 @@ func (s *UsageStore) lease(ctx context.Context, tx pgx.Tx, req meter.LeaseReques
 		}
 	}
 	self := c.usage[capID]
-	// A lease opened in a period the tenant has since closed is settled
-	// before an amount is added: what it spends from now on is this
-	// period's, and settlement counts a lease's spend in its own period.
-	closed := req.Amount > 0 && self.lease.period != c.tenant.period
-	if self.lease.held() && (!self.lease.openAt(asOf) || !slices.Equal(self.lease.ancestors, ancestorIDs(ancestors)) || closed) {
+	// A lease that expired, or whose chain changed, is settled on its own
+	// first: settling it locks the ancestors it was held against. An open
+	// one is settled below, by the top-up, in its own period, so one of a
+	// period the tenant has since closed charges that period nothing now.
+	if self.lease.held() && (!self.lease.openAt(asOf) || !slices.Equal(self.lease.ancestors, ancestorIDs(ancestors))) {
 		return meter.Lease{}, errLeaseStale
 	}
 	refuse := func(err error) error { return err }
@@ -416,30 +418,49 @@ func (s *UsageStore) lease(ctx context.Context, tx pgx.Tx, req meter.LeaseReques
 	if err != nil {
 		return meter.Lease{}, err
 	}
-	l := self.lease
-	if !l.held() {
-		l = leaseState{id: uuid.New(), ancestors: ancestorIDs(ancestors), period: c.tenant.period}
+	l := leaseState{
+		id: uuid.New(), amount: req.Amount, requests: req.Requests,
+		expires: expires.Truncate(timeResolution), ancestors: ancestorIDs(ancestors), period: c.tenant.period,
 	}
-	l.amount += req.Amount
-	l.requests += req.Requests
-	if expires = expires.Truncate(timeResolution); expires.After(l.expires) {
-		l.expires = expires
+	// A top-up settles the open lease, so its spend reaches the chain, and
+	// opens one under a new id of what it had left and the top-up: a
+	// refund of a charge taken under the old one goes to the chain the
+	// settlement charged (refundLeased). The ceilings were checked with the
+	// old lease held, which equals checking the new one once the old is
+	// settled.
+	settled := self.lease.held()
+	if settled {
+		old := self.lease
+		settleLeaseInto(c, self, old)
+		l.amount += old.remaining()
+		l.requests += old.requestsRemaining()
+		s.log.DebugContext(ctx, "pgstore: settled a lease topped up and opened it anew",
+			slog.String(logKeyOp, retriedLease), slog.String(logKeyCapability, capID.String()),
+			slog.Int64(logKeySettledSpent, int64(old.spent)), slog.Int64(logKeyCarried, int64(old.remaining())))
 	}
 	for _, id := range held {
 		u := c.usage[id]
-		u.reserved += req.Amount
-		u.reservedRequests += req.Requests
+		u.reserved += l.amount
+		u.reservedRequests += l.requests
 		u.unit = cmp.Or(u.unit, unit)
 	}
 	// A lease of requests alone holds nothing of the tenant's, whose
-	// aggregate it leaves as it is.
-	c.tenant.reserved += req.Amount
+	// aggregate it leaves as it is; a settled one moved it.
+	c.tenant.reserved += l.amount
 	set := heldStmt{sql: sqlSetLease, args: []any{capID, l.id, int64(l.amount), int64(l.spent), l.expires, l.ancestors, l.period, l.requests, l.requestsSpent}}
-	if err := c.write(ctx, tx, now, req.Amount > 0, set); err != nil {
+	if err := c.write(ctx, tx, now, req.Amount > 0 || settled && c.tenant.persisted, set); err != nil {
 		return meter.Lease{}, err
 	}
 	return leaseView(capID, tenantID, unit, l), nil
 }
+
+// logKeySettledSpent is what a lease settled by a top-up had spent, which
+// reached the chain; logKeyCarried what it had left, which the new lease
+// holds.
+const (
+	logKeySettledSpent = "settled_spent"
+	logKeyCarried      = "carried"
+)
 
 // leaseView is l as meter.Lease gives it.
 func leaseView(capID, tenantID uuid.UUID, unit string, l leaseState) meter.Lease {
@@ -527,6 +548,22 @@ func (s *UsageStore) settleLease(ctx context.Context, tx pgx.Tx, capID uuid.UUID
 		return meter.Lease{}, errLeaseMoved
 	}
 	l := self.lease
+	settleLeaseInto(c, self, l)
+	end := heldStmt{sql: sqlClearLease, args: []any{capID}}
+	if err := c.write(ctx, tx, now, c.tenant.persisted, end); err != nil {
+		return meter.Lease{}, err
+	}
+	return leaseView(capID, tenantID, unit, l), nil
+}
+
+// settleLeaseInto settles l, the lease of self, on c, which holds self, the
+// ancestors l is held against and the tenant's aggregate, locked: what l
+// spent is charged to the ancestors and the tenant — the tenant's while l's
+// period is still the current one — and the requests it made counted on the
+// ancestors; what it holds is released from them and from self, which spent
+// its share, and counted its requests, as they were made. SettleLease and a
+// top-up (lease) settle through it.
+func settleLeaseInto(c *counters, self *usageRow, l leaseState) {
 	self.reserved = max0(self.reserved - l.remaining())
 	self.reservedRequests = max(self.reservedRequests-l.requestsRemaining(), 0)
 	for _, id := range l.ancestors {
@@ -543,11 +580,6 @@ func (s *UsageStore) settleLease(ctx context.Context, tx pgx.Tx, capID uuid.UUID
 			c.tenant.spent += l.spent
 		}
 	}
-	end := heldStmt{sql: sqlClearLease, args: []any{capID}}
-	if err := c.write(ctx, tx, now, c.tenant.persisted, end); err != nil {
-		return meter.Lease{}, err
-	}
-	return leaseView(capID, tenantID, unit, l), nil
 }
 
 // sqlMatchingLeasesHead and sqlMatchingLeasesTail surround the selectors of
