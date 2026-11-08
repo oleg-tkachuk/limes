@@ -30,6 +30,11 @@
 // overflow, and, when the Ledger is a meter.LedgerHousekeeping, PurgeCharges
 // to its retention. They need a real ledger, not a fake.
 //
+// Concurrent calls that each promise to move one thing once — refunds of one
+// charge, settles and releases of one hold, top-ups of one lease, charges
+// racing EraseTenantUsage, writes of a tenant ceiling at one version — are
+// held to moving it once.
+//
 // Several checks call the store from many goroutines at once. Give the Env a
 // connection pool of one or two connections: a call that takes a second
 // connection while it holds its transaction then deadlocks here, not under a
@@ -498,6 +503,15 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{Name: "ASettleWritesNoRowForARemovedAncestor", Run: checkSettleAfterRemovedAncestor},
 		{Name: "ASettleCountsOnAnAncestorWhoseRowWasDropped", Run: checkSettleAfterAncestorDropped},
 		{Name: "ConcurrentChargesKeepTheCeiling", Run: checkConcurrentCeiling},
+		{Name: "ConcurrentRefundsNeverPassTheCharge", Run: checkConcurrentRefunds},
+		{Name: "ConcurrentFullRefundsReturnTheChargeOnce", Run: checkConcurrentFullRefunds},
+		{Name: "AKeyedRefundRefundsOnceConcurrently", Run: checkConcurrentKeyedRefunds},
+		{Name: "ConcurrentSettlesChargeTheHoldOnce", Run: checkConcurrentSettles},
+		{Name: "ConcurrentReleasesReturnTheHoldOnce", Run: checkConcurrentReleases},
+		{Name: "ASettleRacingAReleaseEndsTheHoldOnce", Run: checkSettleRacingRelease},
+		{Name: "ConcurrentLeaseTopUpsKeepTheCeiling", Run: checkConcurrentLeaseTopUps},
+		{Name: "ChargesRacingEraseTenantUsageLeaveNothing", Run: checkEraseRacingCharges},
+		{Name: "ConcurrentBudgetWritesAtOneVersionApplyOnce", Run: checkConcurrentBudgetWrites},
 		{Name: "SiblingsChargingAtOnceKeepTheirRootsCeiling", Run: checkSiblingCharges},
 		{Name: "SiblingsHoldingAtOnceKeepTheirRootsCeiling", Run: checkSiblingHolds},
 		{Name: "CapabilitiesChargingAtOnceKeepTheTenantCeiling", Run: checkSiblingTenantCharges},
