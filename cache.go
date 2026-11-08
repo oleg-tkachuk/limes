@@ -203,9 +203,10 @@ type RevocationCacheConfig struct {
 	// signature, and one per set of ids asked about together, keyed by a
 	// SHA-256 digest of the set, whatever its size. Over a RevocationLineageLookup a
 	// capability's "not revoked" answer keeps its ancestors' ids beside it,
-	// up to MaxDelegationDepth of them: about 16 bytes per generation, so a
-	// full cache of chains 64 deep holds some 100 MB of them at the default
-	// bound, against 32 to 80 bytes for chains two to five deep.
+	// up to MaxDelegationDepth of them, and again in an index ClearRevoked
+	// reads them by: about 32 bytes per generation, so a full cache of
+	// chains 64 deep holds some 200 MB of them at the default bound, against
+	// 64 to 160 bytes for chains two to five deep.
 	MaxEntries int
 	// MaxStale is how long past the TTL in force an answer stands in for
 	// an upstream that fails: the question is answered as it was then, in

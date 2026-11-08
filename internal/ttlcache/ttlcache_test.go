@@ -780,6 +780,89 @@ func TestTheOrderStaysBoundedUnderForget(t *testing.T) {
 	}
 }
 
+// An answer cached again with other tags is no longer dropped by a Forget
+// of a tag it named before, nor is one Forget already dropped counted
+// twice: the index of tags is read against the answer each key holds now.
+func TestForgetReadsTheTagsAnAnswerHoldsNow(t *testing.T) {
+	c, _ := newCache(10)
+	var calls atomic.Int32
+	ctx := t.Context()
+	if _, _, err := c.GetTagged(ctx, "child", tagged(false, &calls, "parent")); err != nil {
+		t.Fatal(err)
+	}
+	if dropped := c.Forget([]string{"child"}); dropped != 1 {
+		t.Fatalf("Forget of the key dropped %d answers, want 1", dropped)
+	}
+	if _, _, err := c.GetTagged(ctx, "child", tagged(false, &calls, "elsewhere")); err != nil {
+		t.Fatal(err)
+	}
+	if dropped := c.Forget([]string{"parent"}); dropped != 0 {
+		t.Errorf("Forget of a tag the answer no longer names dropped %d, want 0", dropped)
+	}
+	n := calls.Load()
+	if _, _, err := c.GetTagged(ctx, "child", tagged(false, &calls)); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != n {
+		t.Error("the answer cached with other tags was dropped")
+	}
+	if dropped := c.Forget([]string{"elsewhere", "child", "elsewhere"}); dropped != 1 {
+		t.Errorf("Forget of a key and its tag dropped %d answers, want 1", dropped)
+	}
+}
+
+// A tagged answer is dropped by a Forget of its tag whichever shard the tag
+// and the answer hash to, in a cache big enough to have every shard.
+func TestForgetOfATagReachesEveryShard(t *testing.T) {
+	c, _ := newCache(maxShards * minShardEntries)
+	var calls atomic.Int32
+	ctx := t.Context()
+	const children = maxShards * orderSlack
+	for i := range children {
+		if _, _, err := c.GetTagged(ctx, keyName(i), tagged(false, &calls, "parent")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if dropped := c.Forget([]string{"parent"}); dropped != children {
+		t.Errorf("Forget dropped %d answers, want %d", dropped, children)
+	}
+	if c.Len() != 0 {
+		t.Errorf("%d answers left after Forget", c.Len())
+	}
+}
+
+// Tagged answers that make room, expire or are cached again leave places
+// in the index no entry owns; the index drops them, so it stays within
+// taggedSlack places per tag the entries hold, plus the bound, however
+// many come and go without a Forget.
+func TestTheTagIndexStaysBounded(t *testing.T) {
+	const (
+		bound = 4
+		tags  = 3
+	)
+	c, clk := newCache(bound)
+	var calls atomic.Int32
+	for round := range forgetRounds {
+		names := make([]string, tags)
+		for i := range names {
+			names[i] = keyName(round%fuzzKeys) + strconv.Itoa(i)
+		}
+		if _, _, err := c.GetTagged(t.Context(), strconv.Itoa(round%(bound*orderSlack)), tagged(false, &calls, names...)); err != nil {
+			t.Fatal(err)
+		}
+		if round%bound == 0 {
+			clk.advance(testTTL)
+		}
+		s := c.shards[0]
+		s.mu.RLock()
+		indexed, live := s.indexed, s.liveTags
+		s.mu.RUnlock()
+		if limit := taggedSlack*live + bound + tags; indexed > limit {
+			t.Fatalf("round %d: %d places indexed, want at most %d", round, indexed, limit)
+		}
+	}
+}
+
 // An entry seeded with an older answer's time sits behind later places,
 // out of the sweep's reach; once it expires, room is made by dropping it,
 // not the live entry ahead of it.
