@@ -651,12 +651,15 @@ func (s *UsageStore) Reserve(ctx context.Context, req meter.ReserveRequest) (met
 			})
 		})
 	}
-	err = attempt()
 	// A hold under the id committed while this call waited for its locks:
 	// it is answered afresh, as a replay or a conflict.
-	if errors.Is(err, errHoldTakenAfterLock) {
-		err = attempt()
-	}
+	err = s.retryLostRace(ctx, lostRace{
+		op: retriedReserve, lost: errHoldTakenAfterLock, gaveUp: errHoldKeptTaken,
+		about: []any{
+			slog.String(logKeyCapability, req.Subject.CapabilityID().String()),
+			slog.String(logKeyReservation, req.ReservationID.String()),
+		},
+	}, attempt, noneBetween)
 	if err != nil {
 		return meter.Reservation{}, err
 	}
@@ -665,7 +668,8 @@ func (s *UsageStore) Reserve(ctx context.Context, req meter.ReserveRequest) (met
 
 // errHoldTakenAfterLock rolls back a keyed Reserve that found its id taken
 // by another call once it held the locks; Reserve runs again, and answers
-// from what that call committed.
+// from what that call committed — or, losing again, is refused as
+// errHoldKeptTaken (retryLostRace).
 var errHoldTakenAfterLock = fmt.Errorf("%w: pgstore: reservation id taken while the call waited for its locks", limes.ErrInternal)
 
 // reserved answers a Reserve whose ReservationID is on record already, as a
