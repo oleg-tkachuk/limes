@@ -80,6 +80,17 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
   policy, as `jwks.Remote` refuses it; the client passed in is copied, not
   changed. A test serving keys from `httptest.NewServer` serves them from
   `httptest.NewTLSServer` and passes its `Client()`.
+- `jwtverify.DefaultAlgorithms` is a function, `DefaultAlgorithms()`,
+  returning a fresh slice each call, where it was an exported variable
+  that served as the allow-list: a package that changed it widened what
+  every Verifier accepted.
+
+  ```go
+  // before
+  algs := jwtverify.DefaultAlgorithms
+  // after
+  algs := jwtverify.DefaultAlgorithms()
+  ```
 
 ## pgstore/v0.70.0
 
