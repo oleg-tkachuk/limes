@@ -60,7 +60,7 @@
 //     a tenant refuses one whose request names another with
 //     [ErrScopeMismatch]. A store paired with a meter.TenantUsageEraser
 //     refuses Insert for a tenant whose usage was erased with
-//     [ErrTenantErased].
+//     [ErrTenantErased], which the [Issuer] answers as [ErrTenantGone].
 //   - [github.com/oleg-tkachuk/limes/meter.UsageStore] — request and
 //     spend counters and the charges ledger, for a consumer that meters;
 //     see package meter.

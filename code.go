@@ -52,31 +52,33 @@ const (
 // The codes of the other errors.
 const (
 	// Refusals Reason reports under a wider one, or not at all.
-	CodeTenantErased           Code = "tenant_erased"
-	CodeDelegationTooDeep      Code = "delegation_too_deep"
-	CodeUnknownKID             Code = "unknown_kid"
-	CodeUnauthenticated        Code = "unauthenticated"
-	CodeProofOfPossession      Code = "proof_of_possession"
-	CodeCaveatViolation        Code = "caveat_violation"
-	CodeConflict               Code = "conflict"
-	CodeAlreadyExists          Code = "already_exists"
-	CodeUnitCodeMismatch       Code = "unit_code_mismatch"
-	CodeInvalidRequest         Code = "invalid_request"
-	CodeInvalidCaveats         Code = "invalid_caveats"
-	CodeInvalidAmount          Code = "invalid_amount"
-	CodeEffectConflict         Code = "effect_conflict"
-	CodeCursorMismatch         Code = "cursor_mismatch"
-	CodeDelegationTooWide      Code = "delegation_too_wide"
-	CodeNotFound               Code = "not_found"
-	CodeUnknownTenant          Code = "unknown_tenant"
-	CodeTenantDeleted          Code = "tenant_deleted"
-	CodeScopeMismatch          Code = "scope_mismatch"
-	CodeProofUnsupported       Code = "proof_unsupported"
-	CodeNoRevocationLineage    Code = "no_revocation_lineage"
-	CodeCopyCountersNotMetered Code = "copy_counters_not_metered"
-	CodeCursorRepeated         Code = "cursor_repeated"
-	CodeInvalidConfig          Code = "invalid_config"
-	CodeInternal               Code = "internal"
+	CodeTenantErased            Code = "tenant_erased"
+	CodeDelegationTooDeep       Code = "delegation_too_deep"
+	CodeUnknownKID              Code = "unknown_kid"
+	CodeUnauthenticated         Code = "unauthenticated"
+	CodeProofOfPossession       Code = "proof_of_possession"
+	CodeCaveatViolation         Code = "caveat_violation"
+	CodeConflict                Code = "conflict"
+	CodeAlreadyExists           Code = "already_exists"
+	CodeUnitCodeMismatch        Code = "unit_code_mismatch"
+	CodeInvalidRequest          Code = "invalid_request"
+	CodeInvalidCaveats          Code = "invalid_caveats"
+	CodeInvalidAmount           Code = "invalid_amount"
+	CodeEffectConflict          Code = "effect_conflict"
+	CodeCursorMismatch          Code = "cursor_mismatch"
+	CodeDelegationTooWide       Code = "delegation_too_wide"
+	CodeDelegationDepthExceeded Code = "delegation_depth_exceeded"
+	CodeNotFound                Code = "not_found"
+	CodeUnknownTenant           Code = "unknown_tenant"
+	CodeTenantDeleted           Code = "tenant_deleted"
+	CodeTenantGone              Code = "tenant_gone"
+	CodeScopeMismatch           Code = "scope_mismatch"
+	CodeProofUnsupported        Code = "proof_unsupported"
+	CodeNoRevocationLineage     Code = "no_revocation_lineage"
+	CodeCopyCountersNotMetered  Code = "copy_counters_not_metered"
+	CodeCursorRepeated          Code = "cursor_repeated"
+	CodeInvalidConfig           Code = "invalid_config"
+	CodeInternal                Code = "internal"
 )
 
 // The codes of package meter's sentinels, which this package answers as its
@@ -177,12 +179,14 @@ var codeRules = []codeRule{
 	{ErrCursorMismatch, CodeCursorMismatch, http.StatusBadRequest, "The cursor is of another listing", CategoryInvalid},
 	{ErrInvalidRequest, CodeInvalidRequest, http.StatusBadRequest, "The request is invalid", CategoryInvalid},
 	{ErrDelegationTooWide, CodeDelegationTooWide, http.StatusForbidden, "The delegation asks for more than its parent holds", CategoryDenied},
+	{ErrDelegationDepthExceeded, CodeDelegationDepthExceeded, http.StatusForbidden, "The delegation would exceed the maximum chain depth", CategoryDenied},
 	{jwks.ErrUnknownKID, CodeUnknownKID, http.StatusUnauthorized, "The key id names no key", CategoryUnauthenticated},
 
 	// What is, or is not, on record.
 	{ErrNotFound, CodeNotFound, http.StatusNotFound, "Not found", CategoryNotFound},
 	{ErrUnknownTenant, CodeUnknownTenant, http.StatusNotFound, "The tenant is unknown", CategoryNotFound},
 	{ErrTenantDeleted, CodeTenantDeleted, http.StatusGone, "The tenant is deleted", CategoryNotFound},
+	{ErrTenantGone, CodeTenantGone, http.StatusGone, "The tenant is erased", CategoryNotFound},
 	{ErrScopeMismatch, CodeScopeMismatch, http.StatusInternalServerError, "The call is scoped to another tenant than its request names", CategoryInternal},
 
 	// The server's configuration or its upstream: its own to fix.

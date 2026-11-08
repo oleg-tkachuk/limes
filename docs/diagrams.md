@@ -195,7 +195,7 @@ sequenceDiagram
     Op->>I: Issue(IssueRequest)
     I->>I: Caveats.Validate · TTL → ExpiresAt, after IssuedAt
     I->>I: sign with the Signer, within MaxTokenBytes
-    I->>St: Store.Insert(InsertRequest{cap, IssuedBy, Session}) — ErrTenantErased once the tenant's usage is erased
+    I->>St: Store.Insert(InsertRequest{cap, IssuedBy, Session}) — ErrTenantErased once the tenant's usage is erased, which Issue returns as ErrTenantGone
     I-->>O: token
 
     O->>I: Delegate(DelegateRequest{Parent: Verify(token), Caveats})
@@ -646,7 +646,7 @@ flowchart TB
     noshare["ErrOpNotAllowed"]
     dead["ErrExpired · ErrRevoked<br/>or the store's error"]
     inval["ErrInvalidRequest · ErrInvalidCaveats"]
-    stored["the store's error<br/>ErrDelegationTooDeep, …"]
+    stored["the store's error<br/>ErrDelegationTooDeep as ErrDelegationDepthExceeded<br/>ErrTenantErased as ErrTenantGone"]
 
     req --> pid -- yes --> copyp -- yes --> own -- yes --> share -- yes --> fill --> valid -- yes --> alive -- yes --> clamp --> start --> n0
     n7 --> sign --> persist -- ok --> depth -- "no error" --> ok

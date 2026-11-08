@@ -3,6 +3,7 @@ package limes_test
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
@@ -32,8 +33,21 @@ func TestDelegationStopsAtMaxDelegationDepth(t *testing.T) {
 		}
 	}
 	leaf := s.verified(token)
-	if _, _, err := delegate(leaf, "too-deep"); !errors.Is(err, limes.ErrDelegationTooDeep) {
-		t.Fatalf("a delegation past MaxDelegationDepth: err = %v, want ErrDelegationTooDeep", err)
+	_, _, err := delegate(leaf, "too-deep")
+	if !errors.Is(err, limes.ErrDelegationDepthExceeded) {
+		t.Fatalf("a delegation past MaxDelegationDepth: err = %v, want ErrDelegationDepthExceeded", err)
+	}
+	// The parent is live: the refusal is the delegation's, never one a
+	// client would read as its token gone.
+	if errors.Is(err, limes.ErrRevoked) || errors.Is(err, limes.ErrDelegationTooDeep) || errors.Is(err, limes.ErrUnauthenticated) {
+		t.Errorf("a delegation past MaxDelegationDepth: err = %v matches a refusal of the parent", err)
+	}
+	p, ok := limes.ProblemOf(err)
+	if !ok || p.Status != http.StatusForbidden || p.Code != limes.CodeDelegationDepthExceeded || p.Category != limes.CategoryDenied || p.Reason != "" {
+		t.Errorf("a delegation past MaxDelegationDepth: problem %+v, %v; want 403 %s, denied, no reason", p, ok, limes.CodeDelegationDepthExceeded)
+	}
+	if _, err := s.verifier.Verify(ctx, limes.VerifyRequest{Token: token, Audience: exampleAudience}); err != nil {
+		t.Errorf("the parent after the refused delegation: %v, want it still verified", err)
 	}
 	left, err := s.records.ListByPrincipal(ctx, limes.ListByPrincipalRequest{
 		TenantID: s.tenantID, PrincipalType: limes.PrincipalTypeAgent, Subject: "too-deep",

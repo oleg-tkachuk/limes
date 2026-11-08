@@ -38,7 +38,9 @@ type IssuanceStore interface {
 	// store that knows tenants returns ErrUnknownTenant or ErrTenantDeleted
 	// for a tenant it cannot mint for. A store beside a meter.TenantUsageEraser
 	// refuses a tenant whose usage it erased as ErrTenantErased, until
-	// PurgeOrphans forgets the mark.
+	// PurgeOrphans forgets the mark. The Issuer answers those two refusals
+	// as ErrDelegationDepthExceeded and ErrTenantGone: no presented
+	// capability was revoked.
 	Insert(ctx context.Context, req InsertRequest) error
 
 	// IsRevoked reports whether the capability, or any ancestor of it

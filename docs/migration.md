@@ -121,6 +121,30 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
   // after
   erased, err := eraser.EraseTenantUsage(ctx, meter.EraseTenantUsageRequest{TenantID: tenant})
   ```
+- A mint the store refuses for a chain too deep or a tenant erased is no
+  longer answered as a revocation. `Issuer.Delegate` from a parent with
+  `MaxDelegationDepth` ancestors returned `ErrDelegationTooDeep`
+  (`delegation_too_deep`, 401, reason `revoked`, permanent), so a client
+  threw away a parent that still verifies; it returns
+  `ErrDelegationDepthExceeded` (`delegation_depth_exceeded`, 403,
+  `denied`, no reason). `Issue` and `Delegate` for a tenant whose usage was
+  erased returned `ErrTenantErased` (`tenant_erased`, 401, reason
+  `revoked`); they return `ErrTenantGone` (`tenant_gone`, 410,
+  `not_found`, no reason). Neither matches `ErrRevoked`,
+  `ErrUnauthenticated` or the store's sentinel, whose text the error
+  keeps. Branch on the new sentinels where a mint's error was matched:
+
+  ```go
+  // before
+  if errors.Is(err, limes.ErrDelegationTooDeep) { … }
+  // after
+  if errors.Is(err, limes.ErrDelegationDepthExceeded) { … }
+  ```
+
+  The verify path and the meter are unchanged: a lineage already too deep
+  is still `ErrDelegationTooDeep` and a metering call for an erased tenant
+  still `ErrTenantErased`, both revoked. `Store.Insert` still returns the
+  store sentinels; a store of your own changes nothing.
 
 - `meter.Leaser.Lease` on a subject whose lease is open — a top-up —
   settles that lease and opens a new one, atomically, where it added to
