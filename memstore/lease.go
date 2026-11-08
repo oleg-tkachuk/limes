@@ -87,22 +87,24 @@ func (s *UsageStore) Lease(_ context.Context, req meter.LeaseRequest) (meter.Lea
 	if err != nil {
 		return meter.Lease{}, err
 	}
-	l, ok := s.leases[capID]
-	if !ok {
-		l = lease{
-			id: uuid.New(), capID: capID, tenantID: tenantID, ancestors: ancestorIDs(ancestors),
-			unit: unit, period: s.periods[tenantID],
-		}
+	l := lease{
+		id: uuid.New(), capID: capID, tenantID: tenantID, ancestors: ancestorIDs(ancestors),
+		unit: unit, period: s.periods[tenantID], amount: req.Amount, requests: req.Requests, expires: expires,
 	}
-	l.amount += req.Amount
-	l.requests += req.Requests
-	if expires.After(l.expires) {
-		l.expires = expires
+	// A top-up settles the open lease, so its spend reaches the chain, and
+	// opens one under a new id of what it had left and the top-up: a
+	// refund of a charge taken under the old one goes to the chain the
+	// settlement charged. The ceilings were checked with the old lease
+	// held, which equals checking the new one once the old is settled.
+	if open, ok := s.leases[capID]; ok {
+		s.settleLeaseLocked(open)
+		l.amount += open.Remaining()
+		l.requests += open.requestsRemaining()
 	}
-	if req.Amount > 0 {
-		s.reserveLeaseLocked(l, req.Amount, +1)
+	if l.amount > 0 {
+		s.reserveLeaseLocked(l, l.amount, +1)
 	}
-	s.holdLeaseRequestsLocked(l, req.Requests)
+	s.holdLeaseRequestsLocked(l, l.requests)
 	s.leases[capID] = l
 	return l.view(), nil
 }

@@ -1,6 +1,6 @@
 # ADR-0017: Budget leases for delegated capabilities
 
-**Status:** Accepted, first version implemented (below); decision 4 (nested leases) deferred to an opt-in
+**Status:** Accepted, first version implemented (below); decision 4 (nested leases) deferred to an opt-in; amended on 2026-11-08 (top-ups)
 **Date:** 2026-10-31
 **Deciders:** Oleg Tkachuk
 **Relates to:** [ADR-0007](0007-pgstore-components.md), [ADR-0015](0015-release-matching-holds.md)
@@ -273,3 +273,16 @@ ADR-0018 took `Charge` from 16 round trips to 6, then to 4 with `BEGIN`
 and `COMMIT` in its batches, not "toward one or two" as the Consequences
 expected (`pgstore/round_trips_test.go`). The figures above were measured
 at 6.
+
+## Amendment, 2026-11-08
+
+Leases do not nest on v1: decision 4 stays deferred, and `Lease` under an
+ancestor holding an open lease is `meter.ErrLeaseNested`, as the amendment
+above says. Decision 3's "on renewal" now holds for a top-up too: `Lease`
+on a capability whose lease is open settles that lease, under the locks
+`SettleLease` takes and in the same transaction, and opens a new one under
+a new id, of what the old one had left and the top-up. Before, a top-up
+added to the open lease and kept its id, so a lease topped up as the guide
+recommends never settled and its chain's `SpentAmount` lagged without
+bound. The new id keeps a refund of a charge taken before the top-up on
+the chain the settlement charged, since a refund finds its lease by id.

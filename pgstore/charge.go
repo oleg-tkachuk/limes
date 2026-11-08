@@ -33,11 +33,8 @@ func (s *UsageStore) Bump(ctx context.Context, req meter.BumpRequest) (meter.Bum
 			})
 		})
 	}
-	err := attempt()
 	// A lease that moved between its read and its lock is read afresh.
-	if errors.Is(err, errLeaseMoved) {
-		err = attempt()
-	}
+	err := s.retryLeaseMoved(ctx, retriedBump, req.Subject.CapabilityID(), attempt)
 	if err != nil {
 		return meter.BumpReceipt{RequestCount: receipt.RequestCount}, err
 	}
@@ -230,11 +227,8 @@ func (s *UsageStore) Charge(ctx context.Context, req meter.ChargeRequest, onChar
 			})
 		})
 	}
-	err := attempt()
 	// A lease that moved between its read and its lock is read afresh.
-	if errors.Is(err, errLeaseMoved) {
-		err = attempt()
-	}
+	err := s.retryLeaseMoved(ctx, retriedCharge, req.Subject.CapabilityID(), attempt)
 	if errors.Is(err, errReplayedAfterLock) {
 		return receipt, nil
 	}

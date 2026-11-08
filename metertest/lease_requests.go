@@ -123,12 +123,13 @@ func checkRequestLeaseIsHeldAgainstASibling(t *testing.T, f fixture) {
 
 // A bump past the requests the lease holds is refused with
 // ErrLeaseRequestsExhausted, a kind of ErrRequestLimitExceeded, and counts
-// nothing; topped up, the lease covers it.
+// nothing; topped up, the lease made whole is settled and one of the
+// top-up opened, which covers it.
 func checkRequestLeaseIsExhaustedAndToppedUp(t *testing.T, f fixture) {
 	l := f.leaser(t)
 	c := f.newRequestChain(t)
 	child := f.requestSubject(c.child, requestChild)
-	f.leaseRequests(t, l, child, requestLeased)
+	first := f.leaseRequests(t, l, child, requestLeased)
 	for range requestLeased {
 		expect.Must(t, f.bump(child) == nil, "a bump within the lease")
 	}
@@ -136,7 +137,9 @@ func checkRequestLeaseIsExhaustedAndToppedUp(t *testing.T, f fixture) {
 	expect.That(t, errors.Is(err, meter.ErrLeaseRequestsExhausted) && errors.Is(err, limes.ErrRequestLimitExceeded), "a bump past the lease: %v, want ErrLeaseRequestsExhausted, an ErrRequestLimitExceeded", err)
 	expect.That(t, f.usageOf(t, c.child).RequestCount == requestLeased, "the child made %d requests after a refused bump, want %d", f.usageOf(t, c.child).RequestCount, requestLeased)
 	topped := f.leaseRequests(t, l, child, requestTopUp)
-	expect.That(t, topped.Requests == requestLeased+requestTopUp && topped.RequestsSpent == requestLeased, "a top-up = %+v, want %d leased, %d made", topped, requestLeased+requestTopUp, requestLeased)
+	expect.That(t, topped.ID != first.ID && topped.Requests == requestTopUp && topped.RequestsSpent == 0, "a top-up = %+v, want a new lease of %d requests, none made", topped, requestTopUp)
+	r := f.usageOf(t, c.root)
+	expect.That(t, r.RequestCount == requestLeased && r.ReservedRequests == requestTopUp, "the root once the exhausted lease was topped up = %+v, want %d made and %d held", r, requestLeased, requestTopUp)
 	expect.That(t, f.bump(child) == nil, "a bump once topped up")
 }
 

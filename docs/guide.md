@@ -884,6 +884,16 @@ under a lease as without one — the lease holds its share of every ceiling,
 so they stay correct, only not faster. Lease a few minutes of a sub-agent's
 expected spend, and top it up when half is gone.
 
+A top-up — `Lease` on a capability whose lease is open — settles that lease
+and opens a new one in the same call: what it spent is charged to the
+ancestors and the tenant, so their `SpentAmount`, which budget listings and
+risk rankings read, lags by at most one lease however long a sub-agent runs.
+The new lease holds what the old one had left and the top-up, for the
+request's `TTL` from now, under a new `ID`: a refund of a charge taken
+before the top-up goes to the chain the settlement charged, and one taken
+after it to the new lease. A top-up refused at a ceiling leaves the open
+lease as it was.
+
 A lease holds requests too, for a sub-agent whose every call is a `Bump`:
 
 ```go

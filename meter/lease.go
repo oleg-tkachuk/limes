@@ -16,17 +16,19 @@ const DefaultLeaseTTL = 5 * time.Minute
 type LeaseRequest struct {
 	// Subject is the leaseholder (VerifiedCapability.MeterSubject).
 	Subject limes.MeterSubject
-	// Amount to lease, in the subject's unit, added to an open lease's.
-	// Within 0..MaxNanos; a lease of no amount covers no Charge.
+	// Amount to lease, in the subject's unit. A top-up of an open lease
+	// settles it and opens a new one of what it had left and Amount
+	// (Leaser.Lease). Within 0..MaxNanos; a lease of no amount covers no
+	// Charge.
 	Amount limes.Nanos
-	// Requests to lease, added to an open lease's; a lease of none covers
-	// no Bump. Negative is ErrInvalidRequest, and so is a request of no
-	// amount and no requests.
+	// Requests to lease; a top-up's new lease holds what the open one had
+	// left and these. A lease of none covers no Bump. Negative is
+	// ErrInvalidRequest, and so is a request of no amount and no requests.
 	Requests int64
 	// TTL is how long the lease lasts unless settled, at most until its
-	// capability expires, as a hold's (Meter.Reserve); a lease topped up
-	// lasts until the later of its end and this one. 0 = DefaultLeaseTTL;
-	// negative is ErrInvalidRequest.
+	// capability expires, as a hold's (Meter.Reserve); a top-up's new lease
+	// lasts this long from the top-up. 0 = DefaultLeaseTTL; negative is
+	// ErrInvalidRequest.
 	TTL time.Duration
 }
 
@@ -74,16 +76,19 @@ func (r SettleLeaseRequest) Validate() error {
 // Lease is the budget a capability holds of its chain: Amount held against
 // every ancestor and the tenant, of which Spent is spent.
 type Lease struct {
-	// ID is this lease's, from its first Lease until it is settled; a
-	// lease opened after it has another.
+	// ID is this lease's, from the Lease that opened it until it is
+	// settled; a lease opened after it — by a top-up among others — has
+	// another. A refund of a charge taken under it goes to the lease while
+	// it is open, and to the chain once it is settled.
 	ID           uuid.UUID
 	CapabilityID uuid.UUID
 	TenantID     uuid.UUID
 	UnitCode     string
-	// Amount is what the lease holds, every top-up added; Spent is what
-	// its capability and those delegated from it charged under it.
+	// Amount is what the lease holds — for one a top-up opened, what the
+	// lease before it had left and the top-up; Spent is what its
+	// capability and those delegated from it charged under it.
 	Amount, Spent limes.Nanos
-	// Requests is how many requests the lease holds, every top-up added;
+	// Requests is how many requests the lease holds, counted as Amount is;
 	// RequestsSpent how many its capability and those delegated from it
 	// made under it.
 	Requests, RequestsSpent int64
@@ -138,7 +143,8 @@ func (l Lease) RequestsRemaining() int64 {
 //     copy's own ceilings.
 //
 // A lease is settled — its spend charged to every ancestor and the tenant,
-// its requests counted on every ancestor, the rest released — by SettleLease, by ReleaseExpired once it expired,
+// its requests counted on every ancestor, the rest released — by SettleLease,
+// by a Lease that tops it up, by ReleaseExpired once it expired,
 // by ReleaseMatching once its capability is revoked, by DeleteUsage and
 // PurgeOrphans before its counters go, by DeleteUsage before an
 // ancestor's go — the hold it keeps on them goes with them — and by a SetTenantBudget that
@@ -146,12 +152,16 @@ func (l Lease) RequestsRemaining() int64 {
 // lease returns it to the lease while it is open, and to the chain once
 // it is settled.
 type Leaser interface {
-	// Lease opens a lease of req.Amount and req.Requests on the subject, or
-	// adds them to the one open, refusing what a Reserve of that amount, or
-	// as many Bumps, would refuse — a ceiling crossed is the ceiling's
-	// sentinel — and ErrLeaseNested under
-	// an ancestor that holds one. A lease that expired is settled first and
-	// a new one opened.
+	// Lease opens a lease of req.Amount and req.Requests on the subject,
+	// refusing what a Reserve of that amount, or as many Bumps, would
+	// refuse — a ceiling crossed is the ceiling's sentinel — and
+	// ErrLeaseNested under an ancestor that holds one. On a subject that
+	// holds an open lease it is a top-up: atomically, under the locks
+	// SettleLease takes, the open lease is settled, so what it spent
+	// reaches the chain, and a new one opened under a new ID, holding what
+	// the old one had left and req's, until req.TTL from now; a refused
+	// top-up leaves the open lease as it was. A lease that expired is
+	// settled first and a new one of req's alone opened.
 	Lease(ctx context.Context, req LeaseRequest) (Lease, error)
 	// GetLease returns the lease of capID still holding budget — open, or
 	// expired and not yet settled (ExpiresAt tells which) — or
