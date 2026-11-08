@@ -2,6 +2,16 @@
 
 Every release of the otelmetric module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.19.0](https://github.com/oleg-tkachuk/limes/compare/otelmetric%2Fv0.18.0...otelmetric%2Fv0.19.0) (2026-11-08)
+
+### Features
+
+* **otelmetric:** forward the result of EraseTenantUsage to the caller ([93993a2](https://github.com/oleg-tkachuk/limes/commit/93993a27691342bf9582f877a4174fb294805df3))
+
+### Dependencies
+
+* require limes v0.172.0
+
 ## [0.18.0](https://github.com/oleg-tkachuk/limes/compare/otelmetric%2Fv0.17.5...otelmetric%2Fv0.18.0) (2026-11-07)
 
 ### Features
