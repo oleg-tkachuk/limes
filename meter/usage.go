@@ -123,7 +123,10 @@ type RequestCounter interface {
 	// Bump increments the request counter of the capability and of
 	// each ancestor, and returns the capability's new count. When any
 	// ceiling in the chain would be crossed it returns
-	// ErrRequestLimitExceeded and nothing is mutated.
+	// ErrRequestLimitExceeded and nothing is mutated. Under a lease that
+	// keeps moving while the call locks it, a store may refuse it as
+	// limes.ErrConflict, mutating nothing, for the caller to send again
+	// (Leaser).
 	Bump(ctx context.Context, req BumpRequest) (BumpReceipt, error)
 }
 
@@ -177,6 +180,10 @@ type BudgetMeter interface {
 	// nothing. With req.Overrun = OverrunPolicyRecord, a charge that
 	// would cross a ceiling is committed anyway and the receipt reports it
 	// (ChargeReceipt.Overrun); see OverrunPolicy.
+	//
+	// Under a lease that keeps moving while the call locks it, a store may
+	// refuse a charge as limes.ErrConflict, moving nothing and running no
+	// onCharged; the caller sends it again (Leaser).
 	Charge(ctx context.Context, req ChargeRequest, onCharged func(ctx context.Context, c Charged) error) (ChargeReceipt, error)
 
 	// Refund returns spend from one recorded charge to every counter that
