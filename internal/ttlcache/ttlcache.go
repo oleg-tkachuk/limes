@@ -153,6 +153,15 @@ type shard[K comparable] struct {
 	// before its old place expires: that place then names an entry no
 	// longer its own, and dropping it leaves the new one.
 	order []queued[K]
+	// tagged indexes the live answers by their tags: for each tag, the
+	// keys of this shard whose live answer named it when cached, so Forget
+	// reads only the answers a key may outdate rather than every entry. A
+	// key whose entry has gone, or was cached again without the tag,
+	// keeps its place until Forget reads it or the index is rebuilt
+	// (compactTaggedLocked). indexed counts the places, and liveTags those
+	// the live entries own: the sum of their tags.
+	tagged            map[K][]K
+	indexed, liveTags int
 	// misses and lookups count the shard's questions not answered from
 	// it and the upstream lookups run for them; evictions the live entries
 	// it dropped to stay within its bound, under mu.
@@ -211,7 +220,10 @@ func New[K comparable](cfg Config) *Cache[K] {
 		if i < cfg.MaxEntries%n {
 			share++
 		}
-		c.shards[i] = &shard[K]{maxEntries: share, entries: make(map[K]cacheEntry[K]), inflight: make(map[K]*lookupCall[K])}
+		c.shards[i] = &shard[K]{
+			maxEntries: share, entries: make(map[K]cacheEntry[K]),
+			inflight: make(map[K]*lookupCall[K]), tagged: make(map[K][]K),
+		}
 	}
 	return c
 }
@@ -456,7 +468,7 @@ func (c *Cache[K]) SeedRevoked(key K, epoch uint64) {
 	}
 	now := c.cfg.Now()
 	c.noteLost(s.makeRoomLocked(c.judge(now)))
-	s.entries[key] = cacheEntry[K]{revoked: true, at: now}
+	s.putLocked(key, cacheEntry[K]{revoked: true, at: now})
 	s.enqueueLocked(key, now)
 }
 
@@ -482,7 +494,7 @@ func (c *Cache[K]) SeedLive(keys []K, epoch uint64, at time.Time) {
 		_, inflight := s.inflight[k]
 		if e, ok := s.entries[k]; !inflight && (!ok || !j.fresh(e.at)) {
 			c.noteLost(s.makeRoomLocked(j))
-			s.entries[k] = cacheEntry[K]{at: at}
+			s.putLocked(k, cacheEntry[K]{at: at})
 			s.enqueueLocked(k, at)
 		}
 		s.mu.Unlock()
@@ -503,7 +515,7 @@ func (c *Cache[K]) finish(s *shard[K], key K, call *lookupCall[K]) {
 	call.discarded = call.err == nil && !c.mayCacheLocked(call.seq, call.revoked, key, call.tags)
 	if call.err == nil && !call.discarded && !undoes {
 		c.noteLost(s.makeRoomLocked(c.judge(c.cfg.Now())))
-		s.entries[key] = cacheEntry[K]{revoked: call.revoked, at: call.at, tags: call.tags}
+		s.putLocked(key, cacheEntry[K]{revoked: call.revoked, at: call.at, tags: call.tags})
 		s.enqueueLocked(key, call.at)
 	}
 	s.mu.Unlock()
@@ -525,6 +537,8 @@ const orderSlack = 2
 func (s *shard[K]) makeRoomLocked(j judge) time.Time {
 	var lost time.Time
 	s.compactLocked()
+	// Once room is made: what it dropped no longer counts as owned.
+	defer s.compactTaggedLocked()
 	s.sweepLocked(j)
 	for len(s.entries) >= s.maxEntries {
 		if len(s.order) == 0 {
@@ -585,9 +599,93 @@ func (s *shard[K]) popLocked() bool {
 	s.order[0] = queued[K]{} // let the key go
 	s.order = s.order[1:]
 	if e, ok := s.entries[q.key]; ok && e.at.Equal(q.at) {
-		delete(s.entries, q.key)
+		s.deleteLocked(q.key)
 	}
 	return true
+}
+
+// indexedTags are the tags of e the index holds it under: a live answer's,
+// none for a revoked one, which Forget never drops.
+func indexedTags[K comparable](e cacheEntry[K]) []K {
+	if e.revoked {
+		return nil
+	}
+	return e.tags
+}
+
+// putLocked caches e under key, in place of what key held, and indexes it
+// by its tags.
+func (s *shard[K]) putLocked(key K, e cacheEntry[K]) {
+	s.deleteLocked(key)
+	s.entries[key] = e
+	tags := indexedTags(e)
+	for _, t := range tags {
+		s.tagged[t] = append(s.tagged[t], key)
+	}
+	s.indexed += len(tags)
+	s.liveTags += len(tags)
+}
+
+// deleteLocked drops key's entry. Its places in the index stay until
+// Forget reads them or compactTaggedLocked drops them.
+func (s *shard[K]) deleteLocked(key K) {
+	if e, ok := s.entries[key]; ok {
+		s.liveTags -= len(indexedTags(e))
+		delete(s.entries, key)
+	}
+}
+
+// taggedSlack bounds the index at this many places per place a live entry
+// owns, plus the shard's bound: past it, the index is rebuilt from the
+// entries. The rebuild drops at least as many places as it reads entries,
+// so it costs each place cached a constant share.
+const taggedSlack = 2
+
+// compactTaggedLocked rebuilds the index from the live entries once its
+// places pass taggedSlack per place they own plus the shard's bound, so the
+// index stays bounded however many tagged answers expire, make room or are
+// replaced.
+func (s *shard[K]) compactTaggedLocked() {
+	if s.indexed <= taggedSlack*s.liveTags+s.maxEntries {
+		return
+	}
+	clear(s.tagged)
+	for key, e := range s.entries {
+		for _, t := range indexedTags(e) {
+			s.tagged[t] = append(s.tagged[t], key)
+		}
+	}
+	s.indexed = s.liveTags
+}
+
+// forgetLocked drops the live answer of key, if it is one, and reports
+// whether it did.
+func (s *shard[K]) forgetLocked(key K) bool {
+	if e, ok := s.entries[key]; ok && !e.revoked {
+		s.deleteLocked(key)
+		return true
+	}
+	return false
+}
+
+// forgetTaggedLocked drops every live answer of the shard tagged with tag,
+// and its places in the index, and returns how many it dropped. A place
+// whose entry has gone, or no longer names tag, drops nothing.
+func (s *shard[K]) forgetTaggedLocked(tag K) int {
+	keys, ok := s.tagged[tag]
+	if !ok {
+		return 0
+	}
+	dropped := 0
+	for _, key := range keys {
+		if e, ok := s.entries[key]; ok && !e.revoked && slices.Contains(e.tags, tag) {
+			s.deleteLocked(key)
+			dropped++
+		}
+	}
+	delete(s.tagged, tag)
+	s.indexed -= len(keys)
+	return dropped
 }
 
 // sweepLocked drops every entry of the shard past its TTL and MaxStale,
@@ -666,6 +764,8 @@ func (c *Cache[K]) Clear() {
 		s.mu.Lock()
 		clear(s.entries)
 		clear(s.inflight)
+		clear(s.tagged)
+		s.indexed, s.liveTags = 0, 0
 		s.order = nil
 		s.mu.Unlock()
 	}
@@ -680,25 +780,19 @@ func (c *Cache[K]) Clear() {
 // callers that joined before and cached for nobody, while one that joined
 // after asks again. Every other answer is cached as though no Forget had
 // happened. A "revoked" answer stays: no revocation is undone. It returns
-// how many answers it dropped.
+// how many answers it dropped. It reads only the answers keys may outdate,
+// through each shard's index of tags, so it costs as much as keys and what
+// they drop, whatever the cache holds.
 func (c *Cache[K]) Forget(keys []K) int {
 	gone := make(map[K]struct{}, len(keys))
+	own := make(map[*shard[K]][]K, len(c.shards))
 	for _, k := range keys {
+		if _, dup := gone[k]; dup {
+			continue
+		}
 		gone[k] = struct{}{}
-	}
-	outdated := func(key K, e cacheEntry[K]) bool {
-		if e.revoked {
-			return false
-		}
-		if _, ok := gone[key]; ok {
-			return true
-		}
-		for _, t := range e.tags {
-			if _, ok := gone[t]; ok {
-				return true
-			}
-		}
-		return false
+		s := c.shardOf(k)
+		own[s] = append(own[s], k)
 	}
 	// Counted before any shard is walked, as a Clear is: a lookup finishing
 	// in a shard not yet walked either sees the count or is dropped by the
@@ -707,14 +801,16 @@ func (c *Cache[K]) Forget(keys []K) int {
 	dropped := 0
 	for _, s := range c.shards {
 		s.mu.Lock()
-		for k := range gone {
+		// A key's own answer and lookup are in its shard; an answer tagged
+		// with it may be in any.
+		for _, k := range own[s] {
 			delete(s.inflight, k)
-		}
-		for key, e := range s.entries {
-			if outdated(key, e) {
-				delete(s.entries, key)
+			if s.forgetLocked(k) {
 				dropped++
 			}
+		}
+		for k := range gone {
+			dropped += s.forgetTaggedLocked(k)
 		}
 		s.compactLocked()
 		s.mu.Unlock()
