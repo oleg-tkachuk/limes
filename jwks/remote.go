@@ -151,7 +151,7 @@ func parseRemoteURL(raw string) (*url.URL, error) {
 		if ue, ok := errors.AsType[*url.Error](err); ok {
 			err = ue.Err
 		}
-		return nil, fmt.Errorf("jwks: RemoteConfig.URL: %w", err)
+		return nil, errs.Errorf("%w: jwks: RemoteConfig.URL: %w", errs.ErrInvalidConfig, err)
 	}
 	if u.Scheme != schemeHTTPS || u.Host == "" {
 		return nil, errs.Config("jwks: RemoteConfig.URL must be an %s URL, got %q", schemeHTTPS, u.Redacted())
