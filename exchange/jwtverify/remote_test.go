@@ -62,7 +62,7 @@ func newJWKSServer(t *testing.T, sets ...jwk.Set) *jwksServer {
 	t.Helper()
 	s := &jwksServer{}
 	s.publish(t, sets...)
-	s.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	s.Server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		s.fetches.Add(1)
 		if s.failing.Load() {
 			http.Error(w, "down", http.StatusServiceUnavailable)

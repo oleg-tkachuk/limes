@@ -70,6 +70,17 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## exchange/v0.22.0
+
+- `jwtverify.RemoteKeys` takes only an https URL with a host, and refuses
+  any other as `limes.ErrInvalidConfig`, where it fetched an identity
+  provider's keys over plain http: whoever sat on the path chose the keys,
+  and so the subject tokens the exchange minted capabilities for. A
+  redirect to another scheme or host is refused, whatever the client's own
+  policy, as `jwks.Remote` refuses it; the client passed in is copied, not
+  changed. A test serving keys from `httptest.NewServer` serves them from
+  `httptest.NewTLSServer` and passes its `Client()`.
+
 ## pgstore/v0.70.0
 
 - `UsageStore.Refund` takes the `onRefunded` callback of

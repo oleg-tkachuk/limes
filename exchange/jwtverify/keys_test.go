@@ -62,7 +62,7 @@ func TestRemoteKeysServesTheFetchedSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", jsonContentType)
 		_, _ = w.Write(doc)
 	}))
@@ -93,7 +93,7 @@ func TestRemoteKeysServesTheFetchedSet(t *testing.T) {
 // server's failure, not a refusal of the token.
 func TestRemoteKeysNeverFetchedAreTheServers(t *testing.T) {
 	p := newIDP(t)
-	srv := httptest.NewServer(http.NotFoundHandler())
+	srv := httptest.NewTLSServer(http.NotFoundHandler())
 	url := srv.URL
 	srv.Close()
 	keys, err := RemoteKeys(t.Context(), url, nil)
