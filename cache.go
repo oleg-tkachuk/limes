@@ -64,7 +64,9 @@ func (a RevocationAnswer) Below(ancestor uuid.UUID) bool {
 
 // ErrNoRevocationLineage is NewRevocationCache refusing, under
 // RevocationCacheConfig.RequireLineage, a Capabilities upstream that is no
-// RevocationLineageLookup.
+// RevocationLineageLookup, and RevocationCache.RevocationLineage answering
+// over such an upstream: a verifier that requires a record, given a lookup
+// of yours that wraps such a cache, fails the verification with it.
 var ErrNoRevocationLineage = errors.New("limes: the revocation upstream names no lineage")
 
 // DefaultRevocationCacheTTL bounds how long a cached answer is served. A
