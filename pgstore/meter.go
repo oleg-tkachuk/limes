@@ -543,13 +543,15 @@ func lockTenantOf(ctx context.Context, tx pgx.Tx, l lockRequest, c *counters) er
 	if l.tenantUnit != "" {
 		b.Queue(sqlCreateTenant, l.tenantID, l.tenantUnit, l.now)
 	}
+	// A striped tenant's row and stripes are read before the lock, so
+	// that a tenant whose row is locked holds it no longer for the read.
+	if l.stripes {
+		b.Queue(sqlGetTenant, l.tenantID)
+	}
 	b.Queue(sqlClock)
 	b.Queue(sqlFoldStripes, l.tenantID, l.stripes)
 	b.Queue(sqlLockUnstripedTenant, l.tenantID, l.stripes)
 	b.Queue(sqlClock)
-	if l.stripes {
-		b.Queue(sqlGetTenant, l.tenantID)
-	}
 	if l.replayRef != "" {
 		b.Queue(sqlChargeByRef, l.replayCapID, l.replayRef)
 	}
@@ -560,6 +562,13 @@ func lockTenantOf(ctx context.Context, tx pgx.Tx, l lockRequest, c *counters) er
 	err := func() error {
 		if l.tenantUnit != "" {
 			if _, err := br.Exec(); err != nil {
+				return err
+			}
+		}
+		var read budgetRow
+		if l.stripes {
+			var err error
+			if read, err = scanTenant(br.QueryRow(), l.tenantID); err != nil {
 				return err
 			}
 		}
@@ -581,17 +590,12 @@ func lockTenantOf(ctx context.Context, tx pgx.Tx, l lockRequest, c *counters) er
 			return err
 		}
 		c.tenantWait = max(after.Sub(before), 0)
-		if l.stripes {
-			read, err := scanTenant(br.QueryRow(), l.tenantID)
-			if err != nil {
-				return err
-			}
-			// A row the lock did not return is a striped tenant's, or one
-			// created after the lock looked, which counts as not there.
-			if !t.persisted && stripes(read, l.stripes) {
-				read.striped, read.readSpent, read.readReserved = true, read.spent, read.reserved
-				c.tenant = read
-			}
+		// A row the lock did not return is a striped tenant's, or one
+		// created between the read and the lock, which counts as not
+		// there.
+		if !t.persisted && stripes(read, l.stripes) {
+			read.striped, read.readSpent, read.readReserved = true, read.spent, read.reserved
+			c.tenant = read
 		}
 		if l.replayRef != "" {
 			if c.replay, c.replayed, err = scanEntry(br.QueryRow()); err != nil {
