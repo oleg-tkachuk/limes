@@ -145,18 +145,13 @@ func TestRevokeAcrossTenantsWaitsForEachTenantsRevokeLock(t *testing.T) {
 // sqlSeedEveryTenant records, as the owner, planRecords records each of a
 // tenant of its own, one in planEvery of them under client $2 and session
 // $3, the rest under others, and revokes half of them, as a store that
-// revokes as often as it lets tokens expire holds. The records are analyzed
-// before they are revoked: the revocations' triggers read them, and the
-// statistics an earlier test left would plan those reads for a handful of
-// rows, minutes for a seed that takes seconds.
+// revokes as often as it lets tokens expire holds.
 const sqlSeedEveryTenant = `
 INSERT INTO limes.capabilities (id, parent_id, tenant_id, principal_type, subject, expires_at, depth, capability, issued_by, client_id, session)
 SELECT uuidv7(), NULL, gen_random_uuid(), 'agent', 'subject:' || i, $1::timestamptz + interval '1 hour', 0, '{}', '{}',
        CASE WHEN i % $5::int = 0 THEN $2 ELSE 'client:' || (i % 500) END,
        CASE WHEN i % $5::int = 0 THEN $3 ELSE 'sid:' || i END
 FROM generate_series(1, $4::int) i;
-
-ANALYZE limes.capabilities;
 
 INSERT INTO limes.revocations (capability_id, tenant_id, revoked_at, note, actor, cascaded)
 SELECT id, tenant_id, $1::timestamptz, 'plan', 'test', false
@@ -273,14 +268,12 @@ func TestCensusAcrossTenantsBySelectorReadsByIndex(t *testing.T) {
 
 // sqlSeedRuns records, as the owner, planRecords records of tenant $1, one
 // in planEvery of them of agent run $2, the rest of runs of their own, and
-// revokes half of them, analyzed first as sqlSeedEveryTenant's are.
+// revokes half of them.
 const sqlSeedRuns = `
 INSERT INTO limes.capabilities (id, parent_id, tenant_id, principal_type, subject, expires_at, depth, capability, issued_by, run_id)
 SELECT uuidv7(), NULL, $1, 'agent', 'subject:' || i, $3::timestamptz + interval '1 hour', 0, '{}', '{}',
        CASE WHEN i % $5::int = 0 THEN $2::uuid ELSE gen_random_uuid() END
 FROM generate_series(1, $4::int) i;
-
-ANALYZE limes.capabilities;
 
 INSERT INTO limes.revocations (capability_id, tenant_id, revoked_at, note, actor, cascaded)
 SELECT id, tenant_id, $3::timestamptz, 'plan', 'test', false
