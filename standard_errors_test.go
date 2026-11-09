@@ -35,6 +35,9 @@ var wrappedHelpers = map[string]map[string]string{
 	"internal/errs/errs.go": {
 		"Errorf": "formats what its caller passes, which errguard checks at the caller",
 	},
+	"internal/apidoc/apidoc.go": {
+		"byCategory": "a generator a test runs: its error fails that test and reaches no caller",
+	},
 	"metertest/metertest.go": {
 		"checkCallbackRollback": "a conformance check's own fixture: the error a side effect fails with",
 	},
