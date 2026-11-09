@@ -2,6 +2,16 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.174.0](https://github.com/oleg-tkachuk/limes/compare/v0.173.0...v0.174.0) (2026-11-09)
+
+### Features
+
+* **meter:** say who held a tenant in TenantBudgetBusyError ([016a928](https://github.com/oleg-tkachuk/limes/commit/016a928d53a1cb94f2beb5f926a235fec828dbea))
+
+### Contract
+
+* read a tenant's spend through the stores, not the tables
+
 ## [0.173.0](https://github.com/oleg-tkachuk/limes/compare/v0.172.1...v0.173.0) (2026-11-09)
 
 ### Features

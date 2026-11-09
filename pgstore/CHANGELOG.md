@@ -2,6 +2,16 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.74.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.73.0...pgstore%2Fv0.74.0) (2026-11-09)
+
+### Features
+
+* **pgstore:** report a busy tenant's holders and bound the wait in Config ([9a5a399](https://github.com/oleg-tkachuk/limes/commit/9a5a399fc360ed8c28067cb3debb7495c23d70a4))
+
+### Dependencies
+
+* require limes v0.174.0
+
 ## [0.73.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.72.0...pgstore%2Fv0.73.0) (2026-11-09)
 
 ### ⚠ BREAKING CHANGES
