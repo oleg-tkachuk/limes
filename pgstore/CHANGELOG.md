@@ -2,6 +2,20 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.73.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.72.0...pgstore%2Fv0.73.0) (2026-11-09)
+
+### ⚠ BREAKING CHANGES
+
+* **pgstore:** stripe tenants without a ceiling by default
+
+### Features
+
+* **pgstore:** stripe tenants without a ceiling by default ([c847fa3](https://github.com/oleg-tkachuk/limes/commit/c847fa324512643635e7c70bde08dacd489590eb))
+
+### Defaults
+
+* removed: `pgstore.Config.StripeUnlimitedTenants`
+
 ## [0.72.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.71.1...pgstore%2Fv0.72.0) (2026-11-09)
 
 ### Features
