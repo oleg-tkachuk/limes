@@ -26,6 +26,14 @@ redisreplay, otelmetric, exchange and biscuit.
 - **What is stored and signed**: the token formats and the database
   schema, read by every replica of a rolling upgrade.
 
+The schema is promised to limes's own releases, not to a consumer's
+queries. Which rows hold a value is the store's to change: a tenant's
+aggregate, for one, is its budget row plus its stripes since
+[ADR-0022](adr/0022-unlimited-tenant-aggregate.md). A consumer, its
+tests included, reads through the stores' methods — `GetTenantBudget` and
+`ListTenantBudgets` for a tenant's spend and holds, `GetUsage` for a
+capability's, `SumCharges` for the ledger — never through the tables.
+
 ## Breaking
 
 Any of these breaks a consumer:
