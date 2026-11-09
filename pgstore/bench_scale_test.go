@@ -231,30 +231,45 @@ func (f benchFixture) leaseAll(b *testing.B, leaves ...limes.MeterSubject) {
 	}
 }
 
+// benchTenantCeiling is the tenant's ceiling in the ceiling=set rows: finite,
+// so every charge checks it, and past anything a run spends or leases, so
+// none is refused.
+const benchTenantCeiling = limes.MaxNanos
+
 // Charge one at a time, Charge from every processor on chains of one
-// tenant — which queue on the tenant's aggregate — and IsRevoked, each over
-// a database whose round trip is each of scaleRTTs longer than the host's.
+// tenant — which queue on the tenant's aggregate, the one row they share —
+// and IsRevoked, each over a database whose round trip is each of scaleRTTs
+// longer than the host's. The tenant's parallel charges run with no ceiling
+// set (ceiling=none: its aggregate is created unlimited), each leaf under a
+// lease of its own, and with benchTenantCeiling set (ceiling=set), the last
+// on a tenant of its own, so that it starts from an empty tenant as
+// ceiling=none does. The one-at-a-time charges count their references across
+// -count's repetitions, which share the fixture, so none is a replay.
 func BenchmarkRoundTrip(b *testing.B) {
 	skipUnlessScale(b)
 	for _, rtt := range scaleRTTs {
 		pool, sent := latencyPool(b, rtt)
 		f := newBenchFixtureOver(b, pool).leasing(b, pool)
 		ctx := WithTenant(b.Context(), f.tenant)
+		var seq atomic.Int64
 		b.Run(fmt.Sprintf("op=Charge/rtt=%s", rtt), func(b *testing.B) {
-			n := 0
 			defer reportRoundTrips(b, sent)()
 			for b.Loop() {
-				n++
-				if _, err := f.usage.Charge(ctx, meter.ChargeRequest{Subject: f.leaf(), Amount: 1, ExternalRef: strconv.Itoa(n)}, nil); err != nil {
+				if _, err := f.usage.Charge(ctx, meter.ChargeRequest{Subject: f.leaf(), Amount: 1, ExternalRef: strconv.FormatInt(seq.Add(1), 10)}, nil); err != nil {
 					b.Fatal(err)
 				}
 			}
 		})
-		b.Run(fmt.Sprintf("op=ChargeParallel/rtt=%s", rtt), func(b *testing.B) {
+		b.Run(fmt.Sprintf("op=ChargeParallel/ceiling=none/rtt=%s", rtt), func(b *testing.B) {
 			parallelLeaves(b, f, false, func(leaf limes.MeterSubject, n int) error { return chargeLeaf(b, f, leaf, n) })
 		})
 		b.Run(fmt.Sprintf("op=ChargeLeasedParallel/rtt=%s", rtt), func(b *testing.B) {
 			parallelLeasedLeaves(b, f)
+		})
+		capped := newBenchFixtureOver(b, pool).leasing(b, pool)
+		capped.setTenantCeiling(b)
+		b.Run(fmt.Sprintf("op=ChargeParallel/ceiling=set/rtt=%s", rtt), func(b *testing.B) {
+			parallelLeaves(b, capped, false, func(leaf limes.MeterSubject, n int) error { return chargeLeaf(b, capped, leaf, n) })
 		})
 		b.Run(fmt.Sprintf("op=IsRevoked/rtt=%s", rtt), func(b *testing.B) {
 			id := f.chain[len(f.chain)-1].ID
@@ -265,6 +280,15 @@ func BenchmarkRoundTrip(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+// setTenantCeiling sets f's tenant's ceiling to benchTenantCeiling.
+func (f benchFixture) setTenantCeiling(b *testing.B) {
+	b.Helper()
+	req := meter.SetTenantBudgetRequest{TenantID: f.tenant, Ceiling: limes.BudgetCeiling{Max: benchTenantCeiling, UnitCode: testUnit}}
+	if _, err := f.usage.SetTenantBudget(WithTenant(b.Context(), f.tenant), req); err != nil {
+		b.Fatal(err)
 	}
 }
 

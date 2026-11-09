@@ -17,7 +17,7 @@ to many sub-agents, the case limes is for, puts all of their charges on one
 queue.
 
 `task bench:pgstore:scale` (pgstore/bench_scale_test.go) measures it, on
-PostgreSQL in a container on the same host:
+PostgreSQL in a container on the same host. Before ADR-0018:
 
 | | no added latency | +1 ms set per round trip | +2 ms set |
 |---|---|---|---|
@@ -25,15 +25,26 @@ PostgreSQL in a container on the same host:
 | `Charge`, every processor, one tenant | 2.0 ms/op, ≈500/s | 21 ms/op, ≈48/s | 86 ms/op, ≈12/s |
 | `IsRevoked` | 0.23 ms | 2.1 ms | 3.7 ms |
 
-The proxy oversleeps its setting: `IsRevoked`, one round trip, shows each
-round trip took about 1.9 ms and 3.5 ms longer, not 1 ms and 2 ms. The
-throughput conclusion holds at either latency.
+After ADR-0018's step 7, `Charge` makes 4 round trips and holds the
+aggregate for two (median of three runs of 2 s, 14 processors, one host):
 
-After ADR-0018, `Charge` makes 6 round trips and holds the aggregate for
-three: one tenant's charges from every processor take 4.0 ms each at the
-+1 ms setting (≈250/s) and 9.1 ms at +2 ms (≈110/s), instead of 21 and 86.
-The queue remains, shorter: its length is now three round trips per
-charge, which a lease takes off the path entirely.
+| | no added latency | +1 ms set per round trip | +2 ms set |
+|---|---|---|---|
+| `Charge`, one at a time | 1.1 ms | 7.7 ms | 14 ms |
+| `Charge`, every processor, one tenant, no ceiling | 0.85 ms/op, ≈1 200/s | 2.4 ms/op, ≈410/s | 5.8 ms/op, ≈170/s |
+| the same, a ceiling set | 1.2 ms/op, ≈830/s | 2.4 ms/op, ≈410/s | 5.8 ms/op, ≈170/s |
+| the same, each under a lease of its own | 0.45 ms/op, ≈2 200/s | 0.61 ms/op, ≈1 600/s | 1.5 ms/op, ≈660/s |
+| `IsRevoked` | 0.21 ms | 1.9 ms | 3.4 ms |
+
+The proxy oversleeps its setting: `IsRevoked`, one round trip, shows each
+round trip took about 1.7 ms and 3.2 ms longer, not 1 ms and 2 ms (1.9 and
+3.5 in the earlier run). The figures are one host's, the database a
+container on it; the throughput conclusion holds at either latency.
+
+The queue remains, shorter: its length is now two round trips per charge,
+and a lease takes it off the path entirely. A ceiling set on the tenant
+costs about 0.35 ms a charge with no added latency and nothing measurable
+once the round trip dominates.
 
 Before it, `Charge` made 16 round trips and `Bump` 10, whatever the chain's depth
 (1 to 64); `IsRevoked` makes one. A deeper chain costs rows, not round trips:
@@ -184,7 +195,7 @@ every ceiling and stays correct, conservatively. So:
   it is locked with the counters in the order every call takes; the
   housekeeping calls settle leases each in a transaction of their own.
   One tenant's charges from every processor, each under a lease of its
-  own, at the +2 ms setting take 2.3 ms each, against 10.8 without leases
+  own, at the +2 ms setting take 1.5 ms each, against 5.8 without leases
   and 86 before ADR-0018.
 
 ## Request leases
