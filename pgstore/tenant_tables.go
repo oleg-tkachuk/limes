@@ -41,6 +41,7 @@ func TenantTables() []TenantTable {
 		{Name: "exchanges", Erase: EraseKeepsUntilPurge},
 		{Name: "reservations", Erase: EraseRemoves},
 		{Name: "tenant_budgets", Erase: EraseRemoves},
+		{Name: "tenant_budget_stripes", Erase: EraseRemoves},
 		{Name: "usage", Erase: EraseRemoves},
 		{Name: "copy_usage", Erase: EraseRemoves},
 		{Name: "charges", Erase: EraseRemoves},

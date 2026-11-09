@@ -32,14 +32,15 @@ const (
 // Decision 6). Each is optional: a nil one drops its events without a word.
 // A store that has nothing to report for one never calls it.
 //
-// They run synchronously, on the caller's goroutine, inside the call's
-// open transaction, with its locks held: a callback must not block, and
-// must not panic — the store does not recover one. Fields may be added to
-// the struct and to its events.
+// They run synchronously, on the caller's goroutine, while the call runs,
+// mostly inside its open transaction with its locks held: a callback must
+// not block, and must not panic — the store does not recover one. Fields
+// may be added to the struct and to its events.
 type StoreEvents struct {
 	// OnTenantWait is called each time a metered call has locked the row
-	// of its tenant's aggregate, however short the wait: a histogram needs
-	// the fast samples too.
+	// of its tenant's aggregate, or written the tenant's stripe where the
+	// store counts a tenant with no ceiling in stripes, however short the
+	// wait: a histogram needs the fast samples too.
 	OnTenantWait func(context.Context, TenantWaitEvent)
 }
 
@@ -50,8 +51,9 @@ type TenantWaitEvent struct {
 	TenantID uuid.UUID
 	// Operation is the store call that locked it.
 	Operation StoreOperation
-	// Wait is how long locking the row took, by the database's clock: the
-	// wait for that row alone, not for the tenant's advisory lock nor for
-	// the counters of the call's chain. Never negative.
+	// Wait is how long locking the row took, or writing the stripe, by the
+	// database's clock: the wait for that row alone, not for the tenant's
+	// advisory lock nor for the counters of the call's chain. Never
+	// negative.
 	Wait time.Duration
 }

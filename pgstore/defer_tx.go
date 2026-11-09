@@ -48,6 +48,11 @@ type deferTx struct {
 type heldStmt struct {
 	sql  string
 	args []any
+	// into, when set, reads the statement's result from the batch in
+	// place of discarding it; done, when set, runs once the batch is sent
+	// without error.
+	into func(pgx.BatchResults) error
+	done func()
 }
 
 // sqlCommit ends a meter call's transaction in its last batch.

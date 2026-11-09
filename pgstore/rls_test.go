@@ -471,7 +471,7 @@ func tableDigests(t *testing.T) map[string]string {
 var scopedTables = []string{
 	"capabilities", "revocations", "biscuit_revocations", "usage",
 	"copy_usage", "tenant_budgets", "charges", "reservations", "erased_tenants",
-	"refunds",
+	"refunds", "tenant_budget_stripes",
 }
 
 // Under the read-only setting each table's policies let its rows be read
@@ -487,6 +487,11 @@ func TestReadOnlyPoliciesOfEveryTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := f.usage.Reserve(WithTenant(t.Context(), f.mine), meter.ReserveRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1}); err != nil {
+		t.Fatal(err)
+	}
+	// A striped tenant's charge leaves a row of tenant_budget_stripes.
+	striped := leaseholderOf(t)
+	if _, err := stripedStore(t, Config{}).Charge(WithTenant(t.Context(), striped.TenantID()), meter.ChargeRequest{Subject: striped, Amount: 1}, nil); err != nil {
 		t.Fatal(err)
 	}
 	// The other tenant's erase leaves its mark, a row of erased_tenants.
