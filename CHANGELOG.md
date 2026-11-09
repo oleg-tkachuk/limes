@@ -2,6 +2,17 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.173.0](https://github.com/oleg-tkachuk/limes/compare/v0.172.1...v0.173.0) (2026-11-09)
+
+### Features
+
+* **meter:** add ErrTenantBudgetBusy for a ceiling the tenant's calls held too long ([f16ed53](https://github.com/oleg-tkachuk/limes/commit/f16ed5371bc6d0caa8322ec60027f4eb7cd8064a))
+* **meter:** add store events for the wait on a tenant's aggregate ([51c014f](https://github.com/oleg-tkachuk/limes/commit/51c014ff575d8f4aa8263ac3a36b3131020ad547))
+
+### Codes
+
+* added: `tenant_budget_busy`
+
 ## [0.172.1](https://github.com/oleg-tkachuk/limes/compare/v0.172.0...v0.172.1) (2026-11-08)
 
 ### Bug Fixes

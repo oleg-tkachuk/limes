@@ -2,6 +2,25 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.72.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.71.1...pgstore%2Fv0.72.0) (2026-11-09)
+
+### Features
+
+* **pgstore:** report each call's wait for its tenant's aggregate ([363a556](https://github.com/oleg-tkachuk/limes/commit/363a556776349398a0d71b4a15b5e4f1c6c4be65))
+* **pgstore:** stripe the aggregate of a tenant without a ceiling ([145240d](https://github.com/oleg-tkachuk/limes/commit/145240d42cc16889c552d11f5501bdcdee400dc8))
+
+### Bug Fixes
+
+* **pgstore:** mark a statement's revocations in one walk ([34e7178](https://github.com/oleg-tkachuk/limes/commit/34e717852558318c5df63788756f1f4f91246af9))
+
+### Performance Improvements
+
+* **pgstore:** read a striped tenant before locking the aggregate ([a6f0d07](https://github.com/oleg-tkachuk/limes/commit/a6f0d073625b98097a3b31f3f1c1b1cdca108fb4))
+
+### Dependencies
+
+* require limes v0.173.0
+
 ## [0.71.1](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.71.0...pgstore%2Fv0.71.1) (2026-11-08)
 
 ### Bug Fixes
