@@ -15,8 +15,9 @@ import (
 )
 
 // The two statements a level of limes.mark_revoked runs
-// (migrations/015_revoked_flag.sql), its level the parameter: a test holds
-// them to the function's own.
+// (migrations/015_revoked_flag.sql, a statement's entries together since
+// 043_mark_revoked_per_statement.sql), its level the parameter: a test
+// holds them to the function's own.
 const (
 	sqlMarkLevel     = `UPDATE limes.capabilities SET revoked = true WHERE id = ANY ($1) AND NOT revoked RETURNING id`
 	sqlNextLevel     = `SELECT array_agg(id) FROM limes.capabilities WHERE parent_id = ANY ($1) AND NOT revoked`
