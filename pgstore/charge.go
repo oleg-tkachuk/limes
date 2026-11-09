@@ -59,7 +59,7 @@ func (s *UsageStore) bump(ctx context.Context, tx pgx.Tx, subject limes.MeterSub
 	if holder, below, ok := leaseFor(subject.CapabilityID(), ancestors, p.leases, s.asOf(p.now), leaseState.coversBumps); ok {
 		return s.bumpLeased(ctx, tx, subject, ancestors, below, holder, p.leases[holder], s.asOf(p.now))
 	}
-	c, err := lock(ctx, tx, lockRequest{
+	c, err := s.lock(ctx, tx, lockRequest{
 		now:     s.clock(),
 		created: append([]uuid.UUID{subject.CapabilityID()}, ancestorIDs(ancestors)...), usageTenant: subject.TenantID(),
 		copies: copyIDs(subject.Copies()), createCopies: true, copiesCapID: subject.CapabilityID(), maxCopies: subject.CopyQuota().Bounded(s.maxCopies),
@@ -262,7 +262,7 @@ func (s *UsageStore) charge(ctx context.Context, tx pgx.Tx, req meter.ChargeRequ
 		capID: req.Subject.CapabilityID(), tenantID: req.Subject.TenantID(), budget: req.Subject.Budget(),
 		unit: unit, copies: req.Subject.Copies(), copyQuota: req.Subject.CopyQuota(), amount: req.Amount, op: req.Op, actor: req.Actor,
 		externalRef: req.ExternalRef, overrun: req.Overrun, ancestors: ancestors,
-		replayAfterLock: req.ExternalRef != "",
+		replayAfterLock: req.ExternalRef != "", call: meter.StoreOperationCharge,
 	}
 	c, err := s.lockCharge(ctx, tx, spec)
 	if err != nil {
@@ -289,7 +289,7 @@ var errReplayedAfterLock = fmt.Errorf("%w: pgstore: charge replayed after its lo
 // and its copies'.
 func (s *UsageStore) lockCharge(ctx context.Context, tx pgx.Tx, spec chargeSpec) (*counters, error) {
 	l := lockRequest{
-		now:      s.clock(),
+		now: s.clock(), op: spec.call,
 		tenantID: spec.tenantID, tenantUnit: spec.unit,
 		created:     append([]uuid.UUID{spec.capID}, ancestorIDs(spec.ancestors)...),
 		usageTenant: spec.tenantID,
@@ -303,7 +303,7 @@ func (s *UsageStore) lockCharge(ctx context.Context, tx pgx.Tx, spec chargeSpec)
 		l.replayCapID, l.replayRef = spec.capID, spec.externalRef
 	}
 	l.holdID = spec.holdID
-	return lock(ctx, tx, l)
+	return s.lock(ctx, tx, l)
 }
 
 // chargeSpec is one charge to commit, in plain values: a Charge's request, or
@@ -332,6 +332,8 @@ type chargeSpec struct {
 	// holdID is the id a keyed Reserve holds under, looked for once the
 	// locks are held (lockRequest.holdID); nil for none.
 	holdID uuid.UUID
+	// call is the store call the charge is made by.
+	call meter.StoreOperation
 }
 
 // commitCharge checks every ceiling against c and, when all admit the
@@ -742,7 +744,7 @@ func (s *UsageStore) reserve(ctx context.Context, tx pgx.Tx, req meter.ReserveRe
 	}
 	c, err := s.lockCharge(ctx, tx, chargeSpec{
 		capID: subject.CapabilityID(), tenantID: subject.TenantID(), unit: unit, copies: subject.Copies(), copyQuota: subject.CopyQuota(), ancestors: ancestors,
-		holdID: req.ReservationID,
+		holdID: req.ReservationID, call: meter.StoreOperationReserve,
 	})
 	if err != nil {
 		return meter.Reservation{}, err
@@ -935,6 +937,7 @@ func (s *UsageStore) settleHold(ctx context.Context, tx pgx.Tx, req meter.Settle
 	spec := chargeSpec{
 		capID: h.capID, tenantID: h.tenantID, budget: req.Subject.Budget(), unit: h.unit, copies: h.copies, copyQuota: req.Subject.CopyQuota(),
 		amount: req.Amount, op: h.op, actor: h.actor, overrun: req.Overrun, ancestors: ancestors, settling: &h,
+		call: meter.StoreOperationSettle,
 	}
 	c, err := s.lockCharge(ctx, tx, spec)
 	if err != nil {
@@ -971,8 +974,8 @@ func (s *UsageStore) Release(ctx context.Context, req meter.ReleaseRequest) erro
 // releaseHold returns h to every counter that still holds it and deletes
 // it, in the call's last write (writeLast); the hold's row is locked.
 func (s *UsageStore) releaseHold(ctx context.Context, tx pgx.Tx, h hold) error {
-	c, err := lock(ctx, tx, lockRequest{
-		now:      s.clock(),
+	c, err := s.lock(ctx, tx, lockRequest{
+		now: s.clock(), op: meter.StoreOperationRelease,
 		tenantID: h.tenantID,
 		existing: append([]uuid.UUID{h.capID}, h.ancestors...),
 		copies:   copyIDs(h.copies), copiesCapID: h.capID,

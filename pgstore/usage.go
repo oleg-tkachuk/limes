@@ -84,8 +84,8 @@ func (s *UsageStore) lockRefunded(ctx context.Context, tx pgx.Tx, req meter.Refu
 	if !ok {
 		return ledgerEntry{}, nil, priorRefund{}, meter.ErrChargeNotFound
 	}
-	c, err := lock(ctx, tx, lockRequest{
-		now:      s.clock(),
+	c, err := s.lock(ctx, tx, lockRequest{
+		now: s.clock(), op: meter.StoreOperationRefund,
 		tenantID: e.TenantID,
 		existing: append([]uuid.UUID{e.CapabilityID}, e.ancestors...),
 		copies:   e.copies, copiesCapID: e.CapabilityID,
@@ -532,7 +532,7 @@ func (s *UsageStore) settleTenantLeases(ctx context.Context, tx pgx.Tx, tenant u
 	if err != nil || len(leases.holders) == 0 {
 		return err
 	}
-	if _, err := lock(ctx, tx, lockRequest{now: s.clock(), tenantID: tenant, existing: leases.counters}); err != nil {
+	if _, err := s.lock(ctx, tx, lockRequest{now: s.clock(), op: meter.StoreOperationSetTenantBudget, tenantID: tenant, existing: leases.counters}); err != nil {
 		return err
 	}
 	return s.settleLocked(ctx, tx, settledReset, leases)
@@ -580,10 +580,10 @@ func readLeases(ctx context.Context, tx pgx.Tx, query string, arg any) (leasesTo
 
 // settleLocked settles l's leases in tx, which holds every lock settling
 // them takes, and logs how many it settled for op.
-func (s *UsageStore) settleLocked(ctx context.Context, tx pgx.Tx, op string, l leasesToSettle) error {
+func (s *UsageStore) settleLocked(ctx context.Context, tx pgx.Tx, op meter.StoreOperation, l leasesToSettle) error {
 	settled := 0
 	for _, holder := range l.holders {
-		_, err := s.settleLease(ctx, tx, holder)
+		_, err := s.settleLease(ctx, tx, holder, op)
 		switch {
 		case errors.Is(err, meter.ErrLeaseNotFound):
 		case errors.Is(err, errLeaseMoved):
@@ -596,7 +596,7 @@ func (s *UsageStore) settleLocked(ctx context.Context, tx pgx.Tx, op string, l l
 			settled++
 		}
 	}
-	s.log.InfoContext(ctx, "pgstore: settled the leases a call must not leave open", slog.String(logKeyOp, op), slog.Int(logKeyLeases, settled))
+	s.log.InfoContext(ctx, "pgstore: settled the leases a call must not leave open", slog.String(logKeyOp, string(op)), slog.Int(logKeyLeases, settled))
 	return nil
 }
 
@@ -974,7 +974,7 @@ func (s *UsageStore) ReleaseExpired(ctx context.Context, req meter.ReleaseExpire
 	if err != nil {
 		return meter.ReleaseExpiredResult{}, err
 	}
-	settled, _, err := s.settleEach(ctx, func(fn func(pgx.Tx) error) error { return s.inTx(ctx, fn) }, sqlDueLeases, s.dueAt(), limit)
+	settled, _, err := s.settleEach(ctx, meter.StoreOperationReleaseExpired, func(fn func(pgx.Tx) error) error { return s.inTx(ctx, fn) }, sqlDueLeases, s.dueAt(), limit)
 	res := meter.ReleaseExpiredResult{Released: released, SettledLeases: int64(len(settled))}
 	return res, err
 }
@@ -1148,16 +1148,16 @@ var errLeaseOpened = fmt.Errorf("%w: pgstore: a lease was opened after the lease
 
 // The calls settledThen runs, as a log line names them.
 const (
-	settledReset        = "SetTenantBudget"
-	settledDeleteUsage  = "DeleteUsage"
-	settledPurgeOrphans = "PurgeOrphans"
+	settledReset        = meter.StoreOperationSetTenantBudget
+	settledDeleteUsage  = meter.StoreOperationDeleteUsage
+	settledPurgeOrphans = meter.StoreOperationPurgeOrphans
 )
 
 // settledThen runs settle, which settles the leases op must not outlive,
 // then act, op's own transaction; when act finds a lease opened in
 // between, it has rolled back, and both run again, at most settleAttempts
 // times in all. Past them the call is refused as limes.ErrConflict.
-func (s *UsageStore) settledThen(ctx context.Context, op string, settle, act func() error) error {
+func (s *UsageStore) settledThen(ctx context.Context, op meter.StoreOperation, settle, act func() error) error {
 	for attempt := 1; ; attempt++ {
 		if err := settle(); err != nil {
 			return err
@@ -1167,10 +1167,10 @@ func (s *UsageStore) settledThen(ctx context.Context, op string, settle, act fun
 			return err
 		}
 		if attempt == settleAttempts {
-			s.log.ErrorContext(ctx, "pgstore: leases kept opening while a call settled them", slog.String(logKeyOp, op), slog.Int(logKeyAttempts, attempt))
+			s.log.ErrorContext(ctx, "pgstore: leases kept opening while a call settled them", slog.String(logKeyOp, string(op)), slog.Int(logKeyAttempts, attempt))
 			return fmt.Errorf("%w: %s: leases kept opening while it settled them", limes.ErrConflict, op)
 		}
-		s.log.WarnContext(ctx, "pgstore: settling a lease opened while a call settled them", slog.String(logKeyOp, op), slog.Int(logKeyAttempts, attempt))
+		s.log.WarnContext(ctx, "pgstore: settling a lease opened while a call settled them", slog.String(logKeyOp, string(op)), slog.Int(logKeyAttempts, attempt))
 	}
 }
 
@@ -1221,7 +1221,7 @@ func (s *UsageStore) PurgeOrphans(ctx context.Context, req meter.PurgeOrphansReq
 	// The orphans' leases first, each in a transaction of its own, and
 	// again should one open before their counters go.
 	settle := func() error {
-		_, _, err := s.settleEach(ctx, func(fn func(pgx.Tx) error) error { return s.inTx(ctx, fn) }, sqlOrphanLeases, limit)
+		_, _, err := s.settleEach(ctx, meter.StoreOperationPurgeOrphans, func(fn func(pgx.Tx) error) error { return s.inTx(ctx, fn) }, sqlOrphanLeases, limit)
 		return err
 	}
 	var purged int64

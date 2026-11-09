@@ -30,13 +30,13 @@ const logKeyAttempts = "attempts"
 // The meter calls retryDeadlock retries, as a log line names them.
 const (
 	retriedBump        = "Bump"
-	retriedCharge      = "Charge"
-	retriedReserve     = "Reserve"
-	retriedSettle      = "Settle"
-	retriedRelease     = "Release"
-	retriedRefund      = "Refund"
-	retriedLease       = "Lease"
-	retriedSettleLease = "SettleLease"
+	retriedCharge      = string(meter.StoreOperationCharge)
+	retriedReserve     = string(meter.StoreOperationReserve)
+	retriedSettle      = string(meter.StoreOperationSettle)
+	retriedRelease     = string(meter.StoreOperationRelease)
+	retriedRefund      = string(meter.StoreOperationRefund)
+	retriedLease       = string(meter.StoreOperationLease)
+	retriedSettleLease = string(meter.StoreOperationSettleLease)
 )
 
 // logKeyError is the error a log line is about.

@@ -46,8 +46,8 @@ const (
 	metricCacheSignalsWhole         = "limes.revocation_cache.signals_whole"
 )
 
-// unitSeconds is the unit of a time instrument: seconds since the Unix
-// epoch.
+// unitSeconds is UCUM's second, the unit of every time instrument: a
+// timestamp in seconds since the Unix epoch, or a duration.
 const unitSeconds = "s"
 
 // attrKind is the attribute naming the kind of answer, under the cache's
