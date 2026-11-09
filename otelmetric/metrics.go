@@ -144,12 +144,16 @@ type meteringInstruments struct {
 	currentSpend    metric.Float64Histogram // capability spend after each charge
 }
 
-func newMeteringInstruments(cfg meteringConfig) (*meteringInstruments, error) {
-	provider := cfg.provider
-	if provider == nil {
-		provider = otel.GetMeterProvider()
+// providerOf is cfg's provider: the global one when none was set.
+func providerOf(cfg meteringConfig) metric.MeterProvider {
+	if cfg.provider == nil {
+		return otel.GetMeterProvider()
 	}
-	meter := provider.Meter(instrumentationScope)
+	return cfg.provider
+}
+
+func newMeteringInstruments(cfg meteringConfig) (*meteringInstruments, error) {
+	meter := providerOf(cfg).Meter(instrumentationScope)
 	in := &meteringInstruments{tenant: cfg.tenant}
 	var errs [6]error
 	in.chargeAmount, errs[0] = meter.Float64Counter(metricChargeAmount,

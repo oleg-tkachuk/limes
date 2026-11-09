@@ -27,6 +27,14 @@
 //		otelmetric.WithTenantAttribute(),       // opt-in: one series per tenant
 //	)
 //
+// NewStoreEvents returns the callbacks a usage store reports to
+// (pgstore.Config.Events): limes.tenant.wait, a histogram in seconds of how
+// long each metered call waited for its tenant's aggregate row, by
+// limes.operation, the store call:
+//
+//	events, err := otelmetric.NewStoreEvents(otelmetric.WithMeterProvider(provider))
+//	store, err := pgstore.NewUsageStore(pgstore.Config{DB: pool, Events: events})
+//
 // InstrumentRevocationCache reports a limes.RevocationCache's counts —
 // hits, misses, upstream lookups, evictions and entries, each by kind
 // (capability or biscuit), its clears, whole and narrow, and the revocation
