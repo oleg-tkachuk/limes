@@ -23,7 +23,9 @@
 // "Transactions" below. More
 // are needed only with the feature they serve: [CopyUsageReader] to show a
 // Biscuit copy's own counters, [LedgerReader] to sum a tenant's charges,
-// [LedgerHousekeeping] to remove charges past [MinChargeRetention], and
+// [LedgerHousekeeping] to remove charges past [MinChargeRetention],
+// [MatchingReleaser] to free at once the holds of capabilities a bulk
+// revocation stopped, [Leaser] to lease a capability its budget, and
 // [TenantUsageEraser] to remove a tenant. memstore ships them in memory,
 // pgstore over PostgreSQL, and metertest checks any implementation.
 // [Features] names the optional ones a store implements and has on — a
