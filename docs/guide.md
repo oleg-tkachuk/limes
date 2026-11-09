@@ -1584,7 +1584,8 @@ without locking it and add their change to one of the tenant's stripes,
 chosen by their connection, so they queue only where two connections share
 a stripe. Reads sum the row and the stripes, and setting a ceiling folds
 the stripes back into the row first, waiting for the tenant's calls in
-flight a bounded time (`meter.ErrTenantBudgetBusy` past it); from then on
+flight a bounded time (`Config.TenantBudgetLockTimeout`; past it a
+`meter.TenantBudgetBusyError`, which names who held the tenant); from then on
 the tenant's calls lock the row again. A release before pgstore/v0.72.0
 reads the row without its stripes, and would check a ceiling against less
 than was spent: set `DisableTenantStripes` while one still writes the

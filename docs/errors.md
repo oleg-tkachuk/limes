@@ -167,7 +167,13 @@ has a reason, and the store's own error stays in the text only.
   committed is answered as a replay. An unkeyed call sent again may count
   twice (docs/guide.md, "Retrying a lost answer").
 - **`tenant_budget_busy`** is a `SetTenantBudget` that changed nothing: the
-  tenant's calls in flight held it past the store's bound. Send it again.
+  tenant's calls in flight held it past the store's bound
+  (pgstore's `Config.TenantBudgetLockTimeout`). Send it again. pgstore's
+  error is a `meter.TenantBudgetBusyError`, which says how many calls held
+  the tenant and how long the oldest it can see had run: one idle in its
+  transaction is a caller holding it open, which no retry outlasts until
+  that caller ends it, or the database's
+  `idle_in_transaction_session_timeout` does.
 
 `limes.Codes()` lists every code, the meter's among them and, in a
 binary that links the exchange in, the exchange's, so a consumer's test can prove its own mapping covers them all
