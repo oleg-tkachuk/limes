@@ -46,12 +46,26 @@ func otherSide(t *testing.T) pgx.Tx {
 	return tx
 }
 
+// lockingStore is a usage store over app that counts a tenant with no
+// ceiling on its row (Config.DisableTenantStripes), every call locking it.
+func lockingStore(t *testing.T, cfg Config) *UsageStore {
+	t.Helper()
+	cfg.DB, cfg.DisableTenantStripes = app, true
+	usage, err := NewUsageStore(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return usage
+}
+
 // Refund locks the ledger after the counters, as an erase does: an erase
 // that holds the tenant's aggregate and then deletes its charges does not
-// meet a Refund holding the charge and waiting for the aggregate.
+// meet a Refund holding the charge and waiting for the aggregate. The
+// tenant has no ceiling, and its calls lock the row only without stripes.
 func TestRefundLocksTheLedgerLast(t *testing.T) {
 	const amount = 5
 	f := newTenantFixture(t)
+	f.usage = lockingStore(t, Config{Now: f.clock.Now})
 	mine := WithTenant(context.Background(), f.mine)
 	charged, err := f.usage.Charge(mine, meter.ChargeRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: amount}, nil)
 	if err != nil {
@@ -223,7 +237,8 @@ func (h *logRecords) Handle(_ context.Context, r slog.Record) error {
 // A Charge that PostgreSQL aborts to break a deadlock with a call of the
 // order before — the tenant's aggregate first, then a counter — is run
 // again once that call is done, and says so: what a rolling upgrade from
-// that order meets.
+// that order meets. The tenant has no ceiling, and its calls lock the row
+// only without stripes.
 func TestAChargeDeadlockedByTheOldOrderIsRetried(t *testing.T) {
 	f := newTenantFixture(t)
 	mine := WithTenant(context.Background(), f.mine)
@@ -232,10 +247,7 @@ func TestAChargeDeadlockedByTheOldOrderIsRetried(t *testing.T) {
 		t.Fatal(err)
 	}
 	logged := &logRecords{}
-	usage, err := NewUsageStore(Config{DB: app, Now: f.clock.Now, Logger: slog.New(logged)})
-	if err != nil {
-		t.Fatal(err)
-	}
+	usage := lockingStore(t, Config{Now: f.clock.Now, Logger: slog.New(logged)})
 	old := otherSide(t)
 	if _, err := old.Exec(context.Background(), `SELECT 1 FROM `+schema+`.tenant_budgets WHERE tenant_id = $1 FOR UPDATE`, f.mine); err != nil {
 		t.Fatal(err)

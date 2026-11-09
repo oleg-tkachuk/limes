@@ -1555,17 +1555,17 @@ charge's writes, so that its own writes see the charge's row, and before
 database, with no network call in it; a tenant that needs more is served by fewer, larger charges — a
 `Reserve` settled once for many units of work — not by a setting.
 
-A tenant with no ceiling is checked against nothing, and pgstore's
-`Config.StripeUnlimitedTenants` takes its calls off the row: they read it
+A tenant with no ceiling is checked against nothing, and pgstore takes its
+calls off the row unless `Config.DisableTenantStripes` is set: they read it
 without locking it and add their change to one of the tenant's stripes,
 chosen by their connection, so they queue only where two connections share
 a stripe. Reads sum the row and the stripes, and setting a ceiling folds
 the stripes back into the row first, waiting for the tenant's calls in
 flight a bounded time (`meter.ErrTenantBudgetBusy` past it); from then on
-the tenant's calls lock the row again. A release before the one that folds
+the tenant's calls lock the row again. A release before pgstore/v0.72.0
 reads the row without its stripes, and would check a ceiling against less
-than was spent: set the switch only once every store that writes the
-database runs a release that folds
+than was spent: set `DisableTenantStripes` while one still writes the
+database
 ([ADR-0022](adr/0022-unlimited-tenant-aggregate.md)).
 
 The schema is created and upgraded by `pgstore/migrate`, which only a

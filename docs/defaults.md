@@ -137,8 +137,8 @@ or be marked breaking by hand.
 | `pgstore.Config` | `Logger` | `slog.Default()` |  |
 | `pgstore.Config` | `Events` | none | No callback is made. A wait for a tenant's aggregate past 100 ms is still logged at WARN. |
 | `pgstore.Config` | `DisableLeases` | off | The usage store opens a lease when `meter.Leaser.Lease` asks for one, never of itself, and reports `meter.FeatureLeases` enabled. A store that opens none pays one statement per charge and bump a lease could cover, a read of the chain's leases, in the batch the call sends already: no round trip. Set, the read stays, since leases already open are still charged under. |
+| `pgstore.Config` | `DisableTenantStripes` | off | A tenant with no ceiling is counted in stripes: its calls lock no aggregate row. A store with it set still folds stripes another store wrote, and sums them when it reads the aggregate. |
 | `pgstore.Config` | `MaxCopiesPerCapability` | `meter.DefaultMaxCopiesPerCapability` |  |
-| `pgstore.Config` | `StripeUnlimitedTenants` | off | Every call locks its tenant's aggregate row. The store still folds stripes another store wrote, and sums them when it reads the aggregate. |
 | `pgstore.ReplayConfig` | `DB` | required |  |
 | `pgstore.ReplayConfig` | `EntriesPerHolder` | `dpop.DefaultReplayEntriesPerHolder` | Caps one holder at `EntriesPerHolder / (Window + ReplayClockSkew)` proofs a second: about 15 with the defaults. |
 | `pgstore.ReplayConfig` | `Now` | `time.Now` |  |

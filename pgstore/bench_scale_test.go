@@ -243,9 +243,9 @@ const benchTenantCeiling = limes.MaxNanos
 // set (ceiling=none: its aggregate is created unlimited), each leaf under a
 // lease of its own, and with benchTenantCeiling set (ceiling=set), the last
 // on a tenant of its own, so that it starts from an empty tenant as
-// ceiling=none does. Both run again with Config.StripeUnlimitedTenants set
-// (stripes=on), each on a tenant of its own: a tenant with no ceiling is
-// then charged on stripes, not on its row
+// ceiling=none does, with Config.DisableTenantStripes set. Both run again
+// without it (stripes=on), each on a tenant of its own: a tenant with no
+// ceiling is then charged on stripes, not on its row
 // (docs/adr/0022-unlimited-tenant-aggregate.md). The one-at-a-time charges
 // count their references across -count's repetitions, which share the
 // fixture, so none is a replay.
@@ -442,23 +442,24 @@ func delayCopy(dst, src net.Conn, oneWay time.Duration, read *atomic.Int64) {
 }
 
 // leasing is f with a usage store over db that leases, as one does by
-// default: bench_test.go's fixture keeps to the Config the newest release
-// has.
+// default, and counts a tenant with no ceiling on its row
+// (Config.DisableTenantStripes): bench_test.go's fixture keeps to the
+// Config the newest release has.
 func (f benchFixture) leasing(b *testing.B, db *pgxpool.Pool) benchFixture {
 	b.Helper()
 	var err error
-	if f.usage, err = NewUsageStore(Config{DB: db}); err != nil {
+	if f.usage, err = NewUsageStore(Config{DB: db, DisableTenantStripes: true}); err != nil {
 		b.Fatal(err)
 	}
 	return f
 }
 
 // striping is f with a usage store over db that leases and counts a tenant
-// with no ceiling in stripes (Config.StripeUnlimitedTenants).
+// with no ceiling in stripes, as a zero Config does.
 func (f benchFixture) striping(b *testing.B, db *pgxpool.Pool) benchFixture {
 	b.Helper()
 	var err error
-	if f.usage, err = NewUsageStore(Config{DB: db, StripeUnlimitedTenants: true}); err != nil {
+	if f.usage, err = NewUsageStore(Config{DB: db}); err != nil {
 		b.Fatal(err)
 	}
 	return f
