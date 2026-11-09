@@ -374,6 +374,15 @@ type Config struct {
 	// less than was spent: set it while one still writes the database
 	// (docs/migration.md). The record store ignores it.
 	DisableTenantStripes bool
+	// TenantBudgetLockTimeout is how long SetTenantBudget waits for the
+	// tenant's calls in flight before it changes nothing and refuses with a
+	// meter.TenantBudgetBusyError
+	// (docs/adr/0022-unlimited-tenant-aggregate.md, Decision 9). Every call
+	// of the tenant that starts meanwhile queues behind it, so it is also
+	// the longest the tenant is stalled. Zero: 5s. Below a millisecond,
+	// which PostgreSQL's lock_timeout cannot express, is refused, as is
+	// negative. The record store ignores it.
+	TenantBudgetLockTimeout time.Duration
 }
 
 // errNoDB is NewStore given a Config without a DB: none at all, or a nil
@@ -422,8 +431,8 @@ type conn struct {
 	events meter.StoreEvents
 	// stripes is the negation of Config.DisableTenantStripes.
 	stripes bool
-	// tenantBudgetLockTimeout is how long SetTenantBudget waits for the
-	// tenant's calls in flight (defaultTenantBudgetLockTimeout).
+	// tenantBudgetLockTimeout is Config.TenantBudgetLockTimeout, its
+	// default applied.
 	tenantBudgetLockTimeout time.Duration
 	// tenantWaitWarnAfter is how long a call waits for its tenant's
 	// aggregate before the wait is logged at WARN
@@ -455,6 +464,12 @@ func newConn(cfg Config) (conn, error) {
 	case cfg.MaxCopiesPerCapability == 0:
 		cfg.MaxCopiesPerCapability = meter.DefaultMaxCopiesPerCapability
 	}
+	switch {
+	case cfg.TenantBudgetLockTimeout == 0:
+		cfg.TenantBudgetLockTimeout = defaultTenantBudgetLockTimeout
+	case cfg.TenantBudgetLockTimeout < lockTimeoutResolution:
+		return conn{}, fmt.Errorf("%w: pgstore: Config.TenantBudgetLockTimeout %s is below %s", limes.ErrInvalidConfig, cfg.TenantBudgetLockTimeout, lockTimeoutResolution)
+	}
 	txs, path := txBeginnerOf(cfg.DB)
 	cfg.Logger.Info("pgstore: opening transactions",
 		slog.String(logKeyTxPath, path), slog.String(logKeyDBType, fmt.Sprintf("%T", cfg.DB)))
@@ -478,7 +493,7 @@ func newConn(cfg Config) (conn, error) {
 		stripes:    !cfg.DisableTenantStripes,
 
 		tenantWaitWarnAfter:     defaultTenantWaitWarnAfter,
-		tenantBudgetLockTimeout: defaultTenantBudgetLockTimeout,
+		tenantBudgetLockTimeout: cfg.TenantBudgetLockTimeout,
 	}, nil
 }
 

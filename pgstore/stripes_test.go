@@ -5,10 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 	"uuid"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/meter"
@@ -255,42 +259,105 @@ func TestLockingFoldsStripes(t *testing.T) {
 }
 
 // SetTenantBudget waits a bounded time for the tenant's calls in flight;
-// past it, it changes nothing, logs why and refuses with
-// ErrTenantBudgetBusy, which the caller may send again.
+// past it, it changes nothing, logs why and refuses with a
+// TenantBudgetBusyError, which the caller may send again. The error says
+// who held the tenant: a holder of the store's own role by how long it ran
+// and whether it was idle in its transaction, one of another role — the
+// schema's owner here — counted alone, since PostgreSQL shows the store
+// none of its session.
 func TestSetTenantBudgetBusy(t *testing.T) {
-	fresh(t)
-	logged := &logRecords{}
-	usage := stripedStore(t, Config{Logger: slog.New(logged)})
-	usage.tenantBudgetLockTimeout = busyLockTimeout
-	subject := leaseholderOf(t)
-	tenant := subject.TenantID()
-	ctx := WithTenant(t.Context(), tenant)
-	chargeStriped(t, usage, subject)
+	for _, tc := range []struct {
+		name    string
+		holder  func() (pgx.Tx, error)
+		visible bool
+	}{
+		{"a holder of the store's role", func() (pgx.Tx, error) { return app.Begin(context.Background()) }, true},
+		{"a holder of another role", func() (pgx.Tx, error) { return owner.Begin(context.Background()) }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fresh(t)
+			logged := &logRecords{}
+			usage := stripedStore(t, Config{Logger: slog.New(logged), TenantBudgetLockTimeout: busyLockTimeout})
+			subject := leaseholderOf(t)
+			tenant := subject.TenantID()
+			ctx := WithTenant(t.Context(), tenant)
+			chargeStriped(t, usage, subject)
 
-	inFlight, err := owner.Begin(context.Background())
-	if err != nil {
-		t.Fatal(err)
+			inFlight, err := tc.holder()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = inFlight.Rollback(context.Background()) }()
+			if _, err := inFlight.Exec(context.Background(), sqlShareTenantLock, eraseLockClass, tenant); err != nil {
+				t.Fatal(err)
+			}
+			req := meter.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: limes.MaxNanos, UnitCode: testUnit}}
+			_, err = usage.SetTenantBudget(ctx, req)
+			if !errors.Is(err, meter.ErrTenantBudgetBusy) || errors.Is(err, limes.ErrConflict) || errors.Is(err, limes.ErrInternal) {
+				t.Fatalf("SetTenantBudget behind a call in flight = %v, want ErrTenantBudgetBusy alone", err)
+			}
+			var busy *meter.TenantBudgetBusyError
+			if !errors.As(err, &busy) {
+				t.Fatalf("SetTenantBudget behind a call in flight = %T, want a TenantBudgetBusyError", err)
+			}
+			if busy.TenantID != tenant || busy.Waited < busyLockTimeout || busy.Holders != 1 {
+				t.Errorf("busy = tenant %s, waited %s, %d holders; want %s, at least %s, 1", busy.TenantID, busy.Waited, busy.Holders, tenant, busyLockTimeout)
+			}
+			switch {
+			case !tc.visible && busy.Oldest != nil:
+				t.Errorf("a holder of another role seen as %+v, want none", *busy.Oldest)
+			case tc.visible && busy.Oldest == nil:
+				t.Error("a holder of the store's role not seen")
+			case tc.visible && (!busy.Oldest.IdleInTransaction || busy.Oldest.Running < busyLockTimeout):
+				t.Errorf("the holder seen as %+v, want idle in its transaction, running at least %s", *busy.Oldest, busyLockTimeout)
+			}
+			if n := logged.waitWarnings(); n != 1 {
+				t.Errorf("busy SetTenantBudget logged %d wait warnings, want 1", n)
+			}
+			if n := countStripes(t, tenant); n == 0 {
+				t.Errorf("a busy SetTenantBudget folded the stripes")
+			}
+			if err := inFlight.Rollback(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := usage.SetTenantBudget(ctx, req); err != nil {
+				t.Fatalf("SetTenantBudget once the call ended: %v", err)
+			}
+		})
 	}
-	defer func() { _ = inFlight.Rollback(context.Background()) }()
-	if _, err := inFlight.Exec(context.Background(), sqlShareTenantLock, eraseLockClass, tenant); err != nil {
-		t.Fatal(err)
+}
+
+// TenantBudgetLockTimeout of zero is the default; one PostgreSQL's
+// lock_timeout cannot hold, below a millisecond and so set as no bound, is
+// refused, as is a negative one.
+func TestTenantBudgetLockTimeoutConfig(t *testing.T) {
+	for _, tc := range []struct {
+		timeout time.Duration
+		want    time.Duration
+		refused bool
+	}{
+		{0, defaultTenantBudgetLockTimeout, false},
+		{lockTimeoutResolution, lockTimeoutResolution, false},
+		{time.Minute, time.Minute, false},
+		{lockTimeoutResolution - time.Microsecond, 0, true},
+		{-time.Second, 0, true},
+	} {
+		usage, err := NewUsageStore(Config{DB: app, TenantBudgetLockTimeout: tc.timeout})
+		switch {
+		case tc.refused && !errors.Is(err, limes.ErrInvalidConfig):
+			t.Errorf("TenantBudgetLockTimeout %s: %v, want ErrInvalidConfig", tc.timeout, err)
+		case !tc.refused && err != nil:
+			t.Errorf("TenantBudgetLockTimeout %s: %v", tc.timeout, err)
+		case !tc.refused && usage.tenantBudgetLockTimeout != tc.want:
+			t.Errorf("TenantBudgetLockTimeout %s is %s, want %s", tc.timeout, usage.tenantBudgetLockTimeout, tc.want)
+		}
 	}
-	req := meter.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: limes.MaxNanos, UnitCode: testUnit}}
-	_, err = usage.SetTenantBudget(ctx, req)
-	if !errors.Is(err, meter.ErrTenantBudgetBusy) || errors.Is(err, limes.ErrConflict) || errors.Is(err, limes.ErrInternal) {
-		t.Fatalf("SetTenantBudget behind a call in flight = %v, want ErrTenantBudgetBusy alone", err)
-	}
-	if n := logged.waitWarnings(); n != 1 {
-		t.Errorf("busy SetTenantBudget logged %d wait warnings, want 1", n)
-	}
-	if n := countStripes(t, tenant); n == 0 {
-		t.Errorf("a busy SetTenantBudget folded the stripes")
-	}
-	if err := inFlight.Rollback(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := usage.SetTenantBudget(ctx, req); err != nil {
-		t.Fatalf("SetTenantBudget once the call ended: %v", err)
+}
+
+// lockKeyHalfSQL is one 32-bit half of a key, every bit set.
+func TestLockKeyHalf(t *testing.T) {
+	if lockKeyHalfSQL != strconv.FormatUint(math.MaxUint32, 10) {
+		t.Errorf("lockKeyHalfSQL = %s, want %d", lockKeyHalfSQL, uint64(math.MaxUint32))
 	}
 }
 
