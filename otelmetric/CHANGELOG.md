@@ -2,6 +2,16 @@
 
 Every release of the otelmetric module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.20.0](https://github.com/oleg-tkachuk/limes/compare/otelmetric%2Fv0.19.0...otelmetric%2Fv0.20.0) (2026-11-09)
+
+### Features
+
+* **otelmetric:** record the wait for a tenant's aggregate as a histogram ([456b1bc](https://github.com/oleg-tkachuk/limes/commit/456b1bc291958ba0badb1ed4c8c1682e75bbdb29))
+
+### Dependencies
+
+* require limes v0.173.0
+
 ## [0.19.0](https://github.com/oleg-tkachuk/limes/compare/otelmetric%2Fv0.18.0...otelmetric%2Fv0.19.0) (2026-11-08)
 
 ### Features
