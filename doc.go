@@ -77,7 +77,8 @@
 // tenant's records with their dispositions and [RecordListingReader] to read
 // one with its disposition — [RecordReporter] is both, and the Census that
 // memstore.NewCensus and pgstore.NewCensus return serves all three —
-// [BulkRevoker] to revoke by user, client or identity-provider session,
+// [BulkRevoker] to revoke by user, client, identity-provider session or
+// agent run (meter.MatchingReleaser frees the holds it stopped),
 // [ExchangeStore] to exchange each subject token for one capability,
 // [TenantRecordEraser] to
 // remove a tenant, [dpop.ReplayCache] to share DPoP replay

@@ -398,16 +398,10 @@ limes never resolves a Redis client:
 replay, err := redisreplay.New(redisreplay.Config{Client: rdb}) // any redis.UniversalClient
 ```
 
-It keeps one sorted set per capability, so one call is one atomic script on
-one key, Redis Cluster included, and it decides what is live by the
-verifier's clock, never the server's. A holder refused for its share,
-unlike a replay, is logged at WARN (`Config.Logger`). Run it with `maxmemory-policy
-noeviction`: full, Redis refuses the write and the check fails as an outage,
-its own error and never a refused proof, where an eviction policy would
-forget a live id. Redis replicates asynchronously, so
-a failover can lose ids the old primary acknowledged and a proof can then be
-replayed once inside its window; where that matters, keep `Window` short or
-require server nonces.
+Run it with `maxmemory-policy noeviction`, and keep `Window` short or
+require server nonces where a failover replaying a proof once matters: the
+key layout, the clock it decides by and why are in
+[its reference](api/dpop.md#package-redisreplay).
 
 A deployment that runs pgstore already can keep the ids in PostgreSQL
 instead, one table every replica shares (`limes.dpop_seen_proofs`, which
@@ -913,40 +907,17 @@ limits of its own goes through the whole chain, as a charge of one does.
 
 ## Observe the meter
 
-`otelmetric.Instrument`, from the nested module
-`github.com/oleg-tkachuk/limes/otelmetric`, wraps a `UsageStore` in
-OpenTelemetry instruments — a module of its own, so limes itself resolves no
-OpenTelemetry dependency: charge and
-settle attempts, reservations and request bumps counted by `limes.outcome`
-(`allowed`, `overrun`, `budget_exceeded`, `tenant_budget_exceeded`,
-`request_limit_exceeded` — the refusals named as their `Reason` — and
-`error`); amounts charged and refunded, and a capability's spend after each
-charge, by `limes.unit_code`. Instruments are created per store, and an error
-creating them is returned:
-
-```go
-usage, err := otelmetric.Instrument(store,
-    otelmetric.WithMeterProvider(provider), // default: the global provider
-    otelmetric.WithTenantAttribute(),       // opt-in: one series per tenant
-)
-```
-
-A replayed charge or settle moved nothing and is not counted.
-`limes.tenant_id` is off by default because it multiplies every series by the number of tenants;
-with `WithTenantAttribute`, every measurement — a refused charge or settle
-included — carries the subject's tenant.
-
-`otelmetric.NewStoreEvents` gives pgstore the callbacks it reports to
-(`pgstore.Config.Events`): `limes.tenant.wait`, a histogram in seconds of
-how long each metered call waited for its tenant's aggregate row, by
-`limes.operation`, the store call. It is the measure of a tenant's queue,
-and so of when its calls should lease
-([Lease a sub-agent its budget](#lease-a-sub-agent-its-budget)):
-
-```go
-events, err := otelmetric.NewStoreEvents(otelmetric.WithMeterProvider(provider))
-store, err := pgstore.NewUsageStore(pgstore.Config{DB: pool, Events: events})
-```
+The nested module `github.com/oleg-tkachuk/limes/otelmetric` — a module of
+its own, so limes itself resolves no OpenTelemetry dependency — wraps a
+usage store in OpenTelemetry instruments (`otelmetric.Instrument`): charges,
+settles, reservations and request bumps by outcome and by the ceiling that
+refused them, amounts by unit, and a capability's spend after each charge.
+`otelmetric.NewStoreEvents` records `limes.tenant.wait`, how long each
+metered call waited for its tenant's aggregate row: the measure of a
+tenant's queue, and so of when its calls should lease
+([Lease a sub-agent its budget](#lease-a-sub-agent-its-budget)). The
+instruments, their attributes and the options are in
+[the package's reference](api/observing.md#package-otelmetric).
 
 ## Observing the issuer, verifier and revoker
 
@@ -1553,18 +1524,14 @@ no later than that expiry plus `limes.MaxLeeway` and
 only past it — when no verifier could still accept the token, and its
 record may be purged (`limes.MinPurgeRetention`).
 
-A tenant's ceiling is exact because every call that moves its spend or holds
-— `Charge`, `Reserve`, `Settle`, `Refund`, `Release`, `ReleaseExpired`,
-`SetTenantBudget` — locks the tenant's budget row until it commits. One
-tenant's charges therefore commit one at a time, on whatever capabilities, and
-no number of connections or replicas raises that: pgstore's benchmarks, with
-PostgreSQL on the same host, put it at some 350–700 charges a second for one
-tenant. Other tenants do not wait on it, nor do `Bump` and the revocation
-checks. A network to the database adds its round trip to every statement of
-the transaction, and `onCharged` runs while the lock is held — after the
+A tenant's ceiling is exact because the calls that move its spend or holds
+lock its budget row until they commit, so one tenant's charges commit one at
+a time, however many connections or replicas send them: pgstore's
+[Throughput](api/storage.md#package-pgstore) says which calls, and what its
+benchmarks measured. `onCharged` runs while the lock is held — after the
 charge's writes, so that its own writes see the charge's row, and before
-`COMMIT`, which then costs a round trip of its own — so keep it short and on the same
-database, with no network call in it.
+`COMMIT`, which then costs a round trip of its own — so keep it short and on
+the same database, with no network call in it.
 
 A tenant whose calls queue on its row shows it in `limes.tenant.wait`
 ([Observe the meter](#observe-the-meter)), and in pgstore's WARN line for
@@ -2164,67 +2131,25 @@ if err != nil {
 }
 ```
 
-A malformed `Authorization` header is 400; a bad token or proof is 401, with a
-`Bearer` or `DPoP` challenge naming the error code (and `algs` for DPoP, when the verifier checks proofs); a
-refused operation is 403 `insufficient_scope`; an exhausted budget or request
-limit is 403 with no challenge; a conflict with what is on record
-(`ErrConflict`: an id already on record, a unit mismatch, an external
-reference or settle naming another cost, a stale budget version) is 409; an
-issuer's key set never fetched, out of
-reach past `MaxStale`, or lacking the token's kid while the endpoint fails, is
-503 — the server's trouble, not the token's; anything else, a store outage or
-a verifier with no `DPoP` given a key-bound token (`ErrProofUnsupported`)
-included, is 500. A refusal for want of a nonce carries a fresh one in `DPoP-Nonce`. The
-body is `application/problem+json` with fixed text — the error's own
-message, which can name kids or stores, stays in your log — and the
-refusal's stable `Reason` (`budget_exceeded`, `revoked`, …) as its `reason`
-member and the end of its type URI. `ReasonOf(err)` gives the same `Reason`
-for your own wire format, and `Reason.Permanent()` whether the
-same request with the same capability can ever succeed, so a caller knows to
-stop rather than retry. The full table is in [diagrams.md](diagrams.md#answering-a-refusal).
+Each refusal's status and challenge — and the `DPoP-Nonce` a refusal for
+want of a nonce carries — are in [errors.md](errors.md#formats). The body
+is `application/problem+json` with fixed text — the error's own message,
+which can name kids or stores, stays in your log — and the refusal's
+stable `Reason` (`budget_exceeded`, `revoked`, …) as its `reason` member
+and the end of its type URI. `ReasonOf(err)` gives the same `Reason` for
+your own wire format, and `Reason.Permanent()` whether the same request
+with the same capability can ever succeed, so a caller knows to stop
+rather than retry.
 
 The body also carries the error's `code`, a stable name for any error limes
 returns, not only a refusal. An API of your own that is not a protected
-resource — an admin endpoint that revokes, a billing call that settles —
-answers an error limes returned with `limes.ProblemOf(err)`, the meter's
-among them: the same RFC 9457 body, with
-the status a store's not-found (404), conflict (409) or erased tenant (401)
-deserves rather than 500. Its text is never a contract: branch on the
-sentinel with `errors.Is`, put the code on the wire, and never strip
-`limes: ` from a message. [errors.md](errors.md) lists every code, its
-status, its sentinel and how to retry.
+resource answers an error limes returned with `limes.ProblemOf(err)`
+([errors.md](errors.md#formats)). Branch on the sentinel with `errors.Is`,
+and put the code on the wire: the text is never a contract.
 
 ## Defaults
 
-| Setting | Default |
-|---|---|
-| `IssuerConfig.DefaultTTL` | `DefaultIssueTTL`, 15 minutes |
-| `VerifierConfig.Leeway` | `DefaultLeeway`, 30 seconds; `VerifierConfig.NoLeeway: true` for none |
-| `VerifierConfig.MaxTokenBytes` · `IssuerConfig.MaxTokenBytes` | `DefaultMaxTokenBytes`, 16 KiB |
-| `VerifierConfig.Leeway` bound | `MaxLeeway`, 5 minutes |
-| `VerifierConfig.Realm` | `DefaultRealm`, `limes` |
-| `jwks.HandlerConfig.MaxAge` | `jwks.DefaultMaxAge`, 5 minutes; `HandlerConfig.Revalidate: true` for `no-cache` |
-| `ListByPrincipalRequest.Limit` · `meter.ListTenantBudgetsRequest.Limit` · `meter.ListReservationsRequest.Limit` · `meter.SumChargesRequest.Limit` · `CountRecordsRequest.Limit` · `ListRecordsRequest.Limit` | `DefaultListLimit` 50, at most `MaxListLimit` 500 |
-| `PurgeRequest` · `RevokeMatchingRequest` · `meter.ReleaseExpiredRequest` · `meter.PurgeOrphansRequest` | `DefaultHousekeepingLimit` 1 000 a batch; `PurgeRequest.ExpiredFor` `MinPurgeRetention`, 6 minutes, and no less |
-| `meter.PurgeChargesRequest` | `DefaultHousekeepingLimit` 1 000 a batch; `OlderThan` `meter.MinChargeRetention`, 401 days, and no less |
-| `MaxDelegationDepth` · `MaxBiscuitBlocks` | 64 ancestors · 32 attenuation blocks |
-| `meter.CopyUsageRequest.RevocationIDs` | at most `meter.MaxCopyUsageIDs`, 500, of one `CapabilityID` |
-| `RevocationCacheConfig` | `DefaultRevocationCacheTTL` 2 seconds · `DefaultRevocationCacheEntries` 100 000 of each kind, capabilities and Biscuit copies, spread over shards with a lock each — past the bound the oldest of the shard is dropped, the oldest of all in a cache of fewer than 512 entries, which is one shard; `SyncedTTL` is `TTL` unless set, from `TTL` to `MaxRevocationCacheSyncedTTL`, 24 hours; `MaxStale` 0, failing closed, at most `MaxRevocationCacheStale`, an hour; a negative TTL or bound is refused — for no cache, give the verifier the store itself |
-| `pgstore.RevocationWatcher.Heartbeat` | `pgstore.DefaultWatchHeartbeat`, 30 seconds; negative is refused |
-| `jwks.RemoteConfig` | `jwks.DefaultFetchTimeout` 10s · `DefaultRefreshInterval` 5m · `DefaultMinRefreshInterval` 10s · `DefaultMaxStale` 1h · `DefaultMaxDocumentBytes` 1 MiB |
-| `dpop.VerifierConfig.Window` | `dpop.DefaultWindow`, 1 minute; a proof's id is remembered for `Window` plus `dpop.ReplayClockSkew`, 5 seconds |
-| `dpop.VerifierConfig.MaxProofBytes` | `dpop.DefaultMaxProofBytes`, 4 KiB; a `jti` past `dpop.MaxJTIBytes`, 128 bytes, is refused |
-| `dpop.MemoryReplayCacheConfig` | `dpop.DefaultReplayCacheEntries`, 100 000 ids; `dpop.DefaultReplayEntriesPerHolder`, 1 000, per capability — with the default `Window`, about 15 proofs a second per holder ([the share caps a holder's rate](#the-replay-caches-share-caps-a-holders-rate)) |
-| `redisreplay.Config` | `redisreplay.DefaultKeyPrefix`, `limes:dpop:replay:`; `dpop.DefaultReplayEntriesPerHolder`, 1 000, per capability |
-| `pgstore.ReplayConfig` | `dpop.DefaultReplayEntriesPerHolder`, 1 000, per capability; `pgstore.DefaultReplayPurgeBatch`, 10 000 ids per `PurgeExpired` |
-| `dpop.HMACNoncesConfig` | `dpop.DefaultNonceLifetime`, 5 minutes; `dpop.HMACNonceClockSkew`, 5 seconds, for a nonce issued ahead of this replica's clock; keys of at least `dpop.HMACNonceKeyBytes`, 32 |
-| `meter.DefaultReservationTTL` | 5 minutes |
-| `memstore.UsageStoreConfig.MaxCopiesPerCapability` · `pgstore.Config.MaxCopiesPerCapability` | `meter.DefaultMaxCopiesPerCapability`, 1 024; negative is refused |
-| `Caveats.Copies` | the zero `CopyQuota`: no copy with limits of its own is counted |
-| `BudgetCeiling.UnitCode` left empty | allowed only on the zero ceiling, which spends nothing |
-| `PurgeClockSkew` | 1 minute |
-| `meter.MaxExternalRefBytes` | 200 |
-| `MaxNanos` | just under a billion units |
-| `MaxIJSONInteger` | 2^53 − 1, for every integer in a token |
-| `CheckTimeout` of every conformance suite's env (`storetest.Env`, `metertest.Env`, `metertest.CounterEnv`, `jwkstest.Env`, `dpoptest.ReplayEnv`, `dpoptest.NoncesEnv`) | `DefaultCheckTimeout`, 1 minute a check |
-
+Every `Config` field's zero value and every `Default…` constant are in
+[defaults.md](defaults.md), which a test holds to the code; every limit —
+the `Max…` and `Min…` constants — is in the [API reference](api/README.md),
+with its value and what it bounds.

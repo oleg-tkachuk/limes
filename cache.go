@@ -206,7 +206,10 @@ type RevocationCacheConfig struct {
 	// up to MaxDelegationDepth of them, and again in an index ClearRevoked
 	// reads them by: about 32 bytes per generation, so a full cache of
 	// chains 64 deep holds some 200 MB of them at the default bound, against
-	// 64 to 160 bytes for chains two to five deep.
+	// 64 to 160 bytes for chains two to five deep. Each kind is spread over
+	// shards with a lock each, and past the bound a shard drops its oldest
+	// answer: the oldest of all only in a cache small enough to be one
+	// shard.
 	MaxEntries int
 	// MaxStale is how long past the TTL in force an answer stands in for
 	// an upstream that fails: the question is answered as it was then, in

@@ -492,27 +492,8 @@ refused as `dpop.ErrInvalid`, never stored.
 
 `Verifier.ErrorResponse` maps a refusal to how a protected resource
 answers it, from the same table `ReasonOf` reads, and `WriteErrorResponse`
-writes it as `application/problem+json` with `Cache-Control: no-store`. The
-error's own text never reaches the client.
-
-| Refusal | Status | `WWW-Authenticate` |
-|---|---|---|
-| `jwks.ErrUnavailable` | 503 | none |
-| `ErrNoCredentials` | 401 | a challenge with no error code, only the realm (RFC 6750 §3.1): no header, or another scheme's |
-| `ErrMalformedAuthorization` | 400 | `error="invalid_request"` under the client's scheme (Bearer when unknown) |
-| `dpop.ErrNonceRequired` | 401 | `DPoP error="use_dpop_nonce"`, and a fresh `DPoP-Nonce` |
-| `dpop.ErrRequired` · `dpop.ErrInvalid` · `dpop.ErrReplayed`, and any other `ErrProofOfPossession` | 401 | `DPoP error="invalid_dpop_proof", algs="Ed25519 ES256"` |
-| `ErrAuthSchemeMismatch` · `ErrInvalidToken` · `ErrExpired` · `ErrNotYetValid` · `ErrRevoked` · `ErrAudienceMismatch`, and any other `ErrUnauthenticated` | 401 | `error="invalid_token"` under the client's scheme (Bearer when unknown) |
-| any `ErrCaveatViolation` | 403 | `error="insufficient_scope"` |
-| `ErrBudgetExceeded` · `ErrTenantBudgetExceeded` · `ErrRequestLimitExceeded` (`meter.ErrCopyLimitExceeded` included) | 403 | none |
-| `ErrUnitCodeMismatch` · `meter.ErrExternalRefConflict` · `ErrAlreadyExists`, and any other `ErrConflict` | 409 | none |
-| anything else — a store or key resolver outage, `ErrProofUnsupported`, `ErrEffectConflict`, `ErrCopyCountersNotMetered` | 500 | none |
-
-A verifier with DPoP configured adds a `DPoP algs="…"` challenge with no
-error code beside a `Bearer` one, and every `DPoP` challenge it answers
-carries `algs`. A challenge with an error code also carries
-`error_description`, the refusal's fixed title — never the error's own. Every
-challenge ends with `realm="…"`: `VerifierConfig.Realm`, or `DefaultRealm`.
+writes it. Each code's status, challenge and body are in
+[errors.md](errors.md#formats).
 
 Any error limes returns has a `Code` too, a refusal or not. `ProblemOf`
 builds the RFC 9457 body for an API that is not a protected resource;
@@ -528,7 +509,7 @@ flowchart TB
     pInt["ProblemFor: 500 internal"]
     er(["Verifier.ErrorResponse"])
     rr2{"a refusal?"}
-    resp["the table above:<br/>status · challenge · DPoP-Nonce"]
+    resp["errors.md:<br/>status · challenge · DPoP-Nonce"]
     i500["500 internal, no challenge"]
     out(["WriteErrorResponse<br/>application/problem+json · no-store"])
 

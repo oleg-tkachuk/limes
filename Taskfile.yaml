@@ -256,6 +256,11 @@ tasks:
     cmds:
       - go test -race -count=1 -run '^TestContractOnRedis$' ./...
 
+  docs:api:
+    desc: "Regenerate docs/api, the API reference, from every public package's doc comments (internal/apidoc) — the unit suite fails while it differs"
+    cmds:
+      - go test -count=1 -run '^TestReferenceIsCurrent$' ./internal/apidoc -args -update
+
   fmt:
     desc: "gofmt -s -w over every module — the half of fmt:check that rewrites; goimports is not run, as it adds imports this tree does not use"
     cmds:

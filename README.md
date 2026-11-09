@@ -152,24 +152,11 @@ own, pgstore included, logging what happens.
 You implement `Store` and a `KeyResolver`, which `jwks.Static` and
 `jwks.Remote` already are, and, to meter, `meter.UsageStore` — or use
 `memstore`, or `pgstore` over PostgreSQL — and check your implementation from
-its own tests with `storetest`, `metertest` and `jwkstest` (`dpoptest` for a
-DPoP replay cache or nonce source). Metering lives in the package `meter`, so
-a service that only verifies tokens never imports it. A charge runs your
-callback inside the store's transaction — `pgstore.TxFrom` reads it from the
-callback's context — so it can commit together with, say, an outbox write.
-The transaction stays the store's: the callback writes through it and never
-commits or rolls it back (`pgstore.ErrChargeTransaction`), and it closes when
-the callback returns.
-Optional contracts serve one feature each:
-
-- `RevocationLineageLookup` — a `RevocationCache` drops only what a revocation outdates;
-- `BiscuitRevocationStore`, `meter.CopyUsageReader` — Biscuit copies;
-- `meter.LedgerReader`, `meter.LedgerHousekeeping` — billing reads, and charges past their retention removed;
-- `RecordCensus`, `RecordLister`, `RecordListingReader` — reports on records (`memstore.NewCensus` and `pgstore.NewCensus` return a `Census` that is all three);
-- `BulkRevoker` — revocation by user, client, session or agent run, and
-  `meter.MatchingReleaser` to free the holds it stopped;
-- `ExchangeStore` — one capability per exchanged subject token;
-- `TenantRecordEraser`, `meter.TenantUsageEraser` — a tenant removed.
+its own tests with `storetest`, `metertest` and `jwkstest`. Each optional
+contract serves one feature; they are listed in the overviews of
+[limes](docs/api/capabilities.md#package-limes) and
+[meter](docs/api/metering.md#package-meter), and every name is in the
+[API reference](docs/api/README.md).
 
 ## Guarantees
 
@@ -298,6 +285,7 @@ its checks while unset.
 | Document | Covers |
 |----------|--------|
 | [docs/guide.md](docs/guide.md) | each concern in turn: verification, caveats, delegation, DPoP, Biscuit, metering, revocation, storage contracts, key rotation, token exchange |
+| [docs/api/](docs/api/README.md) | every exported name of every public package, by concern — its declaration and its doc comment, which is its specification — generated from the source |
 | [docs/errors.md](docs/errors.md) | every error's stable code, HTTP status and format (RFC 6750, RFC 9449, RFC 9457, RFC 6749), and when to retry |
 | [docs/standards.md](docs/standards.md) | the RFCs implemented — JWT, DPoP, JWKS, HTTP challenges and problem details — the choices made within them, and the OAuth standards deliberately left out |
 | [docs/diagrams.md](docs/diagrams.md) | the contract boundary, a capability's lifecycle, the verification gates, error answers, delegation, Biscuit copies, the charge path, revocation, token exchange |

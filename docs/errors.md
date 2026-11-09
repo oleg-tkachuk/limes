@@ -22,7 +22,18 @@ place.
 - a `WWW-Authenticate` challenge, with the error code RFC 6750 §3.1 or
   RFC 9449 §7.1 defines (the *Challenge `error`* column below);
 - a `DPoP-Nonce` header when the refusal asks for a nonce;
-- an RFC 9457 `application/problem+json` body.
+- an RFC 9457 `application/problem+json` body, sent with
+  `Cache-Control: no-store`. The error's own text never reaches the client.
+
+The challenge is under the client's scheme, `Bearer` when it is unknown; a
+refusal for want of credentials — no header, or another scheme's — carries
+no error code, only the realm (RFC 6750 §3.1). A verifier with DPoP
+configured adds a `DPoP algs="…"` challenge with no error code beside a
+`Bearer` one, and every `DPoP` challenge it answers carries `algs`. A
+challenge with an error code also carries `error_description`, the
+refusal's fixed title. Every challenge ends with `realm="…"`:
+`VerifierConfig.Realm`, or `DefaultRealm`. An error that is no refusal is
+answered 500, with no challenge.
 
 **Any other API of the consumer's** — an admin endpoint that revokes, a
 billing call that settles — answers an error limes returned with

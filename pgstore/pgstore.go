@@ -145,7 +145,10 @@
 // database adds its round trip to every statement of the transaction, and
 // onCharged and onRefunded run inside it, holding the lock: keep them short. A tenant that
 // needs more charges a second than that is a sizing question — fewer,
-// larger charges, as Reserve and Settle allow — not a setting.
+// larger charges, as Reserve and Settle allow, or a lease for each worker,
+// whose charges lock the lease and not the row — not a setting. A tenant
+// with no ceiling counted in stripes locks no row at all: its calls add to
+// a stripe of their connection's (docs/adr/0022-unlimited-tenant-aggregate.md).
 package pgstore
 
 import (
