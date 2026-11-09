@@ -6,7 +6,7 @@ import { after, before, describe, test } from "node:test";
 
 import { parse } from "yaml";
 
-import { ALL_GROUPS, candidateRange, changesNotes, changesOutputs, changesSummary, checkedGroups, classify, Group, INERT, OUTPUT_CHANGELOGS, OUTPUT_CODE, OUTPUT_RELEVANT, OUTPUT_VERIFY_TASKS, PUSH_EVENT, reachedGroups, reachesCode, READ_BY_TESTS, SCRIPTS_TASKS, VERIFY_GATE, verifyTasks } from "./changes.ts";
+import { ALL_GROUPS, candidateRange, changesNotes, changesOutputs, changesSummary, checkedGroups, classify, Group, INERT, OUTPUT_CHANGELOGS, OUTPUT_CODE, OUTPUT_RELEVANT, OUTPUT_VERIFY_TASKS, PUSH_EVENT, reachedGroups, reachesCode, READ_BY_TESTS, GENERATED_DOCS, SCRIPTS_TASKS, VERIFY_GATE, verifyTasks } from "./changes.ts";
 import { globToRegExp } from "./lib/glob.ts";
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
 
@@ -160,6 +160,8 @@ describe("paths a test reads", () => {
     assert.deepEqual([...reachedGroups(["docs/errors.md"])].sort(), [Group.Exchange, Group.Root].sort()));
   test("the defaults reference reaches the root, whose test holds it to every Config", () =>
     assert.deepEqual([...reachedGroups(["docs/defaults.md"])], [Group.Root]));
+  test("the API reference reaches the root, whose test generates it", () =>
+    assert.deepEqual([...reachedGroups([`${GENERATED_DOCS}README.md`, `${GENERATED_DOCS}metering.md`])], [Group.Root]));
   test("other documentation still reaches nothing", () => assert.equal(reachedGroups(["docs/guide.md", "pgstore/README.md"]).size, 0));
   test("every inert path a Go test names is listed", () => {
     const root = join(import.meta.dirname, "..", "..");

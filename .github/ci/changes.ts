@@ -135,11 +135,19 @@ export const READ_BY_TESTS: Readonly<Record<string, readonly Group[]>> = {
   "docs/defaults.md": [Group.Root],
 };
 
+// GENERATED_DOCS is the directory of documentation a root test generates and
+// holds to the doc comments of every module (internal/apidoc): a file of it
+// edited by hand must reach that test, so it reaches the root.
+export const GENERATED_DOCS = "docs/api/";
+
 // groupsOf is the groups one path reaches.
 export function groupsOf(path: string): readonly Group[] {
   const readBy = READ_BY_TESTS[path];
   if (readBy !== undefined) {
     return readBy;
+  }
+  if (path.startsWith(GENERATED_DOCS)) {
+    return [Group.Root];
   }
   if (matchesAny(path, INERT)) {
     return [];
