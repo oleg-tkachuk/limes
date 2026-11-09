@@ -33,12 +33,12 @@ func TestMeterContract(t *testing.T) {
 	})
 }
 
-// The contract holds with a tenant with no ceiling counted in stripes
-// (Config.StripeUnlimitedTenants): its calls lock no aggregate row.
-func TestMeterContractStriped(t *testing.T) {
+// The contract holds with a tenant with no ceiling counted on its row
+// (Config.DisableTenantStripes): its calls lock the aggregate row.
+func TestMeterContractWithoutStripes(t *testing.T) {
 	metertest.Run(t, func(t *testing.T) metertest.Env {
 		t.Helper()
-		return meterEnv(t, Config{StripeUnlimitedTenants: true}, WithAllTenantsReadOnly)
+		return meterEnv(t, Config{DisableTenantStripes: true}, WithAllTenantsReadOnly)
 	})
 }
 

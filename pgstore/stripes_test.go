@@ -59,10 +59,11 @@ func capabilityOf(t *testing.T, tenant uuid.UUID) limes.MeterSubject {
 	return meterSubject(c.ID, tenant)
 }
 
-// stripedStore is a usage store that stripes tenants with no ceiling.
+// stripedStore is a usage store that stripes tenants with no ceiling, as
+// one does by default.
 func stripedStore(t *testing.T, cfg Config) *UsageStore {
 	t.Helper()
-	cfg.DB, cfg.StripeUnlimitedTenants = app, true
+	cfg.DB = app
 	usage, err := NewUsageStore(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -91,8 +92,8 @@ func chargeStriped(t *testing.T, usage *UsageStore, subject limes.MeterSubject) 
 	}
 }
 
-// Off, the switch writes no stripe: the charge goes to the row.
-func TestStripesOffWriteNone(t *testing.T) {
+// A store of a zero Config stripes a tenant with no ceiling.
+func TestStripesByDefault(t *testing.T) {
 	fresh(t)
 	usage, err := NewUsageStore(Config{DB: app})
 	if err != nil {
@@ -100,8 +101,22 @@ func TestStripesOffWriteNone(t *testing.T) {
 	}
 	subject := leaseholderOf(t)
 	chargeStriped(t, usage, subject)
+	if n := countStripes(t, subject.TenantID()); n == 0 {
+		t.Error("a store of a zero Config wrote no stripe, want the tenant's charges on stripes")
+	}
+}
+
+// Disabled, stripes are written by no call: the charge goes to the row.
+func TestStripesDisabledWriteNone(t *testing.T) {
+	fresh(t)
+	usage, err := NewUsageStore(Config{DB: app, DisableTenantStripes: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject := leaseholderOf(t)
+	chargeStriped(t, usage, subject)
 	if n := countStripes(t, subject.TenantID()); n != 0 {
-		t.Errorf("stripes with the switch off = %d, want none", n)
+		t.Errorf("stripes with DisableTenantStripes = %d, want none", n)
 	}
 	var spent, reserved, version int64
 	if err := owner.QueryRow(t.Context(), sqlRowSpent, subject.TenantID()).Scan(&spent, &reserved, &version); err != nil {
@@ -213,14 +228,14 @@ func TestSetTenantBudgetFoldsStripes(t *testing.T) {
 	}
 }
 
-// A store with the switch off folds the stripes another store wrote, as
-// soon as a call of it locks the row.
+// A store with DisableTenantStripes folds the stripes another store wrote,
+// as soon as a call of it locks the row.
 func TestLockingFoldsStripes(t *testing.T) {
 	fresh(t)
 	subject := leaseholderOf(t)
 	tenant := subject.TenantID()
 	chargeStriped(t, stripedStore(t, Config{}), subject)
-	locking, err := NewUsageStore(Config{DB: app})
+	locking, err := NewUsageStore(Config{DB: app, DisableTenantStripes: true})
 	if err != nil {
 		t.Fatal(err)
 	}

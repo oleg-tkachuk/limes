@@ -15,7 +15,7 @@ import (
 )
 
 // A tenant with no ceiling counts its spend and holds in stripes rather
-// than on its aggregate's one row, when Config.StripeUnlimitedTenants is
+// than on its aggregate's one row, unless Config.DisableTenantStripes is
 // set (docs/adr/0022-unlimited-tenant-aggregate.md): its calls read the row
 // without locking it and add their deltas to the stripe of their
 // connection, so they queue only on a stripe their connection shares. A

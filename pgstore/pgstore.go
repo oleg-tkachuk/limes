@@ -362,18 +362,18 @@ type Config struct {
 	// meter.DefaultMaxCopiesPerCapability; negative is refused. The record
 	// store ignores it.
 	MaxCopiesPerCapability int
-	// StripeUnlimitedTenants has the usage store count a tenant with no
-	// ceiling in stripes rather than on its aggregate's one row
-	// (docs/adr/0022-unlimited-tenant-aggregate.md): such a tenant's calls
-	// read the row without locking it and add their change to the stripe
-	// of their connection, so they do not queue on one row. A store folds
-	// the stripes into the row, and sums them when it reads the aggregate,
-	// whether it is set or not. A release before the one that folds reads
-	// the row without its stripes, and checks a ceiling set meanwhile
-	// against less than was spent: set it only once every store writing the
-	// database folds (docs/guide.md). Unset: every call locks the row.
-	// The record store ignores it.
-	StripeUnlimitedTenants bool
+	// DisableTenantStripes has the usage store count a tenant with no
+	// ceiling on its aggregate's one row, every call locking it. Unset,
+	// such a tenant is counted in stripes
+	// (docs/adr/0022-unlimited-tenant-aggregate.md): its calls read the row
+	// without locking it and add their change to the stripe of their
+	// connection, so they do not queue on one row. A store folds the
+	// stripes into the row, and sums them when it reads the aggregate,
+	// whether it is set or not. A release before pgstore/v0.72.0 reads the
+	// row without its stripes, and checks a ceiling set meanwhile against
+	// less than was spent: set it while one still writes the database
+	// (docs/migration.md). The record store ignores it.
+	DisableTenantStripes bool
 }
 
 // errNoDB is NewStore given a Config without a DB: none at all, or a nil
@@ -420,7 +420,7 @@ type conn struct {
 	log *slog.Logger
 	// events is Config.Events.
 	events meter.StoreEvents
-	// stripes is Config.StripeUnlimitedTenants.
+	// stripes is the negation of Config.DisableTenantStripes.
 	stripes bool
 	// tenantBudgetLockTimeout is how long SetTenantBudget waits for the
 	// tenant's calls in flight (defaultTenantBudgetLockTimeout).
@@ -475,7 +475,7 @@ func newConn(cfg Config) (conn, error) {
 		log:        cfg.Logger,
 		expiryByDB: expiryByDB,
 		events:     cfg.Events,
-		stripes:    cfg.StripeUnlimitedTenants,
+		stripes:    !cfg.DisableTenantStripes,
 
 		tenantWaitWarnAfter:     defaultTenantWaitWarnAfter,
 		tenantBudgetLockTimeout: defaultTenantBudgetLockTimeout,

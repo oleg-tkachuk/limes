@@ -771,7 +771,7 @@ type lockRequest struct {
 	// op is the store call that locks, which the wait for the tenant's
 	// aggregate is reported under (Config.Events).
 	op meter.StoreOperation
-	// stripes is Config.StripeUnlimitedTenants: a tenant with no ceiling is
+	// stripes is the negation of Config.DisableTenantStripes: a tenant with no ceiling is
 	// read, not locked, and its change added to a stripe.
 	stripes bool
 	// tenantID is the aggregate to lock, none when nil; tenantUnit, when

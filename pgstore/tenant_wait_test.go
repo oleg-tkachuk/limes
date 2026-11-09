@@ -61,15 +61,13 @@ func (h *logRecords) waitWarnings() int {
 // A metered call reports every wait for its tenant's aggregate through
 // Config.Events, under its own operation and however short; a wait past
 // the threshold is logged at WARN too. A Bump locks no aggregate and
-// reports nothing.
+// reports nothing. The tenant has no ceiling, and its calls lock the row
+// only without stripes (TestStripedChargeLocksNoRow reports a stripe's).
 func TestTenantWaitIsReported(t *testing.T) {
 	fresh(t)
 	waits := &tenantWaits{}
 	logged := &logRecords{}
-	usage, err := NewUsageStore(Config{DB: app, Logger: slog.New(logged), Events: meter.StoreEvents{OnTenantWait: waits.record}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	usage := lockingStore(t, Config{Logger: slog.New(logged), Events: meter.StoreEvents{OnTenantWait: waits.record}})
 	subject := leaseholderOf(t)
 	tenant := subject.TenantID()
 	ctx := WithTenant(t.Context(), tenant)
