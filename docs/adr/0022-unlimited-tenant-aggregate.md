@@ -1,6 +1,6 @@
 # ADR-0022: A tenant without a ceiling is not one locked row
 
-**Status:** Proposed
+**Status:** Accepted, amended on 2026-11-09 before implementation (Decisions 8–11)
 **Date:** 2026-11-09
 **Deciders:** Oleg Tkachuk
 **Relates to:** [ADR-0007](0007-pgstore-components.md), [ADR-0017](0017-budget-leases.md), [ADR-0018](0018-fewer-round-trips-per-charge.md)
@@ -47,7 +47,10 @@ ADR-0018 settled how short the hold can be for a single row: locked last
    a fold always has a row to fold into. `stripe` is `pg_backend_pid() % tenantStripes`, a
    named constant (64): two calls on one connection never run at once, so a
    stripe is contended only by two connections whose pids meet modulo the
-   constant.
+   constant. That is likelier than the count suggests: 14 connections share
+   at least one stripe about four times in five. A shared stripe queues
+   the connections on it, as all of them queue on the row today; 64 is
+   not one stripe per connection.
 2. **A metered call on an unlimited tenant does not lock the aggregate.**
    It already shares the tenant's advisory lock (`eraseLockClass`, taken
    first in each transaction). In the batch that would lock the aggregate
@@ -99,9 +102,49 @@ ADR-0018 settled how short the hold can be for a single row: locked last
    `Config.Events`; otelmetric provides one that records a histogram. The
    types live in `meter` so that otelmetric imports nothing of pgstore and
    pgstore nothing of otelmetric. A wait longer than a named threshold is
-   logged at WARN through `Config.Logger`.
+   logged at WARN through `Config.Logger`. The event starts with those
+   three fields and no more. The wait is that of the tenant-level row only:
+   not of the shared advisory lock, nor of the chain's counters and
+   copies. The instrument's name and description say so, so it is not
+   read as the whole time a call waits.
 7. **The benchmarks hold it**: `ChargeParallel/ceiling=none` and
    `ChargeParallel/ceiling=set` at each added latency, before and after.
+8. **Stripes are switched on, not shipped on.** Writing stripes is gated by
+   `Config.StripeUnlimitedTenants`, off by default. Folding (Decision 3)
+   and summing (Decision 5) run whatever the switch says, so a store with
+   it off still reads and folds stripes another peer wrote. An operator
+   turns it on once every peer runs a version that folds. An older peer
+   reads the aggregate without the stripes. While stripes exist, it checks
+   a ceiling against less than was spent, and the ceiling is not hard.
+   With the switch, nothing produces stripes until no such peer is left.
+   Turning it off again leaves stripes that the next locking call folds.
+   Whether it becomes on by default is a later decision, made on the
+   benchmarks of Decision 11.
+9. **`SetTenantBudget` waits for the tenant a bounded time.** In
+   PostgreSQL a pending exclusive lock queues every later shared request
+   behind it. So while a fold waits for the tenant's slowest call in
+   flight, every new call of the tenant waits too. The exclusive advisory
+   lock is taken under `SET LOCAL lock_timeout` to a named constant. On
+   timeout, `SetTenantBudget` rolls back and returns a new sentinel,
+   `meter.ErrTenantBudgetBusy`. It matches neither `ErrConflict` nor
+   `ErrInternal`, and the call may be retried. It is logged at WARN with
+   the tenant and the time waited, and its code is frozen with v1. A wait
+   that ends inside the bound but past the WARN threshold of Decision 6 is
+   logged the same way.
+10. **The stripes are held to the row they replace.** pgstore's tests run
+    one sequence of `Charge`, `Reserve`, `Settle`, `Release` and `Refund`
+    from several connections on two tenants. One is striped. The other
+    takes the row's path under a ceiling of `limes.MaxNanos`. A
+    `SetTenantBudget` runs while calls are in flight. After every step
+    the two tenants' `GetTenantBudget` agree, and the unclamped sum of
+    the row and stripes is never negative. So a drift that `max0` would
+    hide fails the test instead.
+11. **Success is fixed before the implementation.** Step 4 stays only if,
+    at +1 ms and +2 ms, `ChargeParallel/ceiling=none` with the switch on
+    has at least twice the throughput of the before row: 410/s and
+    173/s, so 820/s and 346/s or more. `ChargeParallel/ceiling=set` must
+    not lose more than 10%. Below that, step 4 is reverted, and this ADR
+    records the figures and why.
 
 ## A store-managed lease for tenants with a ceiling
 
@@ -155,14 +198,20 @@ or a stripe-local share of the ceiling, which is Option D.
 - **`Charge`'s contract does not change**: exact, atomic, its ledger row
   and `onCharged` on its transaction. No `!`; the schema change is
   pgstore's, with a migration.
+- **Setting a ceiling is a cliff.** A tenant that sets one goes back to
+  the single row and its queue. Hot tenants are often the paying ones,
+  and paying tenants are the ones with a ceiling. For them the answer
+  stays a lease (ADR-0017), not this.
 - **`SetTenantBudget` waits for the tenant's calls in flight** and holds
-  new ones while it folds, as an erase does.
-- **`meter.StoreEvents` and pgstore's `Config.Events` are new API**,
-  frozen with v1, and grow as ADR-0021's hooks do.
-- **Rolling upgrade**: an old pgstore reads the row without the stripes, so
-  its `GetTenantBudget` under-reports what new peers striped until the
-  next fold; it sets a ceiling without folding. The migration guide says to
-  set no ceiling until every peer runs the new version.
+  new ones while it folds, as an erase does. Decision 9 bounds how long.
+- **The aggregate has two forms**: the row, and the row plus the stripes.
+  Any later code that changes the period or the spend must fold first.
+  Decision 10's test is what catches one that does not.
+- **New API, frozen with v1**: `meter.StoreEvents`, `meter.TenantWaitEvent`,
+  pgstore's `Config.Events` and `Config.StripeUnlimitedTenants`, and
+  `meter.ErrTenantBudgetBusy`. The events grow as ADR-0021's hooks do.
+- **Rolling upgrade**: safe by Decision 8, since stripes are written only
+  after the operator turns the switch on. The migration guide says so.
 - **Nothing here blocks 1.0**: no contract changes, and the API added is
   struct of optional callbacks.
 
@@ -172,7 +221,8 @@ or a stripe-local share of the ceiling, which is Option D.
 2. This ADR.
 3. `meter.StoreEvents`, pgstore's `Config.Events`, otelmetric's recorder,
    the WARN line.
-4. The stripes: migration, the unlimited path, the fold, the readers,
-   erasure; `metertest` for every store, and cases for a ceiling set while
-   calls are in flight and for signed stripes.
-5. The benchmarks after, recorded here.
+4. The stripes behind `Config.StripeUnlimitedTenants`: migration, the
+   unlimited path, the fold, the readers, erasure, the bounded wait and
+   `meter.ErrTenantBudgetBusy`; `metertest` for every store, and Decision
+   10's test.
+5. The benchmarks after, recorded here and held to Decision 11.
