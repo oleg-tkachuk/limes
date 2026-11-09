@@ -220,7 +220,7 @@ func (s *UsageStore) bumpLeased(ctx context.Context, tx pgx.Tx, subject limes.Me
 	if !isHolder {
 		l.existing = []uuid.UUID{holder}
 	}
-	c, err := lock(ctx, tx, l)
+	c, err := s.lock(ctx, tx, l)
 	if err != nil {
 		return 0, err
 	}
@@ -267,7 +267,7 @@ func (s *UsageStore) chargeLeased(ctx context.Context, tx pgx.Tx, req meter.Char
 	if !isHolder {
 		l.existing = []uuid.UUID{holder}
 	}
-	c, err := lock(ctx, tx, l)
+	c, err := s.lock(ctx, tx, l)
 	if err != nil {
 		return meter.ChargeReceipt{}, err
 	}
@@ -369,7 +369,7 @@ func (s *UsageStore) Lease(ctx context.Context, req meter.LeaseRequest) (meter.L
 	// A lease to settle first is settled in a transaction of its own, and
 	// the lease opened again.
 	settleFirst := func() error {
-		if _, err := s.settle(ctx, req.Subject.CapabilityID(), req.Subject.TenantID()); err != nil && !errors.Is(err, meter.ErrLeaseNotFound) {
+		if _, err := s.settle(ctx, meter.StoreOperationLease, req.Subject.CapabilityID(), req.Subject.TenantID()); err != nil && !errors.Is(err, meter.ErrLeaseNotFound) {
 			return err
 		}
 		return nil
@@ -393,11 +393,11 @@ func (s *UsageStore) lease(ctx context.Context, tx pgx.Tx, req meter.LeaseReques
 	held := append([]uuid.UUID{capID}, ancestorIDs(ancestors)...)
 	// The tenant's aggregate is locked for its period; a lease of requests
 	// alone, which holds none of its budget, does not create it.
-	locks := lockRequest{now: now, tenantID: tenantID, created: held, usageTenant: tenantID}
+	locks := lockRequest{now: now, op: meter.StoreOperationLease, tenantID: tenantID, created: held, usageTenant: tenantID}
 	if req.Amount > 0 {
 		locks.tenantUnit = unit
 	}
-	c, err := lock(ctx, tx, locks)
+	c, err := s.lock(ctx, tx, locks)
 	if err != nil {
 		return meter.Lease{}, err
 	}
@@ -502,19 +502,19 @@ func (s *UsageStore) SettleLease(ctx context.Context, req meter.SettleLeaseReque
 	if err := req.Validate(); err != nil {
 		return meter.Lease{}, err
 	}
-	return s.settle(ctx, req.Subject.CapabilityID(), req.Subject.TenantID())
+	return s.settle(ctx, meter.StoreOperationSettleLease, req.Subject.CapabilityID(), req.Subject.TenantID())
 }
 
 // settle settles capID's lease in a transaction of its own, scoped to its
 // tenant, run again should the lease move while it was locked
 // (retryLeaseMoved).
-func (s *UsageStore) settle(ctx context.Context, capID, tenantID uuid.UUID) (meter.Lease, error) {
+func (s *UsageStore) settle(ctx context.Context, op meter.StoreOperation, capID, tenantID uuid.UUID) (meter.Lease, error) {
 	var out meter.Lease
 	attempt := func() error {
 		return s.retryDeadlock(ctx, retriedSettleLease, func() error {
 			return s.inTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
 				var err error
-				out, err = s.settleLease(ctx, tx, capID)
+				out, err = s.settleLease(ctx, tx, capID, op)
 				return err
 			})
 		})
@@ -531,7 +531,7 @@ func (s *UsageStore) settle(ctx context.Context, capID, tenantID uuid.UUID) (met
 // then its counters locked in the one order every call takes and the
 // tenant's aggregate last, and errLeaseMoved returned should it have moved
 // between.
-func (s *UsageStore) settleLease(ctx context.Context, tx pgx.Tx, capID uuid.UUID) (meter.Lease, error) {
+func (s *UsageStore) settleLease(ctx context.Context, tx pgx.Tx, capID uuid.UUID, op meter.StoreOperation) (meter.Lease, error) {
 	var tenantID uuid.UUID
 	var unit string
 	var read leaseColumns
@@ -544,7 +544,7 @@ func (s *UsageStore) settleLease(ctx context.Context, tx pgx.Tx, capID uuid.UUID
 	}
 	seen := read.state()
 	now := s.clock()
-	c, err := lock(ctx, tx, lockRequest{now: now, tenantID: tenantID, existing: append([]uuid.UUID{capID}, seen.ancestors...)})
+	c, err := s.lock(ctx, tx, lockRequest{now: now, op: op, tenantID: tenantID, existing: append([]uuid.UUID{capID}, seen.ancestors...)})
 	if err != nil {
 		return meter.Lease{}, err
 	}
@@ -608,7 +608,7 @@ type leaseholder struct {
 // settleEach settles the lease of each holder query names, each in a
 // transaction of its own, and returns those it settled, and how many query
 // named: one settled meanwhile is no error.
-func (s *UsageStore) settleEach(ctx context.Context, inTx func(func(pgx.Tx) error) error, query string, args ...any) ([]leaseholder, int, error) {
+func (s *UsageStore) settleEach(ctx context.Context, op meter.StoreOperation, inTx func(func(pgx.Tx) error) error, query string, args ...any) ([]leaseholder, int, error) {
 	var holders []leaseholder
 	err := inTx(func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, query, args...)
@@ -626,7 +626,7 @@ func (s *UsageStore) settleEach(ctx context.Context, inTx func(func(pgx.Tx) erro
 	}
 	var settled []leaseholder
 	for _, h := range holders {
-		if _, err := s.settle(ctx, h.capID, h.tenantID); err != nil {
+		if _, err := s.settle(ctx, op, h.capID, h.tenantID); err != nil {
 			if errors.Is(err, meter.ErrLeaseNotFound) {
 				continue
 			}

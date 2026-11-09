@@ -341,6 +341,12 @@ type Config struct {
 	// call retried after PostgreSQL aborted it to break a deadlock. Nil:
 	// slog.Default().
 	Logger *slog.Logger
+	// Events are the callbacks the usage store makes as it works
+	// (meter.StoreEvents): how long each metered call waited for its
+	// tenant's aggregate, among them. Each is optional; the zero value
+	// makes none. otelmetric.NewStoreEvents records them as metrics. The
+	// record store ignores it.
+	Events meter.StoreEvents
 	// DisableLeases stops the usage store opening leases
 	// (meter.Leaser.Lease): Lease refuses with meter.ErrLeasingDisabled,
 	// while leases already open are still charged under and settled. Unset,
@@ -400,6 +406,12 @@ type conn struct {
 	maxCopies int64
 	// log is Config.Logger, its default applied.
 	log *slog.Logger
+	// events is Config.Events.
+	events meter.StoreEvents
+	// tenantWaitWarnAfter is how long a call waits for its tenant's
+	// aggregate before the wait is logged at WARN
+	// (defaultTenantWaitWarnAfter).
+	tenantWaitWarnAfter time.Duration
 	// outcomes reports a write whose COMMIT went unanswered as
 	// meter.ErrOutcomeUnknown (outcomeOf): the usage store's, whose keyed
 	// calls a caller sends again on it.
@@ -445,6 +457,9 @@ func newConn(cfg Config) (conn, error) {
 		maxCopies:  int64(cfg.MaxCopiesPerCapability),
 		log:        cfg.Logger,
 		expiryByDB: expiryByDB,
+		events:     cfg.Events,
+
+		tenantWaitWarnAfter: defaultTenantWaitWarnAfter,
 	}, nil
 }
 

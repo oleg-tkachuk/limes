@@ -405,6 +405,10 @@ INSERT INTO limes.tenant_budgets (tenant_id, ceiling_max, ceiling_unlimited, uni
 VALUES ($1, 0, true, $2, $3, $3)
 ON CONFLICT (tenant_id) DO NOTHING`
 
+	// sqlClock reads the database's clock as the statement runs, not as
+	// its transaction began: clock_timestamp(), not now().
+	sqlClock = `SELECT clock_timestamp()`
+
 	sqlLockTenant = `
 SELECT tenant_id, ceiling_max, ceiling_unlimited, spent, reserved, unit_code,
        period_start, period_end, updated_at, resource_version, period
@@ -437,6 +441,9 @@ type counters struct {
 	// holdTaken reports that the lock request's holdID named a hold, or a
 	// settled one, once the locks were held.
 	holdTaken bool
+	// tenantWait is how long locking the tenant's aggregate took, by the
+	// database's clock; zero when the lock request named no tenant.
+	tenantWait time.Duration
 }
 
 // usageOf is the counters of id, zero when it has none.
@@ -468,7 +475,7 @@ func lockTenant(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) (budgetRow, 
 // the tenant waits on, so it is held for as little of the call as it can be
 // (docs/adr/0018-fewer-round-trips-per-charge.md). Counters of ids not
 // created and not on record stay absent.
-func lock(ctx context.Context, tx pgx.Tx, l lockRequest) (*counters, error) {
+func (s *UsageStore) lock(ctx context.Context, tx pgx.Tx, l lockRequest) (*counters, error) {
 	c := &counters{usage: map[uuid.UUID]*usageRow{}, copies: map[string]*copyRow{}}
 	if err := lockUsageOf(ctx, tx, l, c); err != nil {
 		return nil, err
@@ -486,6 +493,9 @@ func lock(ctx context.Context, tx pgx.Tx, l lockRequest) (*counters, error) {
 	if err := lockTenantOf(ctx, tx, l, c); err != nil {
 		return nil, err
 	}
+	if l.tenantID != uuid.Nil() {
+		s.reportTenantWait(ctx, l, c.tenantWait)
+	}
 	return c, nil
 }
 
@@ -493,7 +503,10 @@ func lock(ctx context.Context, tx pgx.Tx, l lockRequest) (*counters, error) {
 // ceiling, when l names its unit; nothing when l names no tenant.
 //
 // The aggregate is created, locked and read, and the replay looked up
-// after it, in one batch.
+// after it, in one batch. The database's clock is read on each side of the
+// lock in the same batch, so timing the wait costs no round trip: the
+// statements of a batch run one after another, and the second reading is
+// taken once the row is locked.
 func lockTenantOf(ctx context.Context, tx pgx.Tx, l lockRequest, c *counters) error {
 	if l.tenantID == uuid.Nil() {
 		return nil
@@ -502,7 +515,9 @@ func lockTenantOf(ctx context.Context, tx pgx.Tx, l lockRequest, c *counters) er
 	if l.tenantUnit != "" {
 		b.Queue(sqlCreateTenant, l.tenantID, l.tenantUnit, l.now)
 	}
+	b.Queue(sqlClock)
 	b.Queue(sqlLockTenant, l.tenantID)
+	b.Queue(sqlClock)
 	if l.replayRef != "" {
 		b.Queue(sqlChargeByRef, l.replayCapID, l.replayRef)
 	}
@@ -516,11 +531,19 @@ func lockTenantOf(ctx context.Context, tx pgx.Tx, l lockRequest, c *counters) er
 				return err
 			}
 		}
+		var before, after time.Time
+		if err := br.QueryRow().Scan(&before); err != nil {
+			return err
+		}
 		t, err := scanTenant(br.QueryRow(), l.tenantID)
 		if err != nil {
 			return err
 		}
 		c.tenant = t
+		if err := br.QueryRow().Scan(&after); err != nil {
+			return err
+		}
+		c.tenantWait = max(after.Sub(before), 0)
 		if l.replayRef != "" {
 			if c.replay, c.replayed, err = scanEntry(br.QueryRow()); err != nil {
 				return err
@@ -692,6 +715,9 @@ var errCounterHidden = fmt.Errorf("%w: pgstore: a counter row of the same id bel
 // lockRequest names what lock reads.
 type lockRequest struct {
 	now time.Time
+	// op is the store call that locks, which the wait for the tenant's
+	// aggregate is reported under (Config.Events).
+	op meter.StoreOperation
 	// tenantID is the aggregate to lock, none when nil; tenantUnit, when
 	// set, creates it first.
 	tenantID   uuid.UUID

@@ -65,7 +65,7 @@ func TestSettledThenRetriesUpToItsAttempts(t *testing.T) {
 					}
 					return true
 				})
-				if op != settledPurgeOrphans {
+				if op != string(settledPurgeOrphans) {
 					t.Errorf("a log line names op %q, want %q", op, settledPurgeOrphans)
 				}
 			}

@@ -77,7 +77,7 @@ func (s *UsageStore) ReleaseMatching(ctx context.Context, req meter.ReleaseMatch
 	if err != nil {
 		return meter.ReleaseMatchingResult{}, err
 	}
-	settled, named, err := s.settleEach(ctx, inTx, sqlMatchingLeasesHead+where+sqlMatchingLeasesTail, args...)
+	settled, named, err := s.settleEach(ctx, meter.StoreOperationReleaseMatching, inTx, sqlMatchingLeasesHead+where+sqlMatchingLeasesTail, args...)
 	if err != nil {
 		return meter.ReleaseMatchingResult{}, err
 	}
