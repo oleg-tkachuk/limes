@@ -936,6 +936,18 @@ A replayed charge or settle moved nothing and is not counted.
 with `WithTenantAttribute`, every measurement — a refused charge or settle
 included — carries the subject's tenant.
 
+`otelmetric.NewStoreEvents` gives pgstore the callbacks it reports to
+(`pgstore.Config.Events`): `limes.tenant.wait`, a histogram in seconds of
+how long each metered call waited for its tenant's aggregate row, by
+`limes.operation`, the store call. It is the measure of a tenant's queue,
+and so of when its calls should lease
+([Lease a sub-agent its budget](#lease-a-sub-agent-its-budget)):
+
+```go
+events, err := otelmetric.NewStoreEvents(otelmetric.WithMeterProvider(provider))
+store, err := pgstore.NewUsageStore(pgstore.Config{DB: pool, Events: events})
+```
+
 ## Observing the issuer, verifier and revoker
 
 The issuer, the verifier and the revoker log through `log/slog`
@@ -1552,8 +1564,19 @@ checks. A network to the database adds its round trip to every statement of
 the transaction, and `onCharged` runs while the lock is held — after the
 charge's writes, so that its own writes see the charge's row, and before
 `COMMIT`, which then costs a round trip of its own — so keep it short and on the same
-database, with no network call in it; a tenant that needs more is served by fewer, larger charges — a
-`Reserve` settled once for many units of work — not by a setting.
+database, with no network call in it.
+
+A tenant whose calls queue on its row shows it in `limes.tenant.wait`
+([Observe the meter](#observe-the-meter)), and in pgstore's WARN line for
+each call that waited over 100 ms: a wait that grows towards the call's
+own time is a queue, not a slow database. A tenant with no ceiling is
+taken off the row by stripes (below). One with a ceiling is served by
+calls that do not take it — a lease for each worker, which locks the row
+once to open and once to settle, its charges between touching only the
+lease ([Lease a sub-agent its budget](#lease-a-sub-agent-its-budget);
+ADR-0017 measured some three times the charges a second) — or by fewer,
+larger ones, a `Reserve` settled once for many units of work. No setting
+raises the row's own rate.
 
 A tenant with no ceiling is checked against nothing, and pgstore's
 `Config.StripeUnlimitedTenants` takes its calls off the row: they read it
