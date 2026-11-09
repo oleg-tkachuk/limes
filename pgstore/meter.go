@@ -340,6 +340,12 @@ type budgetRow struct {
 	version   int64
 	period    int64
 	persisted bool // false for a tenant with no row yet
+	// striped is an aggregate read without its row locked, its row and its
+	// stripes summed, whose change the call adds to its stripe rather than
+	// writing the row (stripes); readSpent and readReserved are what it
+	// read, which the change is measured from.
+	striped                 bool
+	readSpent, readReserved limes.Nanos
 }
 
 func (b budgetRow) budget() meter.TenantBudget {
@@ -444,6 +450,12 @@ type counters struct {
 	// tenantWait is how long locking the tenant's aggregate took, by the
 	// database's clock; zero when the lock request named no tenant.
 	tenantWait time.Duration
+	// folded is how many of the tenant's stripes the lock folded into its
+	// aggregate's row.
+	folded int64
+	// onStripeWait is called with how long writing the tenant's stripe
+	// waited, once it is written, when the tenant's aggregate is striped.
+	onStripeWait func(time.Duration)
 }
 
 // usageOf is the counters of id, zero when it has none.
@@ -490,10 +502,21 @@ func (s *UsageStore) lock(ctx context.Context, tx pgx.Tx, l lockRequest) (*count
 			return nil, err
 		}
 	}
-	if err := lockTenantOf(ctx, tx, l, c); err != nil {
+	l.stripes = s.stripes
+	err := lockTenantOf(ctx, tx, l, c)
+	if l.tenantID != uuid.Nil() {
+		s.logFold(ctx, l.op, l.tenantID, c.folded, err)
+	}
+	if err != nil {
 		return nil, err
 	}
-	if l.tenantID != uuid.Nil() {
+	switch {
+	case l.tenantID == uuid.Nil():
+	case c.tenant.striped:
+		// The call waits for its stripe, not the row, and only once it
+		// writes it.
+		c.onStripeWait = func(wait time.Duration) { s.reportTenantWait(ctx, l, wait) }
+	default:
 		s.reportTenantWait(ctx, l, c.tenantWait)
 	}
 	return c, nil
@@ -502,11 +525,16 @@ func (s *UsageStore) lock(ctx context.Context, tx pgx.Tx, l lockRequest) (*count
 // lockTenantOf reads l's tenant aggregate into c, created first, without a
 // ceiling, when l names its unit; nothing when l names no tenant.
 //
-// The aggregate is created, locked and read, and the replay looked up
-// after it, in one batch. The database's clock is read on each side of the
-// lock in the same batch, so timing the wait costs no round trip: the
-// statements of a batch run one after another, and the second reading is
-// taken once the row is locked.
+// The aggregate is created, its stripes folded, locked and read, and the
+// replay looked up after it, in one batch. The database's clock is read on
+// each side of the lock in the same batch, so timing the wait costs no
+// round trip: the statements of a batch run one after another, and the
+// second reading is taken once the row is locked.
+//
+// Under l.stripes, a tenant with no ceiling is neither folded nor locked:
+// its row and stripes are read together, unlocked, in the same batch, and
+// the call's change goes to its stripe
+// (docs/adr/0022-unlimited-tenant-aggregate.md).
 func lockTenantOf(ctx context.Context, tx pgx.Tx, l lockRequest, c *counters) error {
 	if l.tenantID == uuid.Nil() {
 		return nil
@@ -515,8 +543,14 @@ func lockTenantOf(ctx context.Context, tx pgx.Tx, l lockRequest, c *counters) er
 	if l.tenantUnit != "" {
 		b.Queue(sqlCreateTenant, l.tenantID, l.tenantUnit, l.now)
 	}
+	// A striped tenant's row and stripes are read before the lock, so
+	// that a tenant whose row is locked holds it no longer for the read.
+	if l.stripes {
+		b.Queue(sqlGetTenant, l.tenantID)
+	}
 	b.Queue(sqlClock)
-	b.Queue(sqlLockTenant, l.tenantID)
+	b.Queue(sqlFoldStripes, l.tenantID, l.stripes)
+	b.Queue(sqlLockUnstripedTenant, l.tenantID, l.stripes)
 	b.Queue(sqlClock)
 	if l.replayRef != "" {
 		b.Queue(sqlChargeByRef, l.replayCapID, l.replayRef)
@@ -531,8 +565,20 @@ func lockTenantOf(ctx context.Context, tx pgx.Tx, l lockRequest, c *counters) er
 				return err
 			}
 		}
+		var read budgetRow
+		if l.stripes {
+			var err error
+			if read, err = scanTenant(br.QueryRow(), l.tenantID); err != nil {
+				return err
+			}
+		}
 		var before, after time.Time
 		if err := br.QueryRow().Scan(&before); err != nil {
+			return err
+		}
+		folded, err := scanFold(br.QueryRow())
+		c.folded = folded
+		if err != nil {
 			return err
 		}
 		t, err := scanTenant(br.QueryRow(), l.tenantID)
@@ -544,6 +590,13 @@ func lockTenantOf(ctx context.Context, tx pgx.Tx, l lockRequest, c *counters) er
 			return err
 		}
 		c.tenantWait = max(after.Sub(before), 0)
+		// A row the lock did not return is a striped tenant's, or one
+		// created between the read and the lock, which counts as not
+		// there.
+		if !t.persisted && stripes(read, l.stripes) {
+			read.striped, read.readSpent, read.readReserved = true, read.spent, read.reserved
+			c.tenant = read
+		}
 		if l.replayRef != "" {
 			if c.replay, c.replayed, err = scanEntry(br.QueryRow()); err != nil {
 				return err
@@ -718,6 +771,9 @@ type lockRequest struct {
 	// op is the store call that locks, which the wait for the tenant's
 	// aggregate is reported under (Config.Events).
 	op meter.StoreOperation
+	// stripes is Config.StripeUnlimitedTenants: a tenant with no ceiling is
+	// read, not locked, and its change added to a stripe.
+	stripes bool
 	// tenantID is the aggregate to lock, none when nil; tenantUnit, when
 	// set, creates it first.
 	tenantID   uuid.UUID
@@ -782,7 +838,10 @@ func (c *counters) writeLast(ctx context.Context, tx pgx.Tx, now time.Time, writ
 // writeBatch is write, COMMIT queued after it when last.
 func (c *counters) writeBatch(ctx context.Context, tx pgx.Tx, now time.Time, writeTenant, last bool, then []heldStmt) error {
 	var writes []heldStmt
-	if writeTenant {
+	switch {
+	case writeTenant && c.tenant.striped:
+		writes = append(writes, c.stripeStmts(now)...)
+	case writeTenant:
 		c.tenant.updated = now
 		writes = append(writes, writeTenantStmt(c.tenant))
 	}
@@ -848,18 +907,29 @@ func sendWrites(ctx context.Context, tx pgx.Tx, stmts []heldStmt, last bool) err
 	}
 	// COMMIT's result is read by Close, which fails the batch when it did
 	// not commit.
-	writes := b.Len()
 	committing := last && queueCommit(tx, b)
 	br := tx.SendBatch(ctx, b)
 	var err error
-	for range writes {
-		if _, err = br.Exec(); err != nil {
+	for _, st := range stmts {
+		if st.into != nil {
+			err = st.into(br)
+		} else {
+			_, err = br.Exec()
+		}
+		if err != nil {
 			break
 		}
 	}
 	err = errors.Join(err, br.Close())
 	if committing {
-		return commitOutcome(tx, err)
+		err = commitOutcome(tx, err)
+	}
+	if err == nil {
+		for _, st := range stmts {
+			if st.done != nil {
+				st.done()
+			}
+		}
 	}
 	return err
 }

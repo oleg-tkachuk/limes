@@ -19,6 +19,7 @@ const (
 	CodeReserveConflict             = limes.CodeReserveConflict
 	CodeRefundConflict              = limes.CodeRefundConflict
 	CodeOutcomeUnknown              = limes.CodeOutcomeUnknown
+	CodeTenantBudgetBusy            = limes.CodeTenantBudgetBusy
 	CodeLeaseExhausted              = limes.CodeLeaseExhausted
 	CodeLeaseRequestsExhausted      = limes.CodeLeaseRequestsExhausted
 	CodeLeaseNotFound               = limes.CodeLeaseNotFound

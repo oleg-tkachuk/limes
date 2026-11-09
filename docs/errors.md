@@ -166,6 +166,8 @@ has a reason, and the store's own error stays in the text only.
   `Refund` with a `RefundID`, or `Settle` — and a repeat of one that
   committed is answered as a replay. An unkeyed call sent again may count
   twice (docs/guide.md, "Retrying a lost answer").
+- **`tenant_budget_busy`** is a `SetTenantBudget` that changed nothing: the
+  tenant's calls in flight held it past the store's bound. Send it again.
 
 `limes.Codes()` lists every code, the meter's among them and, in a
 binary that links the exchange in, the exchange's, so a consumer's test can prove its own mapping covers them all
@@ -342,6 +344,7 @@ them, and may leave them out of a check of its own mapping
 | `reserve_conflict` | 409 | `meter.ErrReserveConflict` |  |  | The reservation id names another hold | `conflict` |
 | `refund_conflict` | 409 | `meter.ErrRefundConflict` |  |  | The refund id names another refund | `conflict` |
 | `outcome_unknown` | 503 | `meter.ErrOutcomeUnknown` |  |  | The store lost the answer to the call's commit | `unavailable` |
+| `tenant_budget_busy` | 503 | `meter.ErrTenantBudgetBusy` |  |  | The tenant's calls in flight held its budget too long | `unavailable` |
 | `lease_exhausted` | 403 | `meter.ErrLeaseExhausted` | `budget_exceeded` (permanent) |  | The token's request or budget limit is exhausted | `exhausted` |
 | `lease_requests_exhausted` | 403 | `meter.ErrLeaseRequestsExhausted` | `request_limit_exceeded` (permanent) |  | The token's request or budget limit is exhausted | `exhausted` |
 | `lease_not_found` | 404 | `meter.ErrLeaseNotFound` |  |  | The capability holds no lease | `not_found` |
@@ -480,6 +483,7 @@ type means the same for the whole of v1.
 | <a id="reserve_conflict"></a>`reserve_conflict` | 409 | [The meter's codes](#the-meters-codes) |
 | <a id="refund_conflict"></a>`refund_conflict` | 409 | [The meter's codes](#the-meters-codes) |
 | <a id="outcome_unknown"></a>`outcome_unknown` | 503 | [The meter's codes](#the-meters-codes) |
+| <a id="tenant_budget_busy"></a>`tenant_budget_busy` | 503 | [The meter's codes](#the-meters-codes) |
 | <a id="lease_exhausted"></a>`lease_exhausted` | 403 | [The meter's codes](#the-meters-codes) |
 | <a id="lease_requests_exhausted"></a>`lease_requests_exhausted` | 403 | [The meter's codes](#the-meters-codes) |
 | <a id="lease_not_found"></a>`lease_not_found` | 404 | [The meter's codes](#the-meters-codes) |

@@ -464,10 +464,25 @@ func (s *UsageStore) GetTenantBudget(ctx context.Context, tenantID uuid.UUID) (m
 	return out, err
 }
 
-const sqlGetTenant = `
-SELECT tenant_id, ceiling_max, ceiling_unlimited, spent, reserved, unit_code,
-       period_start, period_end, updated_at, resource_version, period
-FROM limes.tenant_budgets WHERE tenant_id = $1`
+// sqlSummedTenants reads every tenant's aggregate as its row and the sum of
+// its stripes together, in one statement and so of one snapshot
+// (docs/adr/0022-unlimited-tenant-aggregate.md, Decision 5): the spend and
+// the holds clamped at zero, as max0 clamps the row's, and UpdatedAt the
+// latest of the row's and the stripes'.
+const sqlSummedTenants = `
+SELECT b.tenant_id, b.ceiling_max, b.ceiling_unlimited,
+       GREATEST(b.spent + COALESCE(s.spent, 0), 0)::bigint AS spent,
+       GREATEST(b.reserved + COALESCE(s.reserved, 0), 0)::bigint AS reserved,
+       b.unit_code, b.period_start, b.period_end,
+       GREATEST(b.updated_at, s.updated_at) AS updated_at, b.resource_version, b.period
+FROM limes.tenant_budgets b
+LEFT JOIN LATERAL (
+    SELECT sum(x.spent) AS spent, sum(x.reserved) AS reserved, max(x.updated_at) AS updated_at
+    FROM limes.tenant_budget_stripes x WHERE x.tenant_id = b.tenant_id
+) s ON true`
+
+const sqlGetTenant = sqlSummedTenants + `
+WHERE b.tenant_id = $1`
 
 // readTenant reads one aggregate with query, sqlGetTenant or sqlLockTenant.
 func readTenant(ctx context.Context, tx pgx.Tx, query string, tenantID uuid.UUID) (budgetRow, error) {
@@ -500,6 +515,13 @@ func (s *UsageStore) SetTenantBudget(ctx context.Context, req meter.SetTenantBud
 	var out meter.TenantBudget
 	set := func() error {
 		return s.inTenantTx(ctx, req.TenantID, func(tx pgx.Tx) error {
+			// Alone on the tenant, the call sees none of its calls in
+			// flight, and none starts until it commits: no call reads the
+			// aggregate as it was, stripes after the fold, or charges
+			// against the ceiling it replaces.
+			if err := s.takeTenantAlone(ctx, tx, req.TenantID); err != nil {
+				return err
+			}
 			// A reset closes the period: what the tenant's leases spent is
 			// the closing period's, so they are settled into it first, in
 			// the reset's own transaction, which a lease opening meanwhile
@@ -610,6 +632,14 @@ func (s *UsageStore) setTenantBudget(ctx context.Context, tx pgx.Tx, req meter.S
 	// that created it meanwhile would be overwritten by the write below.
 	// Created here, the call waits for that charge and reads its counts.
 	if _, err := tx.Exec(ctx, sqlCreateTenant, req.TenantID, "", s.clock()); err != nil {
+		return meter.TenantBudget{}, err
+	}
+	// The stripes are folded into the row before anything reads it: the
+	// ceiling is checked, and a reset closes the period, on the whole
+	// spend. Under the tenant's lock alone no call of it stripes
+	// meanwhile; the fold is no change of the ceiling, and keeps the
+	// version.
+	if err := s.foldTenant(ctx, tx, meter.StoreOperationSetTenantBudget, req.TenantID); err != nil {
 		return meter.TenantBudget{}, err
 	}
 	b, err := lockTenant(ctx, tx, req.TenantID)
@@ -729,7 +759,7 @@ WITH ranked AS (
         CASE WHEN ceiling_unlimited THEN 2 WHEN ceiling_max = 0 THEN 0 ELSE 1 END AS class,
         CASE WHEN NOT ceiling_unlimited AND ceiling_max > 0
              THEN div(spent::numeric * $9::numeric, ceiling_max) ELSE 0 END AS utilization
-    FROM limes.tenant_budgets b
+    FROM (` + sqlSummedTenants + `) b
 ), place AS (
     SELECT $4::int AS class,
         CASE WHEN $4::int = 1 THEN div($5::bigint::numeric * $9::numeric, $6::bigint) ELSE 0 END AS utilization,
@@ -1000,6 +1030,7 @@ func (s *UsageStore) releaseHolds(ctx context.Context, tx pgx.Tx, holds []hold, 
 	if err != nil {
 		return err
 	}
+	s.logBulkFold(ctx, r.folded)
 	ids := make([]uuid.UUID, 0, len(holds))
 	for _, h := range holds {
 		r.release(h)
@@ -1018,6 +1049,9 @@ type releasedRows struct {
 	// copies are by capability, then revocation id.
 	copies  map[uuid.UUID]map[string]*copyRow
 	tenants map[uuid.UUID]*budgetRow
+	// folded is how many stripes the lock folded into the tenants'
+	// aggregates.
+	folded int64
 }
 
 // release returns h to every counter of r that still holds it, as
@@ -1082,6 +1116,7 @@ func lockReleased(ctx context.Context, tx pgx.Tx, holds []hold, leases leasesToS
 		b.Queue(sqlLockCopies, capID, copies[capID])
 	}
 	for _, t := range tenants {
+		b.Queue(sqlFoldStripes, t, false)
 		b.Queue(sqlLockTenant, t)
 	}
 	br := tx.SendBatch(ctx, b)
@@ -1119,6 +1154,11 @@ func readReleased(br pgx.BatchResults, copyCaps, tenants []uuid.UUID) (*released
 		r.copies[capID] = byID
 	}
 	for _, id := range tenants {
+		folded, err := scanFold(br.QueryRow())
+		r.folded += folded
+		if err != nil {
+			return nil, err
+		}
 		t, err := scanTenant(br.QueryRow(), id)
 		if err != nil {
 			return nil, err
@@ -1273,9 +1313,11 @@ func (s *UsageStore) dropUsage(ctx context.Context, tx pgx.Tx, ids []uuid.UUID, 
 	}
 	holds := slices.DeleteFunc(locked, func(h hold) bool { return !slices.Contains(ids, h.capID) })
 	if len(leases.holders) > 0 {
-		if _, err := lockReleased(ctx, tx, holds, leases); err != nil {
+		r, err := lockReleased(ctx, tx, holds, leases)
+		if err != nil {
 			return err
 		}
+		s.logBulkFold(ctx, r.folded)
 		if err := s.settleLocked(ctx, tx, settledDeleteUsage, leases); err != nil {
 			return err
 		}

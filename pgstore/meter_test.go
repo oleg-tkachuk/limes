@@ -33,6 +33,15 @@ func TestMeterContract(t *testing.T) {
 	})
 }
 
+// The contract holds with a tenant with no ceiling counted in stripes
+// (Config.StripeUnlimitedTenants): its calls lock no aggregate row.
+func TestMeterContractStriped(t *testing.T) {
+	metertest.Run(t, func(t *testing.T) metertest.Env {
+		t.Helper()
+		return meterEnv(t, Config{StripeUnlimitedTenants: true}, WithAllTenantsReadOnly)
+	})
+}
+
 // The contract holds under a consumer's Scope that sets the schema's own
 // settings — its read-only marker among them — and CheckSchemaScope.
 func TestMeterContractUnderAConsumersScope(t *testing.T) {

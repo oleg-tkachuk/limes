@@ -226,3 +226,32 @@ or a stripe-local share of the ceiling, which is Option D.
    `meter.ErrTenantBudgetBusy`; `metertest` for every store, and Decision
    10's test.
 5. The benchmarks after, recorded here and held to Decision 11.
+
+## The benchmarks after
+
+`task bench:pgstore:scale`'s `RoundTrip` rows on one host, 14 processors,
+the median of five 2 s runs, each tenant's parallel charges on chains of
+its own. The before rows are ADR-0017's, measured after ADR-0018 step 7.
+The host is noisy: single runs of the locking rows ranged up to four times
+their median.
+
+| Row | +0 | +1 ms | +2 ms |
+|---|---|---|---|
+| ChargeParallel ceiling=none, before | ≈1175/s | ≈410/s | ≈173/s |
+| ChargeParallel ceiling=none, stripes=on | ≈2410/s (0.41 ms) | ≈1800/s (0.56 ms) | ≈900/s (1.11 ms) |
+| ChargeParallel ceiling=set, before | ≈825/s | ≈415/s | ≈172/s |
+| ChargeParallel ceiling=set, stripes=off | ≈900/s (1.11 ms) | ≈430/s (2.32 ms) | ≈213/s (4.69 ms) |
+| ChargeParallel ceiling=set, stripes=on | ≈1120/s (0.89 ms)¹ | ≈440/s (2.27 ms) | ≈216/s (4.63 ms) |
+
+Decision 11's bar is met for a tenant without a ceiling: 1800/s and 900/s
+against 820/s and 346/s at +1 ms and +2 ms, about four and five times the
+before rows, and close to the leased rows of ADR-0017. A tenant with a
+ceiling loses nothing at +1 ms and +2 ms with the switch on.
+
+¹ At +0 the five runs spread from 1.18 ms to 5.62 ms, a median of
+2.62 ms, so that row was measured again alone: six pairs of runs, the
+switch off then on, each pair in a process of its own, so that the host's
+noise and the database's growth fall on both alike. The medians were
+0.885 ms off and 0.894 ms on, and the median of the pairs' ratios 1.024:
+the read the switch adds to every call, sent before the row is locked,
+costs a tenant with a ceiling about 2%, inside the bar's 10%.

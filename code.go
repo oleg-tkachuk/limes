@@ -97,6 +97,7 @@ const (
 	CodeReserveConflict             Code = "reserve_conflict"
 	CodeRefundConflict              Code = "refund_conflict"
 	CodeOutcomeUnknown              Code = "outcome_unknown"
+	CodeTenantBudgetBusy            Code = "tenant_budget_busy"
 	CodeLeaseExhausted              Code = "lease_exhausted"
 	CodeLeaseRequestsExhausted      Code = "lease_requests_exhausted"
 	CodeLeaseNotFound               Code = "lease_not_found"
@@ -216,6 +217,7 @@ var meterCodeRules = []codeRule{
 	{nil, CodeReserveConflict, http.StatusConflict, "The reservation id names another hold", CategoryConflict},
 	{nil, CodeRefundConflict, http.StatusConflict, "The refund id names another refund", CategoryConflict},
 	{nil, CodeOutcomeUnknown, http.StatusServiceUnavailable, "The store lost the answer to the call's commit", CategoryUnavailable},
+	{nil, CodeTenantBudgetBusy, http.StatusServiceUnavailable, "The tenant's calls in flight held its budget too long", CategoryUnavailable},
 	{ErrBudgetExceeded, CodeLeaseExhausted, 0, "", CategoryExhausted},
 	{ErrRequestLimitExceeded, CodeLeaseRequestsExhausted, 0, "", CategoryExhausted},
 	{nil, CodeLeaseNotFound, http.StatusNotFound, "The capability holds no lease", CategoryNotFound},

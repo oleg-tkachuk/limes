@@ -243,8 +243,12 @@ const benchTenantCeiling = limes.MaxNanos
 // set (ceiling=none: its aggregate is created unlimited), each leaf under a
 // lease of its own, and with benchTenantCeiling set (ceiling=set), the last
 // on a tenant of its own, so that it starts from an empty tenant as
-// ceiling=none does. The one-at-a-time charges count their references across
-// -count's repetitions, which share the fixture, so none is a replay.
+// ceiling=none does. Both run again with Config.StripeUnlimitedTenants set
+// (stripes=on), each on a tenant of its own: a tenant with no ceiling is
+// then charged on stripes, not on its row
+// (docs/adr/0022-unlimited-tenant-aggregate.md). The one-at-a-time charges
+// count their references across -count's repetitions, which share the
+// fixture, so none is a replay.
 func BenchmarkRoundTrip(b *testing.B) {
 	skipUnlessScale(b)
 	for _, rtt := range scaleRTTs {
@@ -270,6 +274,15 @@ func BenchmarkRoundTrip(b *testing.B) {
 		capped.setTenantCeiling(b)
 		b.Run(fmt.Sprintf("op=ChargeParallel/ceiling=set/rtt=%s", rtt), func(b *testing.B) {
 			parallelLeaves(b, capped, false, func(leaf limes.MeterSubject, n int) error { return chargeLeaf(b, capped, leaf, n) })
+		})
+		striped := newBenchFixtureOver(b, pool).striping(b, pool)
+		b.Run(fmt.Sprintf("op=ChargeParallel/ceiling=none/stripes=on/rtt=%s", rtt), func(b *testing.B) {
+			parallelLeaves(b, striped, false, func(leaf limes.MeterSubject, n int) error { return chargeLeaf(b, striped, leaf, n) })
+		})
+		stripedCapped := newBenchFixtureOver(b, pool).striping(b, pool)
+		stripedCapped.setTenantCeiling(b)
+		b.Run(fmt.Sprintf("op=ChargeParallel/ceiling=set/stripes=on/rtt=%s", rtt), func(b *testing.B) {
+			parallelLeaves(b, stripedCapped, false, func(leaf limes.MeterSubject, n int) error { return chargeLeaf(b, stripedCapped, leaf, n) })
 		})
 		b.Run(fmt.Sprintf("op=IsRevoked/rtt=%s", rtt), func(b *testing.B) {
 			id := f.chain[len(f.chain)-1].ID
@@ -435,6 +448,17 @@ func (f benchFixture) leasing(b *testing.B, db *pgxpool.Pool) benchFixture {
 	b.Helper()
 	var err error
 	if f.usage, err = NewUsageStore(Config{DB: db}); err != nil {
+		b.Fatal(err)
+	}
+	return f
+}
+
+// striping is f with a usage store over db that leases and counts a tenant
+// with no ceiling in stripes (Config.StripeUnlimitedTenants).
+func (f benchFixture) striping(b *testing.B, db *pgxpool.Pool) benchFixture {
+	b.Helper()
+	var err error
+	if f.usage, err = NewUsageStore(Config{DB: db, StripeUnlimitedTenants: true}); err != nil {
 		b.Fatal(err)
 	}
 	return f

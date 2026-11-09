@@ -92,6 +92,14 @@ var ErrRefundConflict error = &familyError{"limes: refund id already names a dif
 // neither wrong nor known to have failed.
 var ErrOutcomeUnknown error = &familyError{"limes: the store lost the answer to the call's commit", nil, CodeOutcomeUnknown}
 
+// ErrTenantBudgetBusy — SetTenantBudget waits for every metered call of the
+// tenant in flight before it changes the ceiling, and gave up after a bound
+// the store sets, changing nothing
+// (docs/adr/0022-unlimited-tenant-aggregate.md, Decision 9). The call may be
+// sent again. Matches no family: the request is neither wrong nor in
+// conflict with what is on record, and the store did not fail.
+var ErrTenantBudgetBusy error = &familyError{"limes: the tenant's calls in flight held its budget too long", nil, CodeTenantBudgetBusy}
+
 // ErrLeaseExhausted — a Charge under a lease would take it past what it
 // holds. The caller leases more (Leaser.Lease) and charges again. Matches
 // ErrBudgetExceeded: the budget the capability may spend now is used.

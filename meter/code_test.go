@@ -39,6 +39,7 @@ var meterSentinels = map[string]struct {
 	"ErrReserveConflict":             {ErrReserveConflict, CodeReserveConflict},
 	"ErrRefundConflict":              {ErrRefundConflict, CodeRefundConflict},
 	"ErrOutcomeUnknown":              {ErrOutcomeUnknown, CodeOutcomeUnknown},
+	"ErrTenantBudgetBusy":            {ErrTenantBudgetBusy, CodeTenantBudgetBusy},
 	"ErrLeaseExhausted":              {ErrLeaseExhausted, CodeLeaseExhausted},
 	"ErrLeaseRequestsExhausted":      {ErrLeaseRequestsExhausted, CodeLeaseRequestsExhausted},
 	"ErrLeaseNotFound":               {ErrLeaseNotFound, CodeLeaseNotFound},

@@ -122,6 +122,7 @@ SELECT revocation_id FROM limes.copy_usage WHERE tenant_id = $1 ORDER BY capabil
 
 	sqlDeleteTenantHolds   = `DELETE FROM limes.reservations WHERE tenant_id = $1`
 	sqlDeleteTenantBudget  = `DELETE FROM limes.tenant_budgets WHERE tenant_id = $1`
+	sqlDeleteTenantStripes = `DELETE FROM limes.tenant_budget_stripes WHERE tenant_id = $1`
 	sqlDeleteTenantUsage   = `DELETE FROM limes.usage WHERE tenant_id = $1`
 	sqlDeleteTenantCopies  = `DELETE FROM limes.copy_usage WHERE tenant_id = $1`
 	sqlDeleteTenantCharges = `DELETE FROM limes.charges WHERE tenant_id = $1`
@@ -269,6 +270,7 @@ func eraseUsage(ctx context.Context, tx pgx.Tx, req meter.EraseTenantUsageReques
 		{sql: sqlLockTenantHolds}, {sql: sqlLockTenantUsage}, {sql: sqlLockTenantCopies}, {sql: sqlLockTenant},
 		{sql: sqlDeleteTenantHolds, removed: &out.Holds},
 		{sql: sqlDeleteTenantBudget},
+		{sql: sqlDeleteTenantStripes},
 		{sql: sqlDeleteTenantUsage, removed: &out.Counters},
 		{sql: sqlDeleteTenantCopies, removed: &out.Copies},
 		{sql: sqlDeleteTenantCharges, removed: &out.Charges},
