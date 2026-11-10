@@ -1,7 +1,8 @@
 // The Go modules of the checkout as go reads them: which limes each
 // requires, and raising it to a release.
 
-import { existsSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { info } from "./actions.ts";
@@ -22,8 +23,47 @@ export function goEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
-async function go(args: string[], cwd: string): Promise<string> {
-  return execute("go", args, { cwd, env: goEnv() });
+async function go(args: string[], cwd: string, env: NodeJS.ProcessEnv = goEnv()): Promise<string> {
+  return execute("go", args, { cwd, env });
+}
+
+// GO_MOD and GO_SUM are a module's files.
+const GO_MOD = "go.mod";
+const GO_SUM = "go.sum";
+// REQUIRED_PREFIX names the directory a build on the required limes keeps
+// its copy of the module's go.mod in.
+const REQUIRED_PREFIX = "limes-required-";
+
+// Build is whether a module built, and what go said when it did not.
+export interface Build {
+  builds: boolean;
+  output: string;
+}
+
+// buildsOnRequired builds the module in dir as a consumer builds its
+// release: on the limes its go.mod requires, fetched as any module is, its
+// replace of limes dropped. The replace builds it in the checkout against
+// the limes of the same commit, which hides a symbol only that limes has:
+// a release that uses one does not compile on its own requirement. Its
+// go.mod is left as it is: the build reads a copy (go build -modfile).
+export async function buildsOnRequired(dir: string): Promise<Build> {
+  const work = mkdtempSync(join(tmpdir(), REQUIRED_PREFIX));
+  try {
+    const modfile = join(work, GO_MOD);
+    copyFileSync(join(dir, GO_MOD), modfile);
+    if (existsSync(join(dir, GO_SUM))) {
+      copyFileSync(join(dir, GO_SUM), join(work, GO_SUM));
+    }
+    await go(["mod", "edit", `-dropreplace=${LIMES_MODULE}`, modfile], dir);
+    // -mod=mod lets the build record the sums of the limes it fetches in
+    // the copy's go.sum.
+    await go(["build", "-mod=mod", `-modfile=${modfile}`, "./..."], dir);
+    return { builds: true, output: "" };
+  } catch (err) {
+    return { builds: false, output: err instanceof Error ? err.message : String(err) };
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
 }
 
 // requiredLimes is the limes version the module in dir requires, if any.

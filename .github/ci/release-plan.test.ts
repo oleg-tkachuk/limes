@@ -52,6 +52,8 @@ describe("the release plan", () => {
   let data: FakeData;
   // dryRuns are the notes each module's dry run writes, by module name.
   let dryRuns: Record<string, string>;
+  // unbuilt are the modules that do not build on the limes they require.
+  let unbuilt: Set<string>;
   const saved: Record<string, string | undefined> = {};
 
   before(() => {
@@ -93,6 +95,7 @@ describe("the release plan", () => {
     await repo.run("push", "--quiet", "origin", "main");
     data = fakeData();
     dryRuns = { limes: notes("0.2.0", "a feature") };
+    unbuilt = new Set();
   });
   afterEach(() => {
     repo.cleanup();
@@ -109,6 +112,8 @@ describe("the release plan", () => {
       only,
       today: TODAY,
       dryRun: async (module: Module) => dryRuns[module.name],
+      buildsOnRequired: async (module: Module) =>
+        unbuilt.has(module.name) ? { builds: false, output: "undefined: limes.ErrNew" } : { builds: true, output: "" },
     };
   }
 
@@ -183,6 +188,30 @@ describe("the release plan", () => {
     const pgstore = plan.find((p) => p.module.name === PGSTORE);
     assert.equal(pgstore?.tag, `${PGSTORE}/v0.2.0`);
     assert.match(pgstore?.entry ?? "", /\* a store feature\n\n### Dependencies\n\n\* require limes v0\.2\.0\n$/);
+  });
+
+  test("a nested module that does not build on the limes it requires brings limes into the plan, and is raised to it", async () => {
+    repo.write(`${PGSTORE}/feature.go`, "package pgstore\n");
+    await repo.commit(`feat(${PGSTORE})!: a store feature that needs limes's`);
+    dryRuns.pgstore = notes("0.2.0", "a store feature");
+    unbuilt.add(PGSTORE);
+    for (const p of [planner(NEVER_DUE, true, PGSTORE), planner(NEVER_DUE)]) {
+      const plan = await planReleases(p);
+      assert.deepEqual(
+        plan.map((m) => [m.tag, m.raise]),
+        [
+          ["v0.2.0", false],
+          [`${PGSTORE}/v0.2.0`, true],
+        ],
+      );
+    }
+  });
+
+  test("a nested module that does not build on the limes it requires, with nothing of limes to release, fails the plan", async () => {
+    dryRuns.pgstore = notes("0.2.0", "a store feature");
+    delete dryRuns.limes;
+    unbuilt.add(PGSTORE);
+    await assert.rejects(planReleases(planner(NEVER_DUE, true, PGSTORE)), /pgstore does not build on the limes it requires, and limes has no commit to release: undefined: limes\.ErrNew/);
   });
 
   test("a module the policy finds not due is left out, and so is everything it would raise", async () => {
