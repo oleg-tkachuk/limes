@@ -12,11 +12,11 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/oleg-tkachuk/limes/internal/errs"
+	"github.com/oleg-tkachuk/limes/internal/httpsurl"
 	"github.com/oleg-tkachuk/limes/internal/httpx"
 )
 
@@ -39,14 +39,6 @@ const (
 	DefaultMaxStale           = time.Hour
 	DefaultMaxDocumentBytes   = 1 << 20
 )
-
-// schemeHTTPS is the only scheme a key set is fetched over: over anything
-// else whoever sits on the path chooses the keys the verifier trusts.
-const schemeHTTPS = "https"
-
-// maxRedirects is how many redirects a fetch follows, net/http's own default
-// limit, for a Client that sets no CheckRedirect of its own.
-const maxRedirects = 10
 
 // RemoteConfig configures a Remote. Only URL is required.
 // The intervals must nest: MinRefreshInterval ≤ RefreshInterval ≤ MaxStale.
@@ -144,19 +136,11 @@ func NewRemote(cfg RemoteConfig) (*Remote, error) {
 }
 
 // parseRemoteURL reads the JWKS endpoint's URL, refusing one that is not
-// an https URL with a host.
+// an https URL with a host (httpsurl.Parse).
 func parseRemoteURL(raw string) (*url.URL, error) {
-	u, err := url.Parse(raw)
+	u, err := httpsurl.Parse(raw)
 	if err != nil {
-		// A *url.Error quotes the whole URL, password and all: only the
-		// reason is kept.
-		if ue, ok := errors.AsType[*url.Error](err); ok {
-			err = ue.Err
-		}
 		return nil, errs.Errorf("%w: jwks: RemoteConfig.URL: %w", errs.ErrInvalidConfig, err)
-	}
-	if u.Scheme != schemeHTTPS || u.Host == "" {
-		return nil, errs.Config("jwks: RemoteConfig.URL must be an %s URL, got %q", schemeHTTPS, u.Redacted())
 	}
 	return u, nil
 }
@@ -167,7 +151,7 @@ func setRemoteDefaults(cfg *RemoteConfig) {
 	if cfg.Client == nil {
 		cfg.Client = &http.Client{Timeout: DefaultFetchTimeout}
 	}
-	cfg.Client = sameOrigin(cfg.Client)
+	cfg.Client = httpsurl.SameOrigin(cfg.Client)
 	cfg.RefreshInterval = cmp.Or(cfg.RefreshInterval, DefaultRefreshInterval)
 	cfg.MinRefreshInterval = cmp.Or(cfg.MinRefreshInterval, DefaultMinRefreshInterval)
 	cfg.MaxStale = cmp.Or(cfg.MaxStale, DefaultMaxStale)
@@ -178,30 +162,6 @@ func setRemoteDefaults(cfg *RemoteConfig) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
-}
-
-// sameOrigin is a shallow copy of c, so the caller's client is left as it
-// is, whose redirects keep to the scheme and host of the first request: a
-// redirect is the server's choice, and one to http or to another host would
-// let it, or whoever can steer it, pick the keys. Within that, c's own policy
-// decides, or net/http's default when it has none.
-func sameOrigin(c *http.Client) *http.Client {
-	own := c.CheckRedirect
-	out := *c
-	out.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		first := via[0].URL
-		if req.URL.Scheme != schemeHTTPS || !strings.EqualFold(req.URL.Host, first.Host) {
-			return fmt.Errorf("jwks: redirect from %s to %s leaves the origin", first.Redacted(), req.URL.Redacted())
-		}
-		if own != nil {
-			return own(req, via)
-		}
-		if len(via) >= maxRedirects {
-			return fmt.Errorf("jwks: stopped after %d redirects", maxRedirects)
-		}
-		return nil
-	}
-	return &out
 }
 
 // PublicKey implements limes.KeyResolver. A known key from a set past its

@@ -20,8 +20,8 @@ var wrappedHelpers = map[string]map[string]string{
 		"errUserinfo":    "",
 	},
 	"jwks/remote.go": {
-		"sameOrigin": "a fetch's failures: Remote returns them inside ErrUnavailable",
-		"fetch":      "", "readKeys": "", "readCapped": "",
+		"fetch":    "a fetch's failures: Remote returns them inside ErrUnavailable",
+		"readKeys": "", "readCapped": "",
 	},
 	"sealed_form.go": {
 		"applyAttenuation": "a Biscuit's blocks: unsealedGrant refuses with ErrBiscuitAttenuation or ErrInvalidToken",

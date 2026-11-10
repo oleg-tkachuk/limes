@@ -14,6 +14,7 @@ import (
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/internal/errs"
+	"github.com/oleg-tkachuk/limes/internal/httpsurl"
 	"github.com/oleg-tkachuk/limes/jwks"
 )
 
@@ -78,7 +79,7 @@ func newRemote(ctx context.Context, rawURL string, client *http.Client, now func
 	if client == nil {
 		client = jwk.DefaultHTTPClient()
 	}
-	client = sameOrigin(client)
+	client = httpsurl.SameOrigin(client)
 	r := &remote{
 		url: rawURL, endpoint: u.Redacted(), now: now,
 		log:        log.With(slog.String("jwks_url", u.Redacted())),

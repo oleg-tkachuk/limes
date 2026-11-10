@@ -22,11 +22,11 @@ import (
 	"github.com/oleg-tkachuk/limes/jwks"
 )
 
-// jwtverify keeps its own copy of jwks.Remote's rule for where keys are
-// fetched from (origin.go): an https URL with a host, and redirects that keep
-// to its scheme and host. One table of cases runs through both, by their
-// exported API alone, and each must reach the same verdict: a change to one
-// copy that the other lacks fails here.
+// jwtverify and jwks.Remote fetch keys by one rule (internal/httpsurl): an
+// https URL with a host, and redirects that keep to its scheme and host. One
+// table of cases runs through both, by their exported API alone, and each
+// must reach the same verdict: a fetch path that stops applying the rule
+// fails here.
 
 const (
 	// parityKID is the kid the served key set names and the token carries.

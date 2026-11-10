@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+
+	"github.com/oleg-tkachuk/limes/internal/httpsurl"
 )
 
 // The key set is fetched over https only: any other URL is refused when the
@@ -117,8 +119,8 @@ func TestRemoteFollowsARedirectWithinTheOrigin(t *testing.T) {
 	}
 }
 
-// With no policy of its own, a client follows at most maxRedirects, as
-// net/http's default does.
+// With no policy of its own, a client follows at most
+// httpsurl.MaxRedirects, as net/http's default does.
 func TestRemoteStopsAnEndlessRedirect(t *testing.T) {
 	var hops atomic.Int32
 	loop := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -133,7 +135,7 @@ func TestRemoteStopsAnEndlessRedirect(t *testing.T) {
 	if _, err := r.PublicKey(context.Background(), "any"); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("PublicKey = %v, want ErrUnavailable", err)
 	}
-	if n := hops.Load(); n != maxRedirects {
-		t.Errorf("%d requests, want %d", n, maxRedirects)
+	if n := hops.Load(); n != httpsurl.MaxRedirects {
+		t.Errorf("%d requests, want %d", n, httpsurl.MaxRedirects)
 	}
 }
