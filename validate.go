@@ -204,7 +204,7 @@ func (p Principal) Validate() error {
 		return err
 	}
 	if p.Agent != nil && p.Type != PrincipalTypeAgent {
-		return invalidRequest("principal of type %q carries agent details", p.Type)
+		return refuseRequestf("a principal that is no agent carries agent details", "principal of type %q carries agent details", p.Type)
 	}
 	return checkText("principal", p.texts()...)
 }
@@ -220,7 +220,7 @@ func validateOnBehalfOf(obo, holder Principal) error {
 		return refuseRequest("OnBehalfOf names no subject")
 	}
 	if obo.TenantID != holder.TenantID {
-		return invalidRequest("OnBehalfOf is of tenant %s, not the subject's %s", obo.TenantID, holder.TenantID)
+		return refuseRequestf("OnBehalfOf is of another tenant than the subject", "OnBehalfOf is of tenant %s, not the subject's %s", obo.TenantID, holder.TenantID)
 	}
 	return nil
 }
@@ -233,6 +233,6 @@ func (t PrincipalType) Validate() error {
 		return nil
 	case PrincipalTypeUnspecified:
 	}
-	return invalidRequest("principal type %q is not one of %q, %q, %q",
+	return refuseRequestf("the principal type is not one this module defines", "principal type %q is not one of %q, %q, %q",
 		t, PrincipalTypeUser, PrincipalTypeAgent, PrincipalTypeService)
 }

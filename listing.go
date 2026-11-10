@@ -96,7 +96,7 @@ func (d RecordDisposition) Validate() error {
 		return nil
 	case RecordDispositionUnspecified:
 	}
-	return invalidRequest("disposition %q is not one of %q, %q, %q",
+	return refuseRequestf("a disposition is not one this module defines", "disposition %q is not one of %q, %q, %q",
 		d, RecordDispositionActive, RecordDispositionExpired, RecordDispositionRevoked)
 }
 
@@ -127,7 +127,7 @@ func (o ListOrder) String() string {
 // ErrInvalidRequest.
 func (o ListOrder) Validate() error {
 	if o > ListOrderDescending {
-		return invalidRequest("unknown list order %s", o)
+		return refuseRequestf("the list order is unknown", "unknown list order %s", o)
 	}
 	return nil
 }
@@ -178,15 +178,15 @@ func (r ListRecordsRequest) Validate() error {
 	case r.TenantID == uuid.Nil() && !r.AllTenants:
 		return refuseRequest("list records: a tenant id or AllTenants required")
 	case r.TenantID != uuid.Nil() && r.AllTenants:
-		return invalidRequest("list records: tenant id %s beside AllTenants", r.TenantID)
+		return refuseRequestf("list records: a tenant id beside AllTenants", "list records: tenant id %s beside AllTenants", r.TenantID)
 	case r.PrincipalType != PrincipalTypeUnspecified && r.PrincipalType.Validate() != nil:
-		return invalidRequest("list records: principal type %q is not a principal kind", r.PrincipalType)
+		return refuseRequestf("list records: the principal type is not a principal kind", "list records: principal type %q is not a principal kind", r.PrincipalType)
 	case r.Subject != "" && r.SubjectPrefix != "":
-		return invalidRequest("list records: a subject %q beside a subject prefix %q", r.Subject, r.SubjectPrefix)
+		return refuseRequestf("list records: a subject beside a subject prefix", "list records: a subject %q beside a subject prefix %q", r.Subject, r.SubjectPrefix)
 	case r.Order.Validate() != nil:
-		return invalidRequest("list records: unknown order %s", r.Order)
+		return refuseRequestf("list records: the order is unknown", "list records: unknown order %s", r.Order)
 	case r.Limit < 0:
-		return invalidRequest("list records: limit %d is negative", r.Limit)
+		return refuseRequestf("list records: limit is negative", "list records: limit %d is negative", r.Limit)
 	}
 	if err := checkText("list records", r.Subject, r.SubjectPrefix, r.OnBehalfOf, r.ClientID, r.Session, r.SubjectIssuer); err != nil {
 		return err
@@ -198,7 +198,7 @@ func (r ListRecordsRequest) Validate() error {
 func validateDispositions(ds []RecordDisposition) error {
 	for _, d := range ds {
 		if d.Validate() != nil {
-			return invalidRequest("list records: disposition %q is not one of %q, %q, %q",
+			return refuseRequestf("list records: a disposition is not one this module defines", "list records: disposition %q is not one of %q, %q, %q",
 				d, RecordDispositionActive, RecordDispositionExpired, RecordDispositionRevoked)
 		}
 	}

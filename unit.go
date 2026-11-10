@@ -18,7 +18,7 @@ func IsUnitCode(u string) bool {
 // ISO 4217 code.
 func validUnitCode(u string) error {
 	if u != "" && !IsUnitCode(u) {
-		return invalidRequest("unit_code %q is not an ISO 4217 code in upper case", u)
+		return refuseRequestf("unit_code is not an ISO 4217 code in upper case", "unit_code %q is not an ISO 4217 code in upper case", u)
 	}
 	return nil
 }

@@ -73,9 +73,9 @@ func (q CopyQuota) Validate() error { return validateCount("copies", q.Max, q.Un
 func validateCount(axis string, max int64, unlimited bool) error {
 	switch {
 	case unlimited && max != 0:
-		return invalidRequest("%s: %s (Max %d)", axis, unlimitedWithMax, max)
+		return refuseRequestf("a ceiling is either Unlimited or has a Max, not both", "%s: %s (Max %d)", axis, unlimitedWithMax, max)
 	case max < 0 || max > MaxIJSONInteger:
-		return invalidRequest("%s: Max %d is outside 0..%d", axis, max, int64(MaxIJSONInteger))
+		return refuseRequestf("a ceiling's Max is out of range", "%s: Max %d is outside 0..%d", axis, max, int64(MaxIJSONInteger))
 	}
 	return nil
 }
@@ -86,7 +86,7 @@ func validateCount(axis string, max int64, unlimited bool) error {
 // (Nanos.Validate), which matches ErrInvalidRequest too.
 func (c BudgetCeiling) Validate() error {
 	if c.Unlimited && c.Max != 0 {
-		return invalidRequest("budget: %s (Max %s)", unlimitedWithMax, c.Max)
+		return refuseRequestf("the budget is either Unlimited or has a Max, not both", "budget: %s (Max %s)", unlimitedWithMax, c.Max)
 	}
 	if err := c.Max.Validate(); err != nil {
 		return fmt.Errorf("budget: %w", err)
@@ -95,7 +95,7 @@ func (c BudgetCeiling) Validate() error {
 		return fmt.Errorf("budget: %w", err)
 	}
 	if c.permitsSpend() && c.UnitCode == "" {
-		return invalidRequest("budget %s names no unit_code", c)
+		return refuseRequestf("the budget names no unit_code", "budget %s names no unit_code", c)
 	}
 	return nil
 }

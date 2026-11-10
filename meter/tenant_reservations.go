@@ -23,7 +23,7 @@ func (r ListTenantReservationsRequest) Validate() error {
 	case r.TenantID == uuid.Nil():
 		return refuseRequest("list tenant reservations: tenant id required")
 	case r.Limit < 0:
-		return invalidRequest("list tenant reservations: limit %d is negative", r.Limit)
+		return refuseRequestf("list tenant reservations: limit is negative", "list tenant reservations: limit %d is negative", r.Limit)
 	}
 	return nil
 }

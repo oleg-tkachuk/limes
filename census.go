@@ -74,11 +74,11 @@ func (r CountRecordsRequest) Validate() error {
 	case r.TenantID == uuid.Nil() && !r.AllTenants:
 		return refuseRequest("count records: a tenant id or AllTenants required")
 	case r.TenantID != uuid.Nil() && r.AllTenants:
-		return invalidRequest("count records: tenant id %s beside AllTenants", r.TenantID)
+		return refuseRequestf("count records: a tenant id beside AllTenants", "count records: tenant id %s beside AllTenants", r.TenantID)
 	case r.ExpiringWithin < 0:
-		return invalidRequest("count records: ExpiringWithin %s is negative", r.ExpiringWithin)
+		return refuseRequestf("count records: ExpiringWithin is negative", "count records: ExpiringWithin %s is negative", r.ExpiringWithin)
 	case r.Limit < 0:
-		return invalidRequest("count records: limit %d is negative", r.Limit)
+		return refuseRequestf("count records: limit is negative", "count records: limit %d is negative", r.Limit)
 	}
 	return checkText("count records", r.Subject, r.OnBehalfOf, r.ClientID, r.Session, r.SubjectIssuer)
 }

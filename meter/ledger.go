@@ -75,9 +75,9 @@ func (r SumChargesRequest) Validate() error {
 	case r.From.IsZero() || r.To.IsZero():
 		return refuseRequest("sum charges: From and To required")
 	case !r.From.Before(r.To):
-		return invalidRequest("sum charges: From %s is not before To %s", r.From, r.To)
+		return refuseRequestf("sum charges: From is not before To", "sum charges: From %s is not before To %s", r.From, r.To)
 	case r.Limit < 0:
-		return invalidRequest("sum charges: limit %d is negative", r.Limit)
+		return refuseRequestf("sum charges: limit is negative", "sum charges: limit %d is negative", r.Limit)
 	}
 	if err := r.Bucket.Validate(); err != nil {
 		return err
@@ -95,9 +95,9 @@ func (r SumChargesRequest) validateScope() error {
 	case r.TenantID == uuid.Nil() && !r.AllTenants:
 		return refuseRequest("sum charges: a tenant id or AllTenants required")
 	case r.TenantID != uuid.Nil() && r.AllTenants:
-		return invalidRequest("sum charges: tenant id %s beside AllTenants", r.TenantID)
+		return refuseRequestf("sum charges: a tenant id beside AllTenants", "sum charges: tenant id %s beside AllTenants", r.TenantID)
 	case r.TenantID != uuid.Nil() && len(r.Filter.Tenants) > 0:
-		return invalidRequest("sum charges: a tenant filter beside tenant id %s", r.TenantID)
+		return refuseRequestf("sum charges: a tenant filter beside a tenant id", "sum charges: a tenant filter beside tenant id %s", r.TenantID)
 	}
 	return nil
 }
@@ -110,7 +110,7 @@ func validateGroupBy(dims []ChargeDimension) error {
 			return err
 		}
 		if seen[d] {
-			return invalidRequest("sum charges: dimension %s named twice", d)
+			return refuseRequestf("sum charges: a dimension is named twice", "sum charges: dimension %s named twice", d)
 		}
 		seen[d] = true
 	}
@@ -163,7 +163,7 @@ func (d ChargeDimension) String() string {
 // define.
 func (d ChargeDimension) Validate() error {
 	if d == ChargeDimensionUnspecified || d >= chargeDimensionEnd {
-		return invalidRequest("sum charges: dimension %s is not one this module defines", d)
+		return refuseRequestf("sum charges: a dimension is not one this module defines", "sum charges: dimension %s is not one this module defines", d)
 	}
 	return nil
 }
@@ -190,7 +190,7 @@ type ChargeFilter struct {
 func (f ChargeFilter) Validate() error {
 	for name, n := range map[string]int{"tenants": len(f.Tenants), "ops": len(f.Ops), "actors": len(f.Actors), "capabilities": len(f.Capabilities)} {
 		if n > MaxChargeFilterValues {
-			return invalidRequest("sum charges: %d %s in the filter, at most %d", n, name, MaxChargeFilterValues)
+			return refuseRequestf("sum charges: the filter names too many values", "sum charges: %d %s in the filter, at most %d", n, name, MaxChargeFilterValues)
 		}
 	}
 	if slices.Contains(f.Tenants, uuid.Nil()) || slices.Contains(f.Capabilities, uuid.Nil()) {
@@ -279,7 +279,7 @@ func (b ChargeBucket) String() string {
 // Validate refuses a bucket this module does not define.
 func (b ChargeBucket) Validate() error {
 	if b >= chargeBucketEnd {
-		return invalidRequest("sum charges: bucket %s is not one this module defines", b)
+		return refuseRequestf("sum charges: the bucket is not one this module defines", "sum charges: bucket %s is not one this module defines", b)
 	}
 	return nil
 }
@@ -343,7 +343,7 @@ type PurgeChargesRequest struct {
 // zero, and a negative Limit, as ErrInvalidRequest.
 func (r PurgeChargesRequest) Validate() error {
 	if r.OlderThan != 0 && r.OlderThan < MinChargeRetention {
-		return invalidRequest("purge charges: retention %s is shorter than %s", r.OlderThan, MinChargeRetention)
+		return refuseRequestf("purge charges: the retention is shorter than the least one", "purge charges: retention %s is shorter than %s", r.OlderThan, MinChargeRetention)
 	}
 	return validateHousekeepingLimit("purge charges", r.Limit)
 }

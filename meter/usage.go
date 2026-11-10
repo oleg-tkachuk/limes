@@ -647,7 +647,7 @@ func (r ReserveRequest) Validate() error {
 		return err
 	}
 	if r.TTL < 0 {
-		return invalidRequest("reservation TTL %s is negative", r.TTL)
+		return refuseRequestf("reservation TTL is negative", "reservation TTL %s is negative", r.TTL)
 	}
 	return checkText("reserve", string(r.Op), r.Actor)
 }
@@ -733,7 +733,7 @@ type RefundRequest struct {
 func (r RefundRequest) Validate() error {
 	switch {
 	case r.Remaining && r.Amount != 0:
-		return invalidRequest("refund: Amount %v and Remaining both set", r.Amount)
+		return refuseRequestf("refund: Amount and Remaining both set", "refund: Amount %v and Remaining both set", r.Amount)
 	case r.Remaining:
 		return nil
 	case r.Amount == 0:
@@ -818,7 +818,7 @@ func (r SetTenantBudgetRequest) Validate() error {
 	case r.TenantID == uuid.Nil():
 		return refuseRequest("set tenant budget: no tenant")
 	case r.ExpectedVersion < 0:
-		return invalidRequest("set tenant budget: ExpectedVersion %d is negative", r.ExpectedVersion)
+		return refuseRequestf("set tenant budget: ExpectedVersion is negative", "set tenant budget: ExpectedVersion %d is negative", r.ExpectedVersion)
 	}
 	return r.Ceiling.Validate()
 }
@@ -858,7 +858,7 @@ func (f TenantBudgetFilter) String() string {
 // ErrInvalidRequest.
 func (f TenantBudgetFilter) Validate() error {
 	if f > TenantBudgetFilterUnlimited {
-		return invalidRequest("list tenant budgets: unknown filter %s", f)
+		return refuseRequestf("list tenant budgets: the filter is unknown", "list tenant budgets: unknown filter %s", f)
 	}
 	return nil
 }
@@ -893,11 +893,11 @@ func (r ListTenantBudgetsRequest) Validate() error {
 	}
 	switch {
 	case r.Limit < 0:
-		return invalidRequest("list tenant budgets: limit %d is negative", r.Limit)
+		return refuseRequestf("list tenant budgets: limit is negative", "list tenant budgets: limit %d is negative", r.Limit)
 	case r.ThresholdBasisPoints < 0 || r.ThresholdBasisPoints > BasisPointsPerWhole:
-		return invalidRequest("list tenant budgets: threshold of %d basis points is outside 0..%d", r.ThresholdBasisPoints, BasisPointsPerWhole)
+		return refuseRequestf("list tenant budgets: the threshold is out of range", "list tenant budgets: threshold of %d basis points is outside 0..%d", r.ThresholdBasisPoints, BasisPointsPerWhole)
 	case r.ThresholdBasisPoints != 0 && r.Filter != TenantBudgetFilterAtOrPast:
-		return invalidRequest("list tenant budgets: a threshold with filter %s, which takes none", r.Filter)
+		return refuseRequestf("list tenant budgets: a threshold with a filter that takes none", "list tenant budgets: a threshold with filter %s, which takes none", r.Filter)
 	}
 	return nil
 }
@@ -975,11 +975,11 @@ func (r CopyUsageRequest) Validate() error {
 	case n == 0:
 		return refuseRequest("copy usage: no revocation id")
 	case n > MaxCopyUsageIDs:
-		return invalidRequest("copy usage: %d revocation ids, past MaxCopyUsageIDs (%d)", n, MaxCopyUsageIDs)
+		return refuseRequestf("copy usage: too many revocation ids", "copy usage: %d revocation ids, past MaxCopyUsageIDs (%d)", n, MaxCopyUsageIDs)
 	}
 	for i, id := range r.RevocationIDs {
 		if len(id) == 0 {
-			return invalidRequest("copy usage: revocation id %d is empty", i)
+			return refuseRequestf("copy usage: a revocation id is empty", "copy usage: revocation id %d is empty", i)
 		}
 	}
 	return nil
@@ -1070,7 +1070,7 @@ func (r ListReservationsRequest) Validate() error {
 	case r.CapabilityID == uuid.Nil():
 		return refuseRequest("list reservations: capability id required")
 	case r.Limit < 0:
-		return invalidRequest("list reservations: limit %d is negative", r.Limit)
+		return refuseRequestf("list reservations: limit is negative", "list reservations: limit %d is negative", r.Limit)
 	}
 	return nil
 }
@@ -1108,7 +1108,7 @@ func (r ReleaseExpiredRequest) Validate() error {
 // validateHousekeepingLimit refuses a negative batch limit for call.
 func validateHousekeepingLimit(call string, limit int) error {
 	if limit < 0 {
-		return invalidRequest("%s: limit %d is negative", call, limit)
+		return refuseRequestf("limit is negative", "%s: limit %d is negative", call, limit)
 	}
 	return nil
 }

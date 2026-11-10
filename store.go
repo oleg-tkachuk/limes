@@ -96,11 +96,11 @@ func (r InsertRequest) Validate() error {
 	case r.Capability.ID == uuid.Nil():
 		return refuseRequest("insert: the capability has no id")
 	case r.Capability.ExpiresAt.IsZero():
-		return invalidRequest("insert: capability %s never expires", r.Capability.ID)
+		return refuseRequestf("insert: the capability never expires", "insert: capability %s never expires", r.Capability.ID)
 	case r.Capability.ParentID != uuid.Nil() && r.Session != "":
-		return invalidRequest("insert: child %s names a session; it takes its parent's", r.Capability.ID)
+		return refuseRequestf("insert: a child names a session; it takes its parent's", "insert: child %s names a session; it takes its parent's", r.Capability.ID)
 	case r.Capability.ParentID != uuid.Nil() && r.SubjectIssuer != "":
-		return invalidRequest("insert: child %s names a subject issuer; it takes its parent's", r.Capability.ID)
+		return refuseRequestf("insert: a child names a subject issuer; it takes its parent's", "insert: child %s names a subject issuer; it takes its parent's", r.Capability.ID)
 	}
 	texts := append(r.Capability.texts(), r.IssuedBy.texts()...)
 	return checkText("insert", append(texts, r.Session, r.SubjectIssuer)...)
@@ -324,9 +324,9 @@ type PurgeRequest struct {
 func (r PurgeRequest) Validate() error {
 	switch {
 	case r.ExpiredFor != 0 && r.ExpiredFor < MinPurgeRetention:
-		return invalidRequest("purge: retention %s is shorter than %s", r.ExpiredFor, MinPurgeRetention)
+		return refuseRequestf("purge: the retention is shorter than the least one", "purge: retention %s is shorter than %s", r.ExpiredFor, MinPurgeRetention)
 	case r.Limit < 0:
-		return invalidRequest("purge: limit %d is negative", r.Limit)
+		return refuseRequestf("purge: limit is negative", "purge: limit %d is negative", r.Limit)
 	}
 	return nil
 }
@@ -373,11 +373,11 @@ func (r ListByPrincipalRequest) Validate() error {
 	case r.TenantID == uuid.Nil():
 		return refuseRequest("list: tenant id required")
 	case r.PrincipalType.Validate() != nil:
-		return invalidRequest("list: principal type %q is not a principal kind", r.PrincipalType)
+		return refuseRequestf("list: the principal type is not a principal kind", "list: principal type %q is not a principal kind", r.PrincipalType)
 	case r.Subject == "":
 		return refuseRequest("list: subject required")
 	case r.Limit < 0:
-		return invalidRequest("list: limit %d is negative", r.Limit)
+		return refuseRequestf("list: limit is negative", "list: limit %d is negative", r.Limit)
 	}
 	return checkText("list", r.Subject)
 }

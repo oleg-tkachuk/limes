@@ -7,7 +7,7 @@ import "github.com/oleg-tkachuk/limes/internal/storable"
 // requests refuse them. what names the request; the text is not repeated.
 func checkText(what string, texts ...string) error {
 	if !storable.Text(texts...) {
-		return invalidRequest("%s: text that is not valid UTF-8 or holds a NUL", what)
+		return refuseRequestf("text that is not valid UTF-8 or holds a NUL", "%s: text that is not valid UTF-8 or holds a NUL", what)
 	}
 	return nil
 }

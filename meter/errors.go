@@ -164,6 +164,13 @@ func refuseRequest(text detail.Text) error {
 	return detail.Wrap(invalidRequest("%s", text), text)
 }
 
+// refuseRequestf is an ErrInvalidRequest saying, for the log, what format
+// and args make, and carrying text, a constant naming the part of the
+// request refused and the rule it broke: what a client may be shown of it.
+func refuseRequestf(text detail.Text, format string, args ...any) error {
+	return detail.Wrap(invalidRequest(format, args...), text)
+}
+
 // noCompare makes a struct that holds it not comparable with ==, as
 // limes's structs that may gain a field in 1.x are.
 type noCompare [0]func()
