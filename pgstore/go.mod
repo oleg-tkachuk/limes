@@ -17,11 +17,16 @@ replace github.com/oleg-tkachuk/limes => ../
 // wrong tenants without an error.
 retract v0.1.0
 
+// v0.76.0 uses limes.ErrStoreUnavailable and ErrStoreTimeout and requires
+// limes v0.175.0, which has neither, so it does not compile unless limes
+// v0.176.0 or later is required beside it.
+retract v0.76.0
+
 require (
 	github.com/jackc/pgerrcode v0.0.0-20250907135507-afb5586c32a6
 	github.com/jackc/pgx/v5 v5.12.0
 	github.com/jackc/tern/v2 v2.4.3
-	github.com/oleg-tkachuk/limes v0.175.0
+	github.com/oleg-tkachuk/limes v0.176.0
 )
 
 require (
