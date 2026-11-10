@@ -18,7 +18,7 @@ import (
 // testClientID is the OAuth client the tests' capabilities name.
 const testClientID = "test-client"
 
-func issue(t *testing.T) (limes.Capability, string, ed25519.PublicKey) {
+func issue(t testing.TB) (limes.Capability, string, ed25519.PublicKey) {
 	t.Helper()
 	key, err := limes.GenerateKey()
 	kid, pub, priv := key.KeyID, key.Public(), key.Private

@@ -217,7 +217,7 @@ func (c countCursor) encode() string { return encodeCursor(c) }
 // ErrInvalidRequest.
 func decodeCountCursor(s string) (countCursor, error) {
 	var c countCursor
-	if err := decodeCursor(s, &c); err != nil {
+	if err := decodeCursor(s, &c); err != nil || !storableText(c.Type) {
 		return countCursor{}, fmt.Errorf("%w: pgstore: record count cursor %q", limes.ErrInvalidRequest, s)
 	}
 	return c, nil

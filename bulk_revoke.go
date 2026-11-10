@@ -69,7 +69,7 @@ func (r RevokeMatchingRequest) Validate() error {
 	case r.Limit < 0:
 		return invalidRequest("revoke matching: limit %d is negative", r.Limit)
 	}
-	return nil
+	return checkText("revoke matching", r.Subject, r.OnBehalfOf, r.ClientID, r.Session, r.SubjectIssuer, r.Note, r.Actor)
 }
 
 // BatchLimit is Limit, or DefaultHousekeepingLimit when it is zero.

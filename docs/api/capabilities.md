@@ -1071,7 +1071,7 @@ Clone is p with agent details of its own: a store keeps, and hands out, a princi
 func (p Principal) Validate() error
 ```
 
-Validate reports whether p names a principal a capability can be issued to: one of the principal kinds, spelled as the constants spell it, and agent details only on an agent. The kind is part of the token, so a kind outside the set would be signed and then read by every verifier as it pleased.
+Validate reports whether p names a principal a capability can be issued to: one of the principal kinds, spelled as the constants spell it, and agent details only on an agent. The kind is part of the token, so a kind outside the set would be signed and then read by every verifier as it pleased. Its subject and agent details are text a store keeps: valid UTF-8 without NUL (docs/compatibility.md).
 
 <sub>[validate.go](../../validate.go)</sub>
 <a id="limes.PrincipalType"></a>

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/internal/httpsurl"
 	"github.com/oleg-tkachuk/limes/jwks"
 )
 
@@ -149,8 +150,8 @@ func TestRemoteKeysKeepTheClientsRedirectPolicy(t *testing.T) {
 	}
 }
 
-// With no policy of its own, a client follows at most maxRedirects, as
-// net/http's default does.
+// With no policy of its own, a client follows at most
+// httpsurl.MaxRedirects, as net/http's default does.
 func TestRemoteKeysStopAnEndlessRedirect(t *testing.T) {
 	var hops atomic.Int64
 	loop := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -166,7 +167,7 @@ func TestRemoteKeysStopAnEndlessRedirect(t *testing.T) {
 		t.Fatalf("keys = %v, want jwks.ErrUnavailable", err)
 	}
 	// The background fetch may run a chain of its own beside the token's.
-	if n := hops.Load(); n == 0 || n > fetchChains*maxRedirects {
-		t.Errorf("%d requests, want at most %d chains of %d", n, fetchChains, maxRedirects)
+	if n := hops.Load(); n == 0 || n > fetchChains*httpsurl.MaxRedirects {
+		t.Errorf("%d requests, want at most %d chains of %d", n, fetchChains, httpsurl.MaxRedirects)
 	}
 }

@@ -88,7 +88,9 @@ type InsertRequest struct {
 // Validate refuses, as ErrInvalidRequest, a capability with no id — nothing
 // could read it back, and the zero id is what a root's ParentID holds — and
 // one with no expiry: no verifier accepts it, Purge never removes it, and a
-// child under it would outlive nothing.
+// child under it would outlive nothing. Every text it carries, the
+// capability's included, is valid UTF-8 without NUL (docs/compatibility.md):
+// what a store cannot keep as it is is refused, not kept altered.
 func (r InsertRequest) Validate() error {
 	switch {
 	case r.Capability.ID == uuid.Nil():
@@ -100,7 +102,8 @@ func (r InsertRequest) Validate() error {
 	case r.Capability.ParentID != uuid.Nil() && r.SubjectIssuer != "":
 		return invalidRequest("insert: child %s names a subject issuer; it takes its parent's", r.Capability.ID)
 	}
-	return nil
+	texts := append(r.Capability.texts(), r.IssuedBy.texts()...)
+	return checkText("insert", append(texts, r.Session, r.SubjectIssuer)...)
 }
 
 // RevocationStore revokes one capability. Store implements it; a Revoker,
@@ -284,7 +287,7 @@ func (r RevokeRequest) Validate() error {
 	if r.CapabilityID == uuid.Nil() {
 		return invalidRequest("revoke: capability id required")
 	}
-	return nil
+	return checkText("revoke", r.Note, r.Actor)
 }
 
 // DefaultHousekeepingLimit is how many rows one housekeeping batch —
@@ -376,5 +379,5 @@ func (r ListByPrincipalRequest) Validate() error {
 	case r.Limit < 0:
 		return invalidRequest("list: limit %d is negative", r.Limit)
 	}
-	return nil
+	return checkText("list", r.Subject)
 }

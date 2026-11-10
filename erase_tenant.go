@@ -36,7 +36,7 @@ func (r EraseTenantRequest) Validate() error {
 	if r.TenantID == uuid.Nil() {
 		return invalidRequest("erase tenant records: tenant id required")
 	}
-	return nil
+	return checkText("erase tenant records", r.Note, r.Actor)
 }
 
 // EraseTenantResult is what EraseTenantRecords did.

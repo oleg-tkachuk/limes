@@ -403,6 +403,12 @@ func (i *Issuer) mint(t grantTerms) Capability {
 // capability whose token cannot be minted, or would be too long to use, is
 // never recorded. what names the record in an error from the store.
 func (i *Issuer) signAndRecord(ctx context.Context, c Capability, issuance InsertRequest, what string) (string, error) {
+	issuance.Capability = c
+	// Before the signature: a token is never minted for a capability no
+	// store can record.
+	if err := issuance.Validate(); err != nil {
+		return "", err
+	}
 	token, err := i.sign(ctx, c)
 	if err != nil {
 		return "", err

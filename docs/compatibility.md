@@ -26,6 +26,11 @@ redisreplay, otelmetric, exchange and biscuit.
 - **What is stored and signed**: the token formats and the database
   schema, read by every replica of a rolling upgrade.
 
+Text a store keeps is valid UTF-8 without NUL, which every store can keep
+as it is: PostgreSQL text and jsonb hold nothing else. Every request that
+hands a store text refuses other text as `ErrInvalidRequest`, so each
+store answers the same input the same way, as the caller's error.
+
 The schema is promised to limes's own releases, not to a consumer's
 queries. Which rows hold a value is the store's to change: a tenant's
 aggregate, for one, is its budget row plus its stripes since

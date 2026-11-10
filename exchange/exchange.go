@@ -17,6 +17,7 @@ import (
 	"github.com/oleg-tkachuk/limes/dpop"
 	"github.com/oleg-tkachuk/limes/internal/errcode"
 	"github.com/oleg-tkachuk/limes/internal/errs"
+	"github.com/oleg-tkachuk/limes/internal/storable"
 )
 
 // The refusals of an exchange, one per RFC 6749 §5.2 error (and RFC 8707's
@@ -502,6 +503,11 @@ func (e *Exchanger) verifySubject(ctx context.Context, req Request) (Subject, ti
 			return Subject{}, 0, fmt.Errorf("exchange: verify subject token: %w", err)
 		}
 		return Subject{}, 0, err
+	}
+	// Refused here, before anything is claimed or minted: the token's
+	// issuer, id and subject are what an exchange and its capability keep.
+	if !storable.Text(append([]string{subject.Issuer, subject.Subject, subject.ClientID, subject.ID, subject.JKT, subject.SessionID}, subject.Audience...)...) {
+		return Subject{}, 0, fmt.Errorf("%w: the subject token carries text that is not valid UTF-8 or holds a NUL", ErrInvalidGrant)
 	}
 	if !slices.ContainsFunc(subject.Audience, func(aud string) bool { return slices.Contains(req.Client.SubjectAudiences, aud) }) {
 		return subject, 0, fmt.Errorf("%w: issued for %q, not for the client", ErrInvalidGrant, subject.Audience)

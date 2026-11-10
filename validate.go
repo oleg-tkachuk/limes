@@ -200,7 +200,8 @@ func validResource(kind, s string) error {
 // to: one of the principal kinds, spelled as the constants spell it, and
 // agent details only on an agent. The kind is part of the token, so a kind
 // outside the set would be signed and then read by every verifier as it
-// pleased.
+// pleased. Its subject and agent details are text a store keeps: valid
+// UTF-8 without NUL (docs/compatibility.md).
 func (p Principal) Validate() error {
 	if err := p.Type.Validate(); err != nil {
 		return err
@@ -208,7 +209,7 @@ func (p Principal) Validate() error {
 	if p.Agent != nil && p.Type != PrincipalTypeAgent {
 		return invalidRequest("principal of type %q carries agent details", p.Type)
 	}
-	return nil
+	return checkText("principal", p.texts()...)
 }
 
 // validateOnBehalfOf checks the principal a capability of holder acts on
