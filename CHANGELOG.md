@@ -2,6 +2,16 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.176.0](https://github.com/oleg-tkachuk/limes/compare/v0.175.0...v0.176.0) (2026-11-10)
+
+### Features
+
+* **core:** add store_unavailable and store_timeout ([c1ddaef](https://github.com/oleg-tkachuk/limes/commit/c1ddaefbc302cc15fa1b2b979c91e71447129871))
+
+### Codes
+
+* added: `store_timeout`, `store_unavailable`
+
 ## [0.175.0](https://github.com/oleg-tkachuk/limes/compare/v0.174.0...v0.175.0) (2026-11-10)
 
 ### ⚠ BREAKING CHANGES
