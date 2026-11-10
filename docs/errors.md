@@ -54,6 +54,26 @@ if !ok {
 `limes.ProblemFor(err)` never reports false: an error that is not limes's —
 a database's, a consumer's own — is `internal`, 500.
 
+A store answers its database's failures with limes's codes, so a caller
+retries what may be served again and nothing else. pgstore classifies
+PostgreSQL's errors by their type and SQLSTATE, the driver's error kept in
+the chain for `errors.As`:
+
+| Failure | Code |
+| --- | --- |
+| No connection made; one closed or timed out under a call that wrote nothing; the server shutting down or starting (57P01–57P03); a connection exception (class 08); out of resources (class 53, `too_many_connections` among them); a serialization failure (40001) or a deadlock past the store's retries (40P01) | `store_unavailable`, 503 |
+| `statement_timeout` (57014), `lock_timeout` (55P03), `idle_in_transaction_session_timeout` (25P03) | `store_timeout`, 504 |
+| A commit whose answer was lost | `outcome_unknown`, 503 — before either above |
+| The caller's own context ended | none: the caller's |
+| A connection lost under a call that wrote, past its first byte | none: it may have committed, and sent again could apply twice |
+| Any other — a statement's error, the schema's | none: `internal`, 500 |
+
+Under a revocation lookup a store's failure is answered
+`revocation_unavailable`, the lookup's own code, the store's kept in the
+chain. A pool that times out waiting for a free connection returns the
+caller's context error, which no code can tell from the caller's own
+deadline.
+
 **The token endpoint** (`exchange.Handler`) answers in RFC 6749 §5.2's
 format: `error`, `error_description`, and a status. An `Exchanger` called
 in process answers alike with `exchange.ErrorOf(err)`, which reports false
@@ -201,6 +221,11 @@ has a reason, and the store's own error stays in the text only.
   transaction is a caller holding it open, which no retry outlasts until
   that caller ends it, or the database's
   `idle_in_transaction_session_timeout` does.
+- **`store_unavailable`** and **`store_timeout`** are a call the store
+  could not serve and that wrote nothing — no connection, the database
+  shutting down or out of resources, a statement past the database's own
+  limit: send it again, after a pause. A write whose commit may have
+  landed is `outcome_unknown` instead, never one of these.
 
 [errors.json](errors.json) is the same table for a consumer that is not
 written in Go: every code, its HTTP status, category, title, problem type,
@@ -286,7 +311,7 @@ func TestErrorContract(t *testing.T) {
 status and category, for a consumer that answers in HTTP's terms.
 
 A category says what retrying would do, not how bad the failure is, and
-agrees with the status: every 502 and 503 is `unavailable`, a dependency
+agrees with the status: every 502, 503 and 504 is `unavailable`, a dependency
 that failed and may answer the next time — the issuer's keys
 (`keys_unavailable`), the store or upstream that answers revocation
 lookups (`revocation_unavailable`), a store whose pages handed back a cursor already
@@ -296,7 +321,9 @@ no lineage (`no_revocation_lineage`), which `NewRevocationCache` refuses
 at startup until the upstream it is given does, and a verifier requiring a
 record answers when its lookup wraps a cache over such an upstream; and a store whose answer to
 a commit was lost (`outcome_unknown`), which a keyed call sent again
-settles. Every `unauthenticated` code is
+settles; and a store that could not serve a call which wrote nothing
+(`store_unavailable`) or cancelled its statement past its own limit
+(`store_timeout`), which a call sent again may find served. Every `unauthenticated` code is
 a credential no longer good or never proven — expired, revoked, a bad
 proof — which another credential may pass; a transport whose codes keep
 those apart from a lack of permission maps them to its own
@@ -356,6 +383,8 @@ unauthenticated code, not to its permission-denied one.
 | `no_revocation_lineage` | 502 | `limes.ErrNoRevocationLineage` |  |  | The revocation upstream names no lineage | `unavailable` |
 | `copy_counters_not_metered` | 500 | `limes.ErrCopyCountersNotMetered` |  |  | Copy limits need a verifier that meters copies | `internal` |
 | `cursor_repeated` | 502 | `limes.ErrCursorRepeated` |  |  | The store returned a cursor already fetched | `unavailable` |
+| `store_unavailable` | 503 | `limes.ErrStoreUnavailable` |  |  | The store is unavailable | `unavailable` |
+| `store_timeout` | 504 | `limes.ErrStoreTimeout` |  |  | The store did not answer in time | `unavailable` |
 | `invalid_config` | 500 | `limes.ErrInvalidConfig` |  |  | The server is misconfigured | `internal` |
 | `internal` | 500 | `limes.ErrInternal` |  |  | Internal error | `internal` |
 
@@ -506,6 +535,8 @@ type means the same for the whole of v1.
 | <a id="no_revocation_lineage"></a>`no_revocation_lineage` | 502 | [limes's codes](#limess-codes) |
 | <a id="copy_counters_not_metered"></a>`copy_counters_not_metered` | 500 | [limes's codes](#limess-codes) |
 | <a id="cursor_repeated"></a>`cursor_repeated` | 502 | [limes's codes](#limess-codes) |
+| <a id="store_unavailable"></a>`store_unavailable` | 503 | [limes's codes](#limess-codes) |
+| <a id="store_timeout"></a>`store_timeout` | 504 | [limes's codes](#limess-codes) |
 | <a id="invalid_config"></a>`invalid_config` | 500 | [limes's codes](#limess-codes) |
 | <a id="internal"></a>`internal` | 500 | [limes's codes](#limess-codes) |
 | <a id="copy_limit_exceeded"></a>`copy_limit_exceeded` | 403 | [The meter's codes](#the-meters-codes) |

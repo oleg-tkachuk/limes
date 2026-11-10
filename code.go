@@ -78,6 +78,8 @@ const (
 	CodeNoRevocationLineage     Code = "no_revocation_lineage"
 	CodeCopyCountersNotMetered  Code = "copy_counters_not_metered"
 	CodeCursorRepeated          Code = "cursor_repeated"
+	CodeStoreUnavailable        Code = "store_unavailable"
+	CodeStoreTimeout            Code = "store_timeout"
 	CodeInvalidConfig           Code = "invalid_config"
 	CodeInternal                Code = "internal"
 )
@@ -196,6 +198,8 @@ var codeRules = []codeRule{
 	{ErrNoRevocationLineage, CodeNoRevocationLineage, http.StatusBadGateway, "The revocation upstream names no lineage", CategoryUnavailable},
 	{ErrCopyCountersNotMetered, CodeCopyCountersNotMetered, http.StatusInternalServerError, "Copy limits need a verifier that meters copies", CategoryInternal},
 	{ErrCursorRepeated, CodeCursorRepeated, http.StatusBadGateway, "The store returned a cursor already fetched", CategoryUnavailable},
+	{ErrStoreUnavailable, CodeStoreUnavailable, http.StatusServiceUnavailable, "The store is unavailable", CategoryUnavailable},
+	{ErrStoreTimeout, CodeStoreTimeout, http.StatusGatewayTimeout, "The store did not answer in time", CategoryUnavailable},
 	{ErrInvalidConfig, CodeInvalidConfig, http.StatusInternalServerError, "The server is misconfigured", CategoryInternal},
 	{ErrInternal, CodeInternal, http.StatusInternalServerError, internalTitle, CategoryInternal},
 }

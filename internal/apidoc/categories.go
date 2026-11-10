@@ -124,11 +124,12 @@ var rootFiles = map[string]string{
 	"erase_tenant.go":   catStorage,
 	"exchange_store.go": catStorage,
 
-	"errors.go":    catErrors,
-	"code.go":      catErrors,
-	"category.go":  catErrors,
-	"reason.go":    catErrors,
-	"challenge.go": catErrors,
+	"errors.go":        catErrors,
+	"store_failure.go": catErrors,
+	"code.go":          catErrors,
+	"category.go":      catErrors,
+	"reason.go":        catErrors,
+	"challenge.go":     catErrors,
 
 	"events.go":           catObserving,
 	"issuer_observe.go":   catObserving,

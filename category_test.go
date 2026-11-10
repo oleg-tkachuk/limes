@@ -94,12 +94,12 @@ func TestCategoryOfCode(t *testing.T) {
 	}
 }
 
-// A category agrees with the status: every error answered 502 or 503 is a
-// dependency that failed, unavailable.
+// A category agrees with the status: every error answered 502, 503 or 504
+// is a dependency that failed, unavailable.
 func TestEveryGatewayStatusIsUnavailable(t *testing.T) {
 	for _, r := range codeRules {
 		p, _ := ProblemOf(r.sentinel)
-		gateway := p.Status == http.StatusBadGateway || p.Status == http.StatusServiceUnavailable
+		gateway := p.Status == http.StatusBadGateway || p.Status == http.StatusServiceUnavailable || p.Status == http.StatusGatewayTimeout
 		if gateway != (r.category == CategoryUnavailable) {
 			t.Errorf("%s answers %d in category %q", r.code, p.Status, r.category)
 		}
