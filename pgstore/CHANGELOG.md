@@ -2,6 +2,12 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.76.1](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.76.0...pgstore%2Fv0.76.1) (2026-11-10)
+
+### Bug Fixes
+
+* **pgstore:** require limes v0.176.0 and retract v0.76.0 ([251ec43](https://github.com/oleg-tkachuk/limes/commit/251ec43860f0c7832b1319b3014a36e591df4063))
+
 ## [0.76.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.75.0...pgstore%2Fv0.76.0) (2026-11-10)
 
 ### ⚠ BREAKING CHANGES
