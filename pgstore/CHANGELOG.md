@@ -2,6 +2,16 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.76.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.75.0...pgstore%2Fv0.76.0) (2026-11-10)
+
+### ⚠ BREAKING CHANGES
+
+* **pgstore:** a database failure now carries a limes code where it carried none (docs/migration.md).
+
+### Features
+
+* **pgstore:** answer the database's failures with limes's codes ([8ef5d7e](https://github.com/oleg-tkachuk/limes/commit/8ef5d7e4a5a2d8623f8c06d002c220ef91e0696f))
+
 ## [0.75.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.74.0...pgstore%2Fv0.75.0) (2026-11-10)
 
 ### ⚠ BREAKING CHANGES
