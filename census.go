@@ -80,7 +80,7 @@ func (r CountRecordsRequest) Validate() error {
 	case r.Limit < 0:
 		return invalidRequest("count records: limit %d is negative", r.Limit)
 	}
-	return nil
+	return checkText("count records", r.Subject, r.OnBehalfOf, r.ClientID, r.Session, r.SubjectIssuer)
 }
 
 // RecordCount is one group's counts. The fields a request did not group by

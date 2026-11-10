@@ -992,8 +992,9 @@ func checkPurgeKeepsLineage(t *testing.T, f fixture) {
 // checkInsertKeepsLineage holds Insert to a lineage Purge and IsRevoked can
 // rely on: no record without an id, none under a parent not on record, and
 // no record that never expires, which no verifier accepts and Purge never
-// removes, no child expiring after its parent, and no child counting in
-// another unit than its parent. None of them is recorded.
+// removes, no child expiring after its parent, no child counting in another
+// unit than its parent, and no text a store cannot keep as it is. None of
+// them is recorded.
 func checkInsertKeepsLineage(t *testing.T, f fixture) {
 	parent := f.live(t, "agent:parent", uuid.Nil())
 	noID := f.newCapability("agent:no-id", uuid.Nil(), f.now.Add(ttl))
@@ -1019,6 +1020,10 @@ func checkInsertKeepsLineage(t *testing.T, f fixture) {
 	if f.ScopesTenants {
 		elsewhereRefusal = limes.ErrScopeMismatch
 	}
+	// Text is valid UTF-8 without NUL, which every store keeps as it is
+	// (docs/compatibility.md): other text is the caller's error.
+	withNUL := f.newCapability("agent:nul\x00", uuid.Nil(), f.now.Add(ttl))
+	notUTF8 := f.newCapability("agent:\xff", uuid.Nil(), f.now.Add(ttl))
 	for name, tc := range map[string]struct {
 		c    limes.Capability
 		want error
@@ -1030,6 +1035,8 @@ func checkInsertKeepsLineage(t *testing.T, f fixture) {
 		"a root with no expiry":        {endlessRoot, limes.ErrInvalidRequest},
 		"a child in another tenant":    {elsewhere, elsewhereRefusal},
 		"a child in another unit":      {otherUnit, limes.ErrUnitCodeMismatch},
+		"a subject with a NUL":         {withNUL, limes.ErrInvalidRequest},
+		"a subject not UTF-8":          {notUTF8, limes.ErrInvalidRequest},
 	} {
 		err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: tc.c, IssuedBy: issuedBy})
 		expect.That(t, errors.Is(err, tc.want), "Insert of %s: err = %v, want %v", name, err, tc.want)

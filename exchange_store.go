@@ -50,7 +50,7 @@ func (k ExchangeKey) Validate() error {
 	case k.TokenID == "":
 		return invalidRequest("ExchangeKey.TokenID required")
 	}
-	return nil
+	return checkText("ExchangeKey", k.Issuer, k.TokenID)
 }
 
 // ExchangeStore records which capability exchanging a subject token issued,

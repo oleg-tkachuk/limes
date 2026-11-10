@@ -34,6 +34,7 @@ import (
 	"github.com/oleg-tkachuk/limes/internal/errs"
 	"github.com/oleg-tkachuk/limes/internal/jose"
 	"github.com/oleg-tkachuk/limes/internal/rfc3986"
+	"github.com/oleg-tkachuk/limes/internal/storable"
 )
 
 // Proof of possession, after RFC 9449 (DPoP).
@@ -581,7 +582,9 @@ func readProof(jwt string, what presented) (string, proofClaims, error) {
 		return "", proofClaims{}, fmt.Errorf("%w: signature", ErrInvalid)
 	}
 	var claims proofClaims
-	if err := decodeSegment(parts.Payload, &claims); err != nil || claims.JTI == "" || len(claims.JTI) > MaxJTIBytes {
+	if err := decodeSegment(parts.Payload, &claims); err != nil || claims.JTI == "" || len(claims.JTI) > MaxJTIBytes ||
+		// The jti is what a replay cache keeps.
+		!storable.Text(claims.JTI) {
 		return "", proofClaims{}, fmt.Errorf("%w: claims", ErrInvalid)
 	}
 	return thumb, claims, nil

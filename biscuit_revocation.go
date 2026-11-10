@@ -89,7 +89,7 @@ func (r RevokeBiscuitRequest) Validate() error {
 	if err := r.Copy.Validate(); err != nil {
 		return fmt.Errorf("revoke biscuit: %w", err)
 	}
-	return nil
+	return checkText("revoke biscuit", r.Note, r.Actor)
 }
 
 // BiscuitCopy identifies one copy of a capability's Biscuit. Only

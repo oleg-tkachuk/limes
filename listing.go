@@ -188,6 +188,9 @@ func (r ListRecordsRequest) Validate() error {
 	case r.Limit < 0:
 		return invalidRequest("list records: limit %d is negative", r.Limit)
 	}
+	if err := checkText("list records", r.Subject, r.SubjectPrefix, r.OnBehalfOf, r.ClientID, r.Session, r.SubjectIssuer); err != nil {
+		return err
+	}
 	return validateDispositions(r.Dispositions)
 }
 

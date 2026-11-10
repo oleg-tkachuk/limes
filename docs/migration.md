@@ -70,6 +70,31 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## v0.175.0
+
+- Every request that hands a store text refuses, with `ErrInvalidRequest`,
+  text that is not valid UTF-8 or holds a NUL: a capability's and a
+  principal's text on `InsertRequest` and `Principal.Validate`, notes and
+  actors on revocations and erasures, the filters of listings, counts and
+  bulk revocations, `ExchangeKey`, and in package meter the op, actor and
+  external ref of a charge or a hold, a ledger filter and
+  `ReleaseMatchingRequest`. `Issuer.Issue` and `Issuer.Delegate` refuse
+  such text before they sign. memstore kept it; pgstore failed the call as
+  a server error. Pass text as valid UTF-8 without NUL.
+- `Verifier.Verify` refuses, with `ErrInvalidToken`, a token whose subject
+  or agent details hold a NUL: `Principal.Validate` reads them on the way
+  in. Only a store that kept such text, memstore among them, could have
+  recorded one; revoke it and issue its holder another.
+- `dpop.Verifier` refuses, as `dpop.ErrInvalid`, a proof whose `jti` holds
+  a NUL: the replay cache keeps the `jti`.
+
+## exchange/v0.24.0
+
+- `Exchanger.Exchange` refuses, with `ErrInvalidGrant`, a subject token
+  whose issuer, subject, client, id, key thumbprint, session or audience
+  holds a NUL or is not valid UTF-8, before it claims the token or mints a
+  capability.
+
 ## pgstore/v0.73.0
 
 - `Config.StripeUnlimitedTenants` is gone: the usage store counts a tenant

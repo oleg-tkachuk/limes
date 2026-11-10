@@ -426,7 +426,7 @@ InsertRequest is a capability to record, and who asked for it.
 func (r InsertRequest) Validate() error
 ```
 
-Validate refuses, as ErrInvalidRequest, a capability with no id — nothing could read it back, and the zero id is what a root's ParentID holds — and one with no expiry: no verifier accepts it, Purge never removes it, and a child under it would outlive nothing.
+Validate refuses, as ErrInvalidRequest, a capability with no id — nothing could read it back, and the zero id is what a root's ParentID holds — and one with no expiry: no verifier accepts it, Purge never removes it, and a child under it would outlive nothing. Every text it carries, the capability's included, is valid UTF-8 without NUL (docs/compatibility.md): what a store cannot keep as it is is refused, not kept altered.
 
 <sub>[store.go](../../store.go)</sub>
 <a id="limes.IssuanceStore"></a>

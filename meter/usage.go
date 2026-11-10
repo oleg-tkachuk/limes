@@ -8,6 +8,7 @@ import (
 	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/internal/storable"
 )
 
 // UsageStore is everything a consumer implements for runtime accounting. It
@@ -492,6 +493,9 @@ func (r ChargeRequest) Validate() error {
 	if err := ValidateExternalRef(r.ExternalRef); err != nil {
 		return err
 	}
+	if err := checkText("charge", string(r.Op), r.Actor); err != nil {
+		return err
+	}
 	return r.Subject.ValidateAmounts()
 }
 
@@ -645,7 +649,7 @@ func (r ReserveRequest) Validate() error {
 	if r.TTL < 0 {
 		return invalidRequest("reservation TTL %s is negative", r.TTL)
 	}
-	return nil
+	return checkText("reserve", string(r.Op), r.Actor)
 }
 
 // HeldCopy is a Biscuit copy a hold is on: a hold counts no requests, so it
@@ -1018,6 +1022,9 @@ func (p OverrunPolicy) String() string {
 func ValidateExternalRef(ref string) error {
 	if len(ref) > MaxExternalRefBytes {
 		return fmt.Errorf("%w: external ref is %d bytes, at most %d", limes.ErrInvalidRequest, len(ref), MaxExternalRefBytes)
+	}
+	if !storable.Text(ref) {
+		return fmt.Errorf("%w: external ref is not valid UTF-8 or holds a NUL", limes.ErrInvalidRequest)
 	}
 	for _, r := range ref {
 		if !unicode.IsPrint(r) {

@@ -49,6 +49,9 @@ func (r ReleaseMatchingRequest) Validate() error {
 	case r.AllTenants && (r.Subject != "" || r.OnBehalfOf != "" || r.RunID != uuid.Nil() || r.CapabilityID != uuid.Nil()):
 		return invalidRequest("release matching: AllTenants matches by client, session or subject issuer alone; a subject, an agent run or a capability names one tenant's")
 	}
+	if err := checkText("release matching", r.Subject, r.OnBehalfOf, r.ClientID, r.Session, r.SubjectIssuer); err != nil {
+		return err
+	}
 	return validateHousekeepingLimit("release matching", r.Limit)
 }
 

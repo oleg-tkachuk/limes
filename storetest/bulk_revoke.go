@@ -217,6 +217,8 @@ func checkRevokeMatchingMalformed(t *testing.T, f fixture) {
 		"every tenant by on-behalf-of":          {AllTenants: true, OnBehalfOf: "user"},
 		"every tenant by agent run":             {AllTenants: true, ClientID: "client", RunID: uuid.New()},
 		"every tenant by subject of one issuer": {AllTenants: true, Subject: "user", SubjectIssuer: bulkIdP},
+		"a subject with a NUL":                  {TenantID: f.Tenant, Subject: "user\x00"},
+		"a note not UTF-8":                      {TenantID: f.Tenant, Subject: "user", Note: "\xff"},
 	} {
 		_, err := f.BulkRevoker.RevokeMatching(f.Ctx, req)
 		expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "%s: %v, want ErrInvalidRequest", name, err)

@@ -199,7 +199,11 @@ func (f ChargeFilter) Validate() error {
 	if slices.Contains(f.Ops, "") || slices.Contains(f.Actors, "") {
 		return invalidRequest("sum charges: a filter names an empty operation or actor")
 	}
-	return nil
+	texts := append([]string{}, f.Actors...)
+	for _, op := range f.Ops {
+		texts = append(texts, string(op))
+	}
+	return checkText("sum charges", texts...)
 }
 
 // Admits reports whether f keeps a charge of tenant, op, actor and
