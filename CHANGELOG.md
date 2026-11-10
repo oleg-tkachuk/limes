@@ -2,6 +2,25 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.175.0](https://github.com/oleg-tkachuk/limes/compare/v0.174.0...v0.175.0) (2026-11-10)
+
+### ⚠ BREAKING CHANGES
+
+* **core:** requests carrying a NUL or invalid UTF-8 are refused, and a token whose subject holds a NUL no longer verifies (docs/migration.md).
+
+### Features
+
+* **core:** say in a problem's detail what part of a request was refused ([483f6a2](https://github.com/oleg-tkachuk/limes/commit/483f6a2661ddcae8a7e04a92a58d7a328119454f))
+
+### Bug Fixes
+
+* **core:** refuse text no store can keep ([97bc2be](https://github.com/oleg-tkachuk/limes/commit/97bc2be1a7d448648f5e15c5e2b5d777c2d5c364))
+* **jwks:** keep the password out of a refused keys URL ([22eb255](https://github.com/oleg-tkachuk/limes/commit/22eb255a4eaa8591822a9bdfd09b4bf5987ba5cc))
+
+### Contract
+
+* refuse text no store can keep
+
 ## [0.174.0](https://github.com/oleg-tkachuk/limes/compare/v0.173.0...v0.174.0) (2026-11-09)
 
 ### Features
