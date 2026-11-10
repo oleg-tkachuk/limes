@@ -12,7 +12,12 @@
 // has commits that release, or as a patch whose notes are the requirement
 // alone. One unchanged since is left as it is: its last release is the code
 // CI has just built against this limes, so it needs none to work with it,
-// and a consumer's build selects the newer limes anyway. When limes reaches
+// and a consumer's build selects the newer limes anyway. A nested module in
+// the plan that does not build on the limes it requires — built as a
+// consumer builds it, its replace of limes dropped — uses what only the
+// limes of this commit has: limes is released with it, whatever the policy
+// says or the run asked for, and its requirement raised; with nothing of
+// limes to release, the plan fails. When limes reaches
 // v1.0.0, every
 // nested module still on 0.x reaches its v1.0.0 with it, its own notes, if
 // any, under that version: one stable line for the whole repository
@@ -50,7 +55,7 @@ import { gitHubFor, type GitHub, type PullRequestText } from "./lib/github.ts";
 import { runMain } from "./lib/main.ts";
 import { pushAs } from "./lib/push.ts";
 import { DRY_RUN_ARG, semanticRelease } from "./lib/semantic-release.ts";
-import { FOLLOWERS, compareVersions, raise, requiredLimes, tidyFollowers } from "./lib/go-modules.ts";
+import { FOLLOWERS, buildsOnRequired, compareVersions, raise, requiredLimes, tidyFollowers, type Build } from "./lib/go-modules.ts";
 import { ROOT_MODULE, releaseCommits, releasedModules, selectModule, type Module, type ReleaseCommits } from "./lib/modules.ts";
 import { STABLE_MAJOR, nextVersion, parseVersion } from "./lib/prerelease.ts";
 import { notesFrom } from "./lib/releases.ts";
@@ -99,6 +104,10 @@ export interface Planner {
   // dryRun is the notes module's next release would have, heading first,
   // or undefined when no commit since its last release releases anything.
   dryRun(module: Module): Promise<string | undefined>;
+  // buildsOnRequired is whether nested module builds as a consumer builds
+  // its release, on the limes it requires (lib/go-modules.ts), injected so
+  // a test need not fetch one.
+  buildsOnRequired(module: Module): Promise<Build>;
 }
 
 // planReleases is every release the checked-out commit is due, in the
@@ -125,6 +134,7 @@ export async function planReleases(p: Planner): Promise<Planned[]> {
     }
     plan.push(await planned(p, module, notes, false));
   }
+  await pullInLimes(p, plan);
   const limes = plan.find((m) => m.module.name === ROOT_MODULE);
   if (limes !== undefined) {
     const last = await lastStableTag(limes.module, "HEAD", p.root);
@@ -143,6 +153,34 @@ export async function planReleases(p: Planner): Promise<Planned[]> {
   }
   const order = (m: Planned) => names.indexOf(m.module.name);
   return plan.sort((a, b) => order(a) - order(b));
+}
+
+// pullInLimes adds limes to plan, when it is not in it, for a nested module
+// of plan that does not build on the limes it requires: its code uses what
+// only the limes of this commit has, so its release alone would not compile
+// for a consumer. limes is released with it, whatever the policy says or the
+// run asked for, and raiseNested raises the module's requirement to it. One
+// whose limes has nothing to release fails the plan: no release of either
+// can give it what it needs.
+async function pullInLimes(p: Planner, plan: Planned[]): Promise<void> {
+  if (plan.some((m) => m.module.name === ROOT_MODULE)) {
+    return;
+  }
+  for (const m of plan) {
+    const build = await p.buildsOnRequired(m.module);
+    if (build.builds) {
+      info(`${m.module.name}: builds on the limes it requires`);
+      continue;
+    }
+    info(`${m.module.name}: does not build on the limes it requires, so limes is released with it: ${build.output}`);
+    const limes = selectModule(p.root, ROOT_MODULE);
+    const notes = await p.dryRun(limes);
+    if (notes === undefined) {
+      throw new Error(`${m.module.name} does not build on the limes it requires, and limes has no commit to release: ${build.output}`);
+    }
+    plan.push(await planned(p, limes, notes, false));
+    return;
+  }
 }
 
 // followToStable plans every nested module of names whose last release is
@@ -437,6 +475,7 @@ async function main(): Promise<void> {
     only: module === ALL_MODULES ? undefined : module,
     today: today(),
     dryRun: dryRunNotes(semanticRelease(root, token, [DRY_RUN_ARG]), requireEnv("RUNNER_TEMP")),
+    buildsOnRequired: (m: Module) => buildsOnRequired(join(root, m.dir)),
     github: gitHubFor(token, repository),
     push: pushAs(token, repository, root),
   });
