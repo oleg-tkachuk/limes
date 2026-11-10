@@ -2,6 +2,12 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.177.0](https://github.com/oleg-tkachuk/limes/compare/v0.176.0...v0.177.0) (2026-11-10)
+
+### Features
+
+* **core:** name the refused field in the detail of every input refusal ([799d135](https://github.com/oleg-tkachuk/limes/commit/799d13588ce6daeead1225bc23de24a85b094457))
+
 ## [0.176.0](https://github.com/oleg-tkachuk/limes/compare/v0.175.0...v0.176.0) (2026-11-10)
 
 ### Features
