@@ -6,7 +6,7 @@ Exchanging an identity provider's token for a capability (RFC 8693). Part of the
 
 | Package | |
 |---|---|
-| [`github.com/oleg-tkachuk/limes/exchange`](#exchange) | 36 declarations |
+| [`github.com/oleg-tkachuk/limes/exchange`](#exchange) | 39 declarations |
 | [`github.com/oleg-tkachuk/limes/exchange/jwtverify`](#jwtverify) | 5 declarations |
 
 <a id="exchange"></a><a id="package-exchange"></a>
@@ -106,6 +106,17 @@ const DefaultMaxBodyBytes = 64 << 10
 DefaultMaxBodyBytes bounds a token request's body when the config names no MaxBodyBytes: a subject token, a proof and the parameters fit in a few kilobytes.
 
 <sub>[exchange/handler.go](../../exchange/handler.go)</sub>
+<a id="exchange.MaxErrorResponseBytes"></a>
+
+### exchange.MaxErrorResponseBytes
+
+```go
+const MaxErrorResponseBytes = 16 << 10
+```
+
+MaxErrorResponseBytes bounds the body ParseErrorResponse reads: an error response is a code and a sentence, and a server that sends more is not answering as RFC 6749 §5.2 says.
+
+<sub>[exchange/response.go](../../exchange/response.go)</sub>
 <a id="exchange.MetadataMaxAge"></a>
 
 ### exchange.MetadataMaxAge
@@ -212,6 +223,17 @@ func NewResourceMetadataHandler(md ResourceMetadata) (http.Handler, error)
 NewResourceMetadataHandler serves md, refusing a document whose resource or authorization servers are not https URLs without a fragment.
 
 <sub>[exchange/metadata.go](../../exchange/metadata.go)</sub>
+<a id="exchange.ParseErrorResponse"></a>
+
+### exchange.ParseErrorResponse
+
+```go
+func ParseErrorResponse(resp *http.Response) error
+```
+
+ParseErrorResponse reads resp, a token endpoint's answer, as a client of it: nil for a success (2xx), and otherwise a \*ResponseError of its RFC 6749 §5.2 body, read up to MaxErrorResponseBytes. It leaves resp.Body for the caller to close.
+
+<sub>[exchange/response.go](../../exchange/response.go)</sub>
 <a id="exchange.ResourceChallenge"></a>
 
 ### exchange.ResourceChallenge
@@ -762,6 +784,42 @@ type ResourceMetadata struct {
 ResourceMetadata is a protected resource's metadata (RFC 9728 §2), which an MCP server must publish: where its clients get tokens, and how they present them.
 
 <sub>[exchange/metadata.go](../../exchange/metadata.go)</sub>
+<a id="exchange.ResponseError"></a>
+
+### exchange.ResponseError
+
+```go
+type ResponseError struct {
+	Response Error
+	// contains filtered or unexported fields
+}
+```
+
+ResponseError is an error response a token endpoint answered with, as ParseErrorResponse reads it: its status, code and description as the server sent them, the description being the server's text, for a log. It wraps the sentinel of its code, so errors.Is, limes.CodeOf, CategoryOf and ProblemOf answer it as the endpoint answered its own refusal; a code this package does not know, or a body that is no error response, wraps ErrServerError.
+
+<sub>[exchange/response.go](../../exchange/response.go)</sub>
+<a id="exchange.ResponseError.Error"></a>
+
+#### exchange.ResponseError.Error
+
+```go
+func (e *ResponseError) Error() string
+```
+
+Error says what the endpoint answered.
+
+<sub>[exchange/response.go](../../exchange/response.go)</sub>
+<a id="exchange.ResponseError.Unwrap"></a>
+
+#### exchange.ResponseError.Unwrap
+
+```go
+func (e *ResponseError) Unwrap() error
+```
+
+Unwrap is the sentinel of the response's code.
+
+<sub>[exchange/response.go](../../exchange/response.go)</sub>
 <a id="exchange.Result"></a>
 
 ### exchange.Result

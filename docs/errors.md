@@ -60,6 +60,16 @@ in process answers alike with `exchange.ErrorOf(err)`, which reports false
 for an error that is none of the exchange's: answer it `server_error`, 500
 (see [the exchange's codes](#the-exchanges-codes)).
 
+A client of the endpoint reads its answer with
+`exchange.ParseErrorResponse(resp)`: nil for a success, and otherwise an
+`*exchange.ResponseError` holding the status, code and description sent,
+which wraps the sentinel of its code — `errors.Is`, `limes.CodeOf`,
+`CategoryOf` and `ProblemOf` answer it as the endpoint answered its own
+refusal. A code several sentinels share reads as the one the others are
+cases of (`invalid_dpop_proof` as `dpop.ErrInvalid`, `invalid_target` as
+`exchange.ErrInvalidTarget`); a code it does not know, or a body that is
+no error response, as `exchange.ErrServerError`.
+
 The body, for a capability that was revoked:
 
 ```json
