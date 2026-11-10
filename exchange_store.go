@@ -35,7 +35,7 @@ func (r ClaimExchangeRequest) Validate() error {
 		return err
 	}
 	if r.TokenExpiresAt.IsZero() {
-		return invalidRequest("ClaimExchangeRequest.TokenExpiresAt required")
+		return refuseRequest("ClaimExchangeRequest.TokenExpiresAt required")
 	}
 	return nil
 }
@@ -44,11 +44,11 @@ func (r ClaimExchangeRequest) Validate() error {
 func (k ExchangeKey) Validate() error {
 	switch {
 	case k.TenantID == uuid.Nil():
-		return invalidRequest("ExchangeKey.TenantID required")
+		return refuseRequest("ExchangeKey.TenantID required")
 	case k.Issuer == "":
-		return invalidRequest("ExchangeKey.Issuer required")
+		return refuseRequest("ExchangeKey.Issuer required")
 	case k.TokenID == "":
-		return invalidRequest("ExchangeKey.TokenID required")
+		return refuseRequest("ExchangeKey.TokenID required")
 	}
 	return checkText("ExchangeKey", k.Issuer, k.TokenID)
 }

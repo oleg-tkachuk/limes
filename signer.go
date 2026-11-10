@@ -291,7 +291,7 @@ func checkSignable(c Capability) error {
 		return err
 	}
 	if c.ExpiresAt.Before(c.IssuedAt) || c.ExpiresAt.IsZero() {
-		return invalidRequest("limes: ExpiresAt must be after IssuedAt")
+		return refuseRequest("limes: ExpiresAt must be after IssuedAt")
 	}
 	return checkActing(c)
 }
@@ -300,18 +300,18 @@ func checkSignable(c Capability) error {
 func checkRequired(c Capability) error {
 	switch {
 	case c.ID == uuid.Nil():
-		return invalidRequest("limes: ID required")
+		return refuseRequest("limes: ID required")
 	case c.Issuer == "":
-		return invalidRequest("limes: Issuer required")
+		return refuseRequest("limes: Issuer required")
 	case c.Subject.TenantID == uuid.Nil():
-		return invalidRequest("limes: Subject.TenantID required")
+		return refuseRequest("limes: Subject.TenantID required")
 	case c.Subject.Subject == "":
-		return invalidRequest("limes: Subject.Subject required (RFC 9068 sub)")
+		return refuseRequest("limes: Subject.Subject required (RFC 9068 sub)")
 	case len(c.Caveats.Ops) == 0:
-		return invalidRequest("limes: at least one Op required")
+		return refuseRequest("limes: at least one Op required")
 	case c.ClientID == "":
 		// RFC 9068 makes client_id required of an at+jwt: none is invented.
-		return invalidRequest("limes: a capability needs a ClientID (RFC 9068 client_id)")
+		return refuseRequest("limes: a capability needs a ClientID (RFC 9068 client_id)")
 	}
 	return nil
 }
@@ -548,7 +548,7 @@ func readParentID(parentID string, prior []string) (uuid.UUID, error) {
 func checkActing(c Capability) error {
 	if c.OnBehalfOf == nil {
 		if len(c.PriorActors) > 0 {
-			return invalidRequest("limes: PriorActors need an OnBehalfOf")
+			return refuseRequest("limes: PriorActors need an OnBehalfOf")
 		}
 		return nil
 	}
@@ -556,7 +556,7 @@ func checkActing(c Capability) error {
 		return err
 	}
 	if len(c.PriorActors) > 0 && c.ParentID == uuid.Nil() {
-		return invalidRequest("limes: PriorActors need a ParentID")
+		return refuseRequest("limes: PriorActors need a ParentID")
 	}
 	if len(c.PriorActors) > MaxDelegationDepth || slices.Contains(c.PriorActors, "") {
 		return invalidRequest("limes: PriorActors are at most %d subjects, none empty", MaxDelegationDepth)

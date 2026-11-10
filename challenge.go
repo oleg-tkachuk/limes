@@ -60,7 +60,9 @@ type Problem struct {
 	Title string `json:"title"`
 	// Status repeats the HTTP status.
 	Status int `json:"status"`
-	// Detail explains this occurrence, in terms safe to show the client.
+	// Detail explains this occurrence, in terms safe to show the client:
+	// set by ProblemOf, for a code of DetailCodes, as a constant naming the
+	// part of the request refused and the rule it broke, never a value.
 	Detail string `json:"detail,omitempty"`
 	// Reason is the refusal's Reason, an extension member (RFC 9457 §3.2):
 	// the stable name a client branches on, which the Type URI ends with.

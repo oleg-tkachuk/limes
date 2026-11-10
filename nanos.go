@@ -44,7 +44,7 @@ func ParseAmount(s string) (Nanos, error) {
 		return 0, err
 	}
 	if !exact {
-		return 0, fmt.Errorf("%w: %q is finer than a nano", ErrInvalidAmount, s)
+		return 0, refuse(ErrInvalidAmount, "the amount is finer than a nano", "%q is finer than a nano", s)
 	}
 	return n, nil
 }
@@ -67,7 +67,7 @@ func MustParseAmount(s string) Nanos {
 // Nanos.Validate refuses, and NaN and the infinities.
 func AmountFromFloat(f float64) (Nanos, error) {
 	if math.IsNaN(f) || math.IsInf(f, 0) {
-		return 0, fmt.Errorf("%w: %v is not a number", ErrInvalidAmount, f)
+		return 0, refuse(ErrInvalidAmount, "the amount is not a number", "%v is not a number", f)
 	}
 	if f == 0 { // minus zero included, which would format with a sign
 		return 0, nil
@@ -92,18 +92,18 @@ var decimalAmount = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]{1,` +
 // nearest nano, halves to even, reporting whether that was exact.
 func parseDecimal(s string) (Nanos, bool, error) {
 	if strings.HasPrefix(s, "-") {
-		return 0, false, fmt.Errorf("%w: %s is negative", ErrInvalidAmount, s)
+		return 0, false, refuse(ErrInvalidAmount, "the amount is negative", "%s is negative", s)
 	}
 	if !decimalAmount.MatchString(s) {
-		return 0, false, fmt.Errorf("%w: %q is not a decimal amount", ErrInvalidAmount, s)
+		return 0, false, refuse(ErrInvalidAmount, "the amount is not a decimal number", "%q is not a decimal amount", s)
 	}
 	r, ok := new(big.Rat).SetString(s)
 	if !ok {
-		return 0, false, fmt.Errorf("%w: %q is not a decimal amount", ErrInvalidAmount, s)
+		return 0, false, refuse(ErrInvalidAmount, "the amount is not a decimal number", "%q is not a decimal amount", s)
 	}
 	q, exact := roundHalfEven(r.Mul(r, nanosPerUnitRat))
 	if !q.IsInt64() || Nanos(q.Int64()) > MaxNanos {
-		return 0, false, fmt.Errorf("%w: %s exceeds %s", ErrInvalidAmount, s, MaxNanos)
+		return 0, false, refuse(ErrInvalidAmount, "the amount is past the largest one", "%s exceeds %s", s, MaxNanos)
 	}
 	return Nanos(q.Int64()), exact, nil
 }
@@ -161,7 +161,7 @@ func (n Nanos) MarshalJSON() ([]byte, error) { return strconv.AppendQuote(nil, n
 func (n *Nanos) UnmarshalJSON(b []byte) error {
 	s, err := strconv.Unquote(string(b))
 	if err != nil || len(b) == 0 || b[0] != '"' {
-		return fmt.Errorf("%w: %s is not a JSON string", ErrInvalidAmount, b)
+		return refuse(ErrInvalidAmount, "the amount is not a JSON string", "%s is not a JSON string", b)
 	}
 	v, err := ParseAmount(s)
 	if err != nil {
@@ -191,7 +191,7 @@ func (n *Nanos) UnmarshalText(b []byte) error {
 // state.
 func (n Nanos) Validate() error {
 	if n < 0 || n > MaxNanos {
-		return fmt.Errorf("%w: %s is outside 0..%s", ErrInvalidAmount, n, MaxNanos)
+		return refuse(ErrInvalidAmount, "the amount is negative or past the largest one", "%s is outside 0..%s", n, MaxNanos)
 	}
 	return nil
 }

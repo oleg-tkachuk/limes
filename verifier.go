@@ -447,7 +447,7 @@ func checkVerifyRequest(req VerifyRequest) error {
 		return ErrNoCredentials
 	}
 	if req.Audience == "" {
-		return invalidRequest("VerifyRequest.Audience is required")
+		return refuseRequest("VerifyRequest.Audience is required")
 	}
 	return nil
 }

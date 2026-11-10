@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/oleg-tkachuk/limes/dpop"
+	"github.com/oleg-tkachuk/limes/internal/detail"
 	"github.com/oleg-tkachuk/limes/internal/errcode"
 	"github.com/oleg-tkachuk/limes/internal/link"
 	"github.com/oleg-tkachuk/limes/jwks"
@@ -376,15 +377,22 @@ const internalTitle = "Internal error"
 // for a consumer's own API, whatever its transport: its type URI, a fixed
 // title, its HTTP status, its code, its category and, for a refusal, its
 // Reason. A
-// refusal's is the body Verifier.ErrorResponse writes. It carries no detail:
-// an error's text can name kids, issuers or stores, which is for the
-// server's log. False for an error that is not limes's: answer that as the
-// server's failure.
+// refusal's is the body Verifier.ErrorResponse writes. False for an error
+// that is not limes's: answer that as the server's failure.
+//
+// Its Detail is set for a refusal of the client's own input — a code of
+// DetailCodes — when the refusal says which part of the request it refused
+// and which rule that broke, and is empty otherwise. A detail is written
+// where the refusal is, as a constant: it never holds an id, a key id, an
+// issuer, a tenant, a resource or any other value — the client's or the
+// server's. The error's text, which may name all of those, is for the
+// server's log alone.
 func ProblemOf(err error) (Problem, bool) {
 	cr, ok := codeRuleFor(err)
 	if !ok {
 		return Problem{}, false
 	}
+	p := problemOfRule(cr)
 	// A refusal is answered as one, unless its code has a status of its
 	// own: a meter sentinel in a refusal's family that is no refusal.
 	if rr, refused := ruleFor(err); refused && cr.status == 0 {
@@ -392,11 +400,20 @@ func ProblemOf(err error) (Problem, bool) {
 		if rr.reason != "" {
 			kind = string(rr.reason)
 		}
-		p := answer(rr.answer, kind, rr.reason).Problem
+		p = answer(rr.answer, kind, rr.reason).Problem
 		p.Code, p.Category = cr.code, cr.category
-		return p, true
 	}
-	return problemOfRule(cr), true
+	if text, ok := detail.Of(err); ok && slices.Contains(DetailCodes(), p.Code) {
+		p.Detail = string(text)
+	}
+	return p, true
+}
+
+// DetailCodes are the codes whose problem may carry a Detail (ProblemOf):
+// refusals of what the client sent — a request, its caveats, an amount, a
+// delegation wider than its parent.
+func DetailCodes() []Code {
+	return []Code{CodeInvalidRequest, CodeInvalidCaveats, CodeInvalidAmount, CodeDelegationTooWide}
 }
 
 // problemOfRule is the problem of a code with a status of its own.

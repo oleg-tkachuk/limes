@@ -45,7 +45,7 @@ func (r LeaseRequest) Validate() error {
 		return invalidRequest("lease of %d requests", r.Requests)
 	}
 	if r.Amount == 0 && r.Requests == 0 {
-		return invalidRequest("lease of no amount and no requests")
+		return refuseRequest("lease of no amount and no requests")
 	}
 	if err := r.Subject.ValidateAmounts(); err != nil {
 		return err
@@ -68,7 +68,7 @@ type SettleLeaseRequest struct {
 // Validate refuses a subject that names no capability or no tenant.
 func (r SettleLeaseRequest) Validate() error {
 	if r.Subject.CapabilityID() == uuid.Nil() || r.Subject.TenantID() == uuid.Nil() {
-		return invalidRequest("settle lease: a subject with a capability and a tenant required")
+		return refuseRequest("settle lease: a subject with a capability and a tenant required")
 	}
 	return nil
 }

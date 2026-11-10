@@ -21,7 +21,7 @@ type ListTenantReservationsRequest struct {
 func (r ListTenantReservationsRequest) Validate() error {
 	switch {
 	case r.TenantID == uuid.Nil():
-		return invalidRequest("list tenant reservations: tenant id required")
+		return refuseRequest("list tenant reservations: tenant id required")
 	case r.Limit < 0:
 		return invalidRequest("list tenant reservations: limit %d is negative", r.Limit)
 	}

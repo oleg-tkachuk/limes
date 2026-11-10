@@ -32,7 +32,7 @@ type EraseTenantUsageRequest struct {
 // Validate refuses a request naming no tenant.
 func (r EraseTenantUsageRequest) Validate() error {
 	if r.TenantID == uuid.Nil() {
-		return invalidRequest("erase tenant usage: tenant id required")
+		return refuseRequest("erase tenant usage: tenant id required")
 	}
 	return nil
 }

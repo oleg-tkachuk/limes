@@ -737,7 +737,7 @@ func (r RefundRequest) Validate() error {
 	case r.Remaining:
 		return nil
 	case r.Amount == 0:
-		return invalidRequest("refund: neither an Amount nor Remaining")
+		return refuseRequest("refund: neither an Amount nor Remaining")
 	}
 	return r.Amount.Validate()
 }
@@ -816,7 +816,7 @@ type SetTenantBudgetRequest struct {
 func (r SetTenantBudgetRequest) Validate() error {
 	switch {
 	case r.TenantID == uuid.Nil():
-		return invalidRequest("set tenant budget: no tenant")
+		return refuseRequest("set tenant budget: no tenant")
 	case r.ExpectedVersion < 0:
 		return invalidRequest("set tenant budget: ExpectedVersion %d is negative", r.ExpectedVersion)
 	}
@@ -969,11 +969,11 @@ type CopyUsageRequest struct {
 // MaxCopyUsageIDs, or an empty revocation id, as ErrInvalidRequest.
 func (r CopyUsageRequest) Validate() error {
 	if r.CapabilityID == uuid.Nil() {
-		return invalidRequest("copy usage: no capability")
+		return refuseRequest("copy usage: no capability")
 	}
 	switch n := len(r.RevocationIDs); {
 	case n == 0:
-		return invalidRequest("copy usage: no revocation id")
+		return refuseRequest("copy usage: no revocation id")
 	case n > MaxCopyUsageIDs:
 		return invalidRequest("copy usage: %d revocation ids, past MaxCopyUsageIDs (%d)", n, MaxCopyUsageIDs)
 	}
@@ -1068,7 +1068,7 @@ type ListReservationsRequest struct {
 func (r ListReservationsRequest) Validate() error {
 	switch {
 	case r.CapabilityID == uuid.Nil():
-		return invalidRequest("list reservations: capability id required")
+		return refuseRequest("list reservations: capability id required")
 	case r.Limit < 0:
 		return invalidRequest("list reservations: limit %d is negative", r.Limit)
 	}
@@ -1144,9 +1144,9 @@ type ChargeByRefRequest struct {
 func (r ChargeByRefRequest) Validate() error {
 	switch {
 	case r.CapabilityID == uuid.Nil():
-		return invalidRequest("charge by ref: capability id required")
+		return refuseRequest("charge by ref: capability id required")
 	case r.ExternalRef == "":
-		return invalidRequest("charge by ref: external ref required")
+		return refuseRequest("charge by ref: external ref required")
 	}
 	return ValidateExternalRef(r.ExternalRef)
 }
@@ -1159,7 +1159,7 @@ type DeleteUsageRequest struct {
 // Validate refuses a request naming no capability, as ErrInvalidRequest.
 func (r DeleteUsageRequest) Validate() error {
 	if r.CapabilityID == uuid.Nil() {
-		return invalidRequest("delete usage: capability id required")
+		return refuseRequest("delete usage: capability id required")
 	}
 	return nil
 }

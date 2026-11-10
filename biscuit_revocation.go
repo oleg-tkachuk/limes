@@ -107,7 +107,7 @@ type BiscuitCopy struct {
 // ErrInvalidRequest.
 func (c BiscuitCopy) Validate() error {
 	if c.capabilityID == uuid.Nil() || len(c.revocationID) == 0 {
-		return invalidRequest("no biscuit copy; read one with Verifier.BiscuitCopy")
+		return refuseRequest("no biscuit copy; read one with Verifier.BiscuitCopy")
 	}
 	return nil
 }

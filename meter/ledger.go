@@ -73,7 +73,7 @@ func (r SumChargesRequest) Validate() error {
 	}
 	switch {
 	case r.From.IsZero() || r.To.IsZero():
-		return invalidRequest("sum charges: From and To required")
+		return refuseRequest("sum charges: From and To required")
 	case !r.From.Before(r.To):
 		return invalidRequest("sum charges: From %s is not before To %s", r.From, r.To)
 	case r.Limit < 0:
@@ -93,7 +93,7 @@ func (r SumChargesRequest) Validate() error {
 func (r SumChargesRequest) validateScope() error {
 	switch {
 	case r.TenantID == uuid.Nil() && !r.AllTenants:
-		return invalidRequest("sum charges: a tenant id or AllTenants required")
+		return refuseRequest("sum charges: a tenant id or AllTenants required")
 	case r.TenantID != uuid.Nil() && r.AllTenants:
 		return invalidRequest("sum charges: tenant id %s beside AllTenants", r.TenantID)
 	case r.TenantID != uuid.Nil() && len(r.Filter.Tenants) > 0:
@@ -194,10 +194,10 @@ func (f ChargeFilter) Validate() error {
 		}
 	}
 	if slices.Contains(f.Tenants, uuid.Nil()) || slices.Contains(f.Capabilities, uuid.Nil()) {
-		return invalidRequest("sum charges: a filter names the nil id")
+		return refuseRequest("sum charges: a filter names the nil id")
 	}
 	if slices.Contains(f.Ops, "") || slices.Contains(f.Actors, "") {
-		return invalidRequest("sum charges: a filter names an empty operation or actor")
+		return refuseRequest("sum charges: a filter names an empty operation or actor")
 	}
 	texts := append([]string{}, f.Actors...)
 	for _, op := range f.Ops {

@@ -89,7 +89,7 @@ func (s MeterSubject) Copies() []CopyCeiling { return cloneCopyCeilings(s.copies
 // metering request's Validate calls it.
 func (s MeterSubject) Validate() error {
 	if s.capabilityID == uuid.Nil() || s.tenantID == uuid.Nil() {
-		return invalidRequest("the meter subject names no capability or no tenant")
+		return refuseRequest("the meter subject names no capability or no tenant")
 	}
 	return validUnitCode(s.maxBudget.UnitCode)
 }

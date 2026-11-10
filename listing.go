@@ -176,7 +176,7 @@ type ListRecordsRequest struct {
 func (r ListRecordsRequest) Validate() error {
 	switch {
 	case r.TenantID == uuid.Nil() && !r.AllTenants:
-		return invalidRequest("list records: a tenant id or AllTenants required")
+		return refuseRequest("list records: a tenant id or AllTenants required")
 	case r.TenantID != uuid.Nil() && r.AllTenants:
 		return invalidRequest("list records: tenant id %s beside AllTenants", r.TenantID)
 	case r.PrincipalType != PrincipalTypeUnspecified && r.PrincipalType.Validate() != nil:

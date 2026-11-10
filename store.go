@@ -94,7 +94,7 @@ type InsertRequest struct {
 func (r InsertRequest) Validate() error {
 	switch {
 	case r.Capability.ID == uuid.Nil():
-		return invalidRequest("insert: the capability has no id")
+		return refuseRequest("insert: the capability has no id")
 	case r.Capability.ExpiresAt.IsZero():
 		return invalidRequest("insert: capability %s never expires", r.Capability.ID)
 	case r.Capability.ParentID != uuid.Nil() && r.Session != "":
@@ -285,7 +285,7 @@ type RevokeResult struct {
 // would hide the caller's bug.
 func (r RevokeRequest) Validate() error {
 	if r.CapabilityID == uuid.Nil() {
-		return invalidRequest("revoke: capability id required")
+		return refuseRequest("revoke: capability id required")
 	}
 	return checkText("revoke", r.Note, r.Actor)
 }
@@ -371,11 +371,11 @@ type ListByPrincipalRequest struct {
 func (r ListByPrincipalRequest) Validate() error {
 	switch {
 	case r.TenantID == uuid.Nil():
-		return invalidRequest("list: tenant id required")
+		return refuseRequest("list: tenant id required")
 	case r.PrincipalType.Validate() != nil:
 		return invalidRequest("list: principal type %q is not a principal kind", r.PrincipalType)
 	case r.Subject == "":
-		return invalidRequest("list: subject required")
+		return refuseRequest("list: subject required")
 	case r.Limit < 0:
 		return invalidRequest("list: limit %d is negative", r.Limit)
 	}

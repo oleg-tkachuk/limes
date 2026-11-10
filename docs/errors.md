@@ -81,8 +81,14 @@ The body, for a capability that was revoked:
 | `code` | The stable code (`limes.Code`): what a client branches on. |
 | `category` | The code's `limes.Category`: what the caller does about it. |
 | `reason` | For a refusal of a presented capability, its `limes.Reason`, which can be wider than the code: `tenant_erased` and `delegation_too_deep` are reported as `revoked`. |
+| `detail` | `limes.ProblemOf` only, for a refusal of the client's own input — `invalid_request`, `invalid_caveats`, `invalid_amount`, `delegation_too_wide` (`limes.DetailCodes()`): which part of the request was refused and which rule it broke, for example "an op is not among the parent's". Absent when the refusal says nothing safe, and on every other code. |
 
-There is no `detail`: an error's own text is not shown to the client.
+An error's own text is never shown to the client: it names kids,
+issuers, ids, tenants, resources and the parent's caveats, for the server's
+log. A `detail` is written where the refusal is, as a constant — the
+compiler admits no value into one (`internal/detail`) — so it never holds an
+id, a key id, an issuer, a tenant, a resource, an amount or any other value,
+the client's own included.
 
 
 ## Every component
