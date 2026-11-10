@@ -1,12 +1,13 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended", ":dependencyDashboard"],
+  "extends": ["config:recommended", ":dependencyDashboard", "github>oleg-tkachuk/taskfiles//renovate/tasklib"],
   "labels": ["dependencies"],
   "description": [
     "Go and npm: minor/patch only, grouped into one PR per manager per month. Majors are crossed by hand, per the upstream CHANGELOG.",
     "Vulnerability remediation is ungrouped and unscheduled — it should not wait for the monthly window.",
     "A release is proposed only once it is three days old: a compromised or broken one is usually pulled within that window. No pull request is opened before then (internalChecksFilter), and Renovate merges its own once green; auto-merge.yaml leaves Renovate's pull requests to it.",
-    "The tools the workflows pin carry a `# renovate:` comment naming their datasource; the shared task library's tag is read from Taskfile.yaml; Node, from .github/ci/.node-version."
+    "The tools the workflows pin carry a `# renovate:` comment naming their datasource; Node is read from .github/ci/.node-version.",
+    "The shared task library's tag is found in Taskfile.yaml by the library's own preset. Renovate moves the tag and cannot refresh the lock under .task/remote, so that pull request is red and is not merged until `task --yes --offline=false --download tasklib:lock` has been run on its branch and the result pushed."
   ],
   "enabledManagers": ["github-actions", "gomod", "npm", "nodenv", "custom.regex"],
   "customManagers": [
@@ -15,13 +16,6 @@
       "description": "A tool version pinned in a workflow's env, under a `# renovate: datasource=… depName=…` comment.",
       "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
       "matchStrings": ["# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>\\S+)\\s+[A-Z_]+: \"?(?<currentValue>[^\"\\s]+)\"?"]
-    },
-    {
-      "customType": "regex",
-      "description": "The shared task library's tag.",
-      "managerFilePatterns": ["/^Taskfile\\.yaml$/"],
-      "matchStrings": ["https://github\\.com/(?<depName>oleg-tkachuk/taskfiles)\\.git//%s\\?ref=(?<currentValue>v[0-9.]+)"],
-      "datasourceTemplate": "github-tags"
     }
   ],
   "postUpdateOptions": ["gomodTidy"],

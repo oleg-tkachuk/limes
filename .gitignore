@@ -23,8 +23,13 @@ go.work.sum
 # env file
 .env
 
-# Task state and the shared library it fetches
-.task/
+# Task state, but the lock: what the shared library's pin fetched, and its
+# checksum (.task/remote), which every run loads instead of fetching
+.task/*
+!.task/remote/
+.task/remote/*
+!.task/remote/*.yaml
+!.task/remote/*.checksum
 
 # Release tooling (npm ci)
 node_modules/

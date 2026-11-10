@@ -20,8 +20,26 @@ release-notes, major-guard and
 module-commits tests, the gates of `redisreplay` (its tests on miniredis
 included), `otelmetric`, `exchange` and `biscuit`, the static checks of `pgstore` and the examples that need no
 database, run end to end — the same task CI runs. It
-needs no database and no container; it does need the network, for the shared
-Taskfile include, `go mod verify` and govulncheck's database.
+needs no database and no container; it does need the network, for
+`go mod verify` and govulncheck's database.
+
+The gates' shared tasks come from a task library pinned in `Taskfile.yaml`.
+What the pin fetched is committed under `.task/remote`, and `.taskrc.yml`
+has every run load it from there, so no `task` command fetches it. To move
+the pin and that lock together, and only then:
+
+```bash
+task tasklib:bump VERSION=<tag>
+```
+
+`task tasklib:check`, part of the gate, fails when the two have come apart.
+A pin moved without its lock — Renovate's pull request for a new release of
+the library is one, as Renovate cannot run a task — loads nothing until the
+lock follows it, on that branch:
+
+```bash
+task --yes --offline=false --download tasklib:lock
+```
 
 `pgstore`, the reference PostgreSQL store, is a module of its own. Its tests run
 the contract suites against PostgreSQL in a container, so they need a running
@@ -117,8 +135,9 @@ fails nothing, a soak whose counters drift fails it.
   its run is what a release is vouched for by and what says `main` is green. Mark a pull request
   draft to hold it. Renovate's
   own pull requests are the exception: Renovate merges them itself once green
-  (`renovate.json`), those bumping workflow actions, pinned tools or the task
-  library included.
+  (`renovate.json`), those bumping workflow actions or pinned tools included.
+  The one that moves the task library's pin stays red until a person has
+  refreshed its lock.
 - Commit subjects follow [Conventional Commits](https://www.conventionalcommits.org):
   the release is computed from them (`feat` a minor; `fix`, `perf` and
   `security` a patch; pre-1.0 a breaking change a minor), so a non-conforming subject releases nothing.

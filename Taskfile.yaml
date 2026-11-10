@@ -14,8 +14,11 @@ version: "3"
 silent: true
 
 vars:
-  # Shared task library — github.com/oleg-tkachuk/taskfiles, pinned.
-  TASKLIB: 'https://github.com/oleg-tkachuk/taskfiles.git//%s?ref=v14.1.0'
+  # Shared task library — github.com/oleg-tkachuk/taskfiles, pinned. What the
+  # pin fetched is committed under .task/remote, and .taskrc.yml has every run
+  # load it from there: a moved tag changes nothing until `task tasklib:bump
+  # VERSION=<tag>` moves the pin and the lock together.
+  TASKLIB: 'https://github.com/oleg-tkachuk/taskfiles.git//%s?ref=v14.6.2'
   # The developer tools' own module; see its go.mod.
   TOOLS_MODFILE: tools/go.mod
   # golangci-lint's module, apart from TOOLS_MODFILE; see its go.mod.
@@ -48,21 +51,26 @@ vars:
 includes:
   go:
     taskfile: '{{printf .TASKLIB "go"}}'
-    # The sha256 of this Taskfile at TASKLIB's ref. A tag can be moved, and
-    # the gate runs it with --yes, so a moved tag fails rather than runs.
-    # Task does not template this field; bump it with the ref, from the
-    # checksum Task reports it got.
-    checksum: 9e9da097a7bcb0992d9705975c3405850ee8c82f34180589a746bdaf913cdb33
     dir: .
     flatten: true
-    # Its vuln and lint run a govulncheck and a golangci-lint from PATH; the
-    # ones below run the versions tools/ pins. Its fmt also runs a goimports
-    # from PATH, which reads a package-level name of another test file as a
-    # package and imports one for it; the fmt below is gofmt alone. Its build
-    # builds the binaries of ./cmd/..., and this module has none.
-    excludes: [vuln, lint, fmt, build]
-    # GO_TEST_FLAGS spelled out, so a bump of the library cannot drop -race.
-    vars: { PROJECT_NAME: limes, GO_TEST_FLAGS: -race -short }
+    # Its lint reads one tools module, GO_TOOL_MODFILE, and golangci-lint is
+    # pinned in another (GOLANGCI_LINT_MODFILE); the lint below runs that one.
+    # Its build builds the binaries of ./cmd/..., and this module has none.
+    excludes: [lint, build]
+    vars:
+      PROJECT_NAME: limes
+      # GO_TEST_FLAGS spelled out, so a bump of the library cannot drop -race.
+      GO_TEST_FLAGS: -race -short
+      # Its vuln runs the govulncheck this module pins, not one from PATH.
+      GO_TOOL_MODFILE: '{{.TOOLS_MODFILE}}'
+      # Its fmt is gofmt alone: goimports reads a package-level name of
+      # another test file as a package and imports one for it.
+      GO_FMT_GOIMPORTS: "0"
+  # The pin and its lock: tasklib:bump moves both, tasklib:check holds them
+  # together.
+  tasklib:
+    taskfile: '{{printf .TASKLIB "tasklib"}}'
+    dir: .
 
 tasks:
   default:
@@ -76,7 +84,7 @@ tasks:
       - node .github/ci/update-modules.ts
 
   verify-all:
-    desc: "gofmt + go mod tidy/verify + golangci-lint + a 32-bit build + the unit suite + govulncheck + actionlint + the CI scripts + the release rules and notes + the redisreplay, otelmetric, exchange and biscuit modules + pgstore's static checks + the examples that need no database — what CI runs, but test:pgstore and test:examples:pgstore"
+    desc: "the task library's pin and lock + gofmt + go mod tidy/verify + golangci-lint + a 32-bit build + the unit suite + govulncheck + actionlint + the CI scripts + the release rules and notes + the redisreplay, otelmetric, exchange and biscuit modules + pgstore's static checks + the examples that need no database — what CI runs, but test:pgstore and test:examples:pgstore"
     cmds:
       - task: verify:gate
       - task: lint:all
@@ -84,6 +92,7 @@ tasks:
   verify:gate:
     desc: "verify-all but golangci-lint, which CI runs as a job of its own (lint:all)"
     cmds:
+      - task: tasklib:check
       - task: fmt:check
       - task: verify:tidy
       - task: verify:32-bit
@@ -268,11 +277,6 @@ tasks:
     cmds:
       - go test -count=1 -run '^TestErrorsJSONIsCurrent$' . -args -update
 
-  fmt:
-    desc: "gofmt -s -w over every module — the half of fmt:check that rewrites; goimports is not run, as it adds imports this tree does not use"
-    cmds:
-      - gofmt -s -w .
-
   lint:all:
     desc: "golangci-lint over every module, the root and each nested one — ./... at the root does not reach a nested module"
     cmds:
@@ -294,15 +298,10 @@ tasks:
     cmds:
       - go tool -modfile={{.GOLANGCI_LINT_MODFILE}} golangci-lint run {{.CLI_ARGS}} ./...
 
-  vuln:
-    desc: "govulncheck — vulnerabilities this module's code actually reaches"
-    cmds:
-      - go tool -modfile={{.TOOLS_MODFILE}} govulncheck ./...
-
   verify:tidy:
     desc: "Fail when any module's go.mod or go.sum (root, tools, tools/yq, tools/golangci-lint) is not what go mod tidy writes, or a download differs from go.sum"
     cmds:
-      - go mod tidy -diff
+      - task: tidy:check
       - go mod verify
       - cmd: go mod tidy -diff
         dir: tools
