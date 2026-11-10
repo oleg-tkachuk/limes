@@ -600,9 +600,12 @@ func (v *Verifier) isRevoked(ctx context.Context, id uuid.UUID) (bool, error) {
 
 // revocationLookupFailed is err, the failure of the revocation lookup what
 // names, as limes returns it: a code of limes's kept, any other failure an
-// ErrRevocationUnavailable wrapping it.
+// ErrRevocationUnavailable wrapping it. A store's own failure
+// (ErrStoreUnavailable, ErrStoreTimeout) is a lookup that failed like any
+// other: it is answered revocation_unavailable, the refusal a challenge
+// names, the store's code kept in the chain.
 func revocationLookupFailed(what string, err error) error {
-	if _, coded := CodeOf(err); coded {
+	if _, coded := CodeOf(err); coded && !errors.Is(err, ErrStoreUnavailable) && !errors.Is(err, ErrStoreTimeout) {
 		return errs.Errorf("limes: %s: %w", what, err)
 	}
 	return errs.Errorf("%w: %s: %w", ErrRevocationUnavailable, what, err)

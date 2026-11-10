@@ -152,7 +152,7 @@ func (c *ReplayCache) Seen(ctx context.Context, e dpop.ReplayEntry) (bool, error
 		return tx.QueryRow(ctx, sqlProofLive, e.JKT, e.JTI, now).Scan(&live)
 	})
 	if err != nil {
-		return true, fmt.Errorf("pgstore: record proof id: %w", err)
+		return true, fmt.Errorf("pgstore: record proof id: %w", reportFailure(ctx, c.log, err, true))
 	}
 	if !recorded && !live {
 		c.log.WarnContext(ctx, "pgstore: replay cache refused a proof: its holder is past its share",
@@ -172,7 +172,7 @@ func (c *ReplayCache) PurgeExpired(ctx context.Context) (int64, error) {
 		return err
 	})
 	if err != nil {
-		return 0, fmt.Errorf("pgstore: purge expired proof ids: %w", err)
+		return 0, fmt.Errorf("pgstore: purge expired proof ids: %w", reportFailure(ctx, c.log, err, false))
 	}
 	return purged, nil
 }

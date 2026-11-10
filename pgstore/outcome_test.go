@@ -12,6 +12,7 @@ import (
 	"testing"
 	"uuid"
 
+	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -40,7 +41,7 @@ func TestCommitUnanswered(t *testing.T) {
 		"the connection dropped":     {lost, true},
 		"the context ended":          {fmt.Errorf("read: %w", context.DeadlineExceeded), true},
 		"an error of PostgreSQL's":   {&pgconn.PgError{Code: uniqueViolation}, false},
-		"PostgreSQL's beside a drop": {errors.Join(&pgconn.PgError{Code: sqlDeadlockDetected}, lost), false},
+		"PostgreSQL's beside a drop": {errors.Join(&pgconn.PgError{Code: pgerrcode.DeadlockDetected}, lost), false},
 		"COMMIT rolled back":         {errNotCommitted, false},
 		"the transaction ended":      {pgx.ErrTxClosed, false},
 		"nothing sent":               {safeToRetry{lost}, false},

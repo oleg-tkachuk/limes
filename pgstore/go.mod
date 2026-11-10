@@ -18,6 +18,7 @@ replace github.com/oleg-tkachuk/limes => ../
 retract v0.1.0
 
 require (
+	github.com/jackc/pgerrcode v0.0.0-20250907135507-afb5586c32a6
 	github.com/jackc/pgx/v5 v5.12.0
 	github.com/jackc/tern/v2 v2.4.3
 	github.com/oleg-tkachuk/limes v0.175.0

@@ -538,6 +538,22 @@
     "permanent": true
   },
   {
+    "code": "store_timeout",
+    "status": 504,
+    "category": "unavailable",
+    "title": "The store did not answer in time",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#store_timeout",
+    "permanent": false
+  },
+  {
+    "code": "store_unavailable",
+    "status": 503,
+    "category": "unavailable",
+    "title": "The store is unavailable",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#store_unavailable",
+    "permanent": false
+  },
+  {
     "code": "tainted_read_not_allowed",
     "status": 403,
     "category": "denied",

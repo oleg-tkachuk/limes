@@ -86,6 +86,7 @@ var sentinels = map[string]error{
 	"..ErrUnknownTenant": ErrUnknownTenant, "..ErrTenantDeleted": ErrTenantDeleted, "..ErrTenantGone": ErrTenantGone,
 	"..ErrScopeMismatch": ErrScopeMismatch, "..ErrProofUnsupported": ErrProofUnsupported,
 	"..ErrCursorRepeated": ErrCursorRepeated, "..ErrCopyCountersNotMetered": ErrCopyCountersNotMetered,
+	"..ErrStoreUnavailable": ErrStoreUnavailable, "..ErrStoreTimeout": ErrStoreTimeout,
 	"..ErrBiscuitAttenuation": ErrBiscuitAttenuation, "..ErrNotFound": ErrNotFound, "..ErrConflict": ErrConflict,
 	"..ErrAlreadyExists": ErrAlreadyExists, "..ErrInvalidCaveats": ErrInvalidCaveats,
 	"..ErrInvalidConfig": ErrInvalidConfig, "..ErrInternal": ErrInternal, "..ErrRevocationUnavailable": ErrRevocationUnavailable,

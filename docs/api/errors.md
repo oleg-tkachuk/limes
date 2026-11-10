@@ -6,7 +6,7 @@ Error codes, categories and reasons, and answering a refusal over HTTP. docs/err
 
 | Package | |
 |---|---|
-| [`github.com/oleg-tkachuk/limes`](#limes) | 9 declarations |
+| [`github.com/oleg-tkachuk/limes`](#limes) | 10 declarations |
 
 <a id="limes"></a>
 
@@ -228,6 +228,30 @@ Some are families that more specific sentinels match as well, so a caller branch
 	└── ErrAlreadyExists, ErrUnitCodeMismatch, meter.ErrExternalRefConflict, …
 
 <sub>[errors.go](../../errors.go)</sub>
+<a id="limes.ErrStoreUnavailable"></a><a id="limes.ErrStoreTimeout"></a>
+
+### limes.ErrStoreUnavailable, limes.ErrStoreTimeout
+
+```go
+var (
+	// ErrStoreUnavailable is a store that could not serve the call and may
+	// serve it again: no connection to it, one it dropped before its answer
+	// to a call that wrote nothing, the database shutting down or starting,
+	// out of resources, or a transaction it aborted over a conflict another
+	// one won. A call that wrote and whose commit went unanswered is never
+	// this: its outcome is unknown (meter.ErrOutcomeUnknown), and sending it
+	// again could apply it twice. Answered 503, to retry.
+	ErrStoreUnavailable = errors.New("limes: store unavailable")
+	// ErrStoreTimeout is a statement the store cancelled past its own
+	// limit — PostgreSQL's statement_timeout or lock_timeout — the caller's
+	// context still live. It wrote nothing. Answered 504, to retry.
+	ErrStoreTimeout = errors.New("limes: store timed out")
+)
+```
+
+A store's own failures, which a store wraps its driver's error in so that a caller answers each by its code rather than as an error of its own: the driver's error stays in the chain, for the log and for errors.As.
+
+<sub>[store_failure.go](../../store_failure.go)</sub>
 <a id="limes.ProblemTypeURI"></a>
 
 ### limes.ProblemTypeURI
@@ -351,9 +375,9 @@ type Code string
 Code is a stable, machine-readable name for any error limes returns (docs/adr/0012-error-codes.md, docs/errors.md): what a consumer puts on its wire, so a client branches on it rather than on a message, whose text is never a contract. A refusal of a presented capability has its Reason as its code; an error that Reason folds into a wider one keeps a code of its own (tenant\_erased, reported as revoked). Codes are never renamed; new ones may be added.
 
 <sub>[code.go](../../code.go)</sub>
-<a id="limes.CodeTenantErased"></a><a id="limes.CodeDelegationTooDeep"></a><a id="limes.CodeUnknownKID"></a><a id="limes.CodeUnauthenticated"></a><a id="limes.CodeProofOfPossession"></a><a id="limes.CodeCaveatViolation"></a><a id="limes.CodeConflict"></a><a id="limes.CodeAlreadyExists"></a><a id="limes.CodeUnitCodeMismatch"></a><a id="limes.CodeInvalidRequest"></a><a id="limes.CodeInvalidCaveats"></a><a id="limes.CodeInvalidAmount"></a><a id="limes.CodeEffectConflict"></a><a id="limes.CodeCursorMismatch"></a><a id="limes.CodeDelegationTooWide"></a><a id="limes.CodeDelegationDepthExceeded"></a><a id="limes.CodeNotFound"></a><a id="limes.CodeUnknownTenant"></a><a id="limes.CodeTenantDeleted"></a><a id="limes.CodeTenantGone"></a><a id="limes.CodeScopeMismatch"></a><a id="limes.CodeProofUnsupported"></a><a id="limes.CodeNoRevocationLineage"></a><a id="limes.CodeCopyCountersNotMetered"></a><a id="limes.CodeCursorRepeated"></a><a id="limes.CodeInvalidConfig"></a><a id="limes.CodeInternal"></a>
+<a id="limes.CodeTenantErased"></a><a id="limes.CodeDelegationTooDeep"></a><a id="limes.CodeUnknownKID"></a><a id="limes.CodeUnauthenticated"></a><a id="limes.CodeProofOfPossession"></a><a id="limes.CodeCaveatViolation"></a><a id="limes.CodeConflict"></a><a id="limes.CodeAlreadyExists"></a><a id="limes.CodeUnitCodeMismatch"></a><a id="limes.CodeInvalidRequest"></a><a id="limes.CodeInvalidCaveats"></a><a id="limes.CodeInvalidAmount"></a><a id="limes.CodeEffectConflict"></a><a id="limes.CodeCursorMismatch"></a><a id="limes.CodeDelegationTooWide"></a><a id="limes.CodeDelegationDepthExceeded"></a><a id="limes.CodeNotFound"></a><a id="limes.CodeUnknownTenant"></a><a id="limes.CodeTenantDeleted"></a><a id="limes.CodeTenantGone"></a><a id="limes.CodeScopeMismatch"></a><a id="limes.CodeProofUnsupported"></a><a id="limes.CodeNoRevocationLineage"></a><a id="limes.CodeCopyCountersNotMetered"></a><a id="limes.CodeCursorRepeated"></a><a id="limes.CodeStoreUnavailable"></a><a id="limes.CodeStoreTimeout"></a><a id="limes.CodeInvalidConfig"></a><a id="limes.CodeInternal"></a>
 
-#### limes.CodeTenantErased, limes.CodeDelegationTooDeep, limes.CodeUnknownKID, limes.CodeUnauthenticated, limes.CodeProofOfPossession, limes.CodeCaveatViolation, limes.CodeConflict, limes.CodeAlreadyExists, limes.CodeUnitCodeMismatch, limes.CodeInvalidRequest, limes.CodeInvalidCaveats, limes.CodeInvalidAmount, limes.CodeEffectConflict, limes.CodeCursorMismatch, limes.CodeDelegationTooWide, limes.CodeDelegationDepthExceeded, limes.CodeNotFound, limes.CodeUnknownTenant, limes.CodeTenantDeleted, limes.CodeTenantGone, limes.CodeScopeMismatch, limes.CodeProofUnsupported, limes.CodeNoRevocationLineage, limes.CodeCopyCountersNotMetered, limes.CodeCursorRepeated, limes.CodeInvalidConfig, limes.CodeInternal
+#### limes.CodeTenantErased, limes.CodeDelegationTooDeep, limes.CodeUnknownKID, limes.CodeUnauthenticated, limes.CodeProofOfPossession, limes.CodeCaveatViolation, limes.CodeConflict, limes.CodeAlreadyExists, limes.CodeUnitCodeMismatch, limes.CodeInvalidRequest, limes.CodeInvalidCaveats, limes.CodeInvalidAmount, limes.CodeEffectConflict, limes.CodeCursorMismatch, limes.CodeDelegationTooWide, limes.CodeDelegationDepthExceeded, limes.CodeNotFound, limes.CodeUnknownTenant, limes.CodeTenantDeleted, limes.CodeTenantGone, limes.CodeScopeMismatch, limes.CodeProofUnsupported, limes.CodeNoRevocationLineage, limes.CodeCopyCountersNotMetered, limes.CodeCursorRepeated, limes.CodeStoreUnavailable, limes.CodeStoreTimeout, limes.CodeInvalidConfig, limes.CodeInternal
 
 ```go
 const (
@@ -383,6 +407,8 @@ const (
 	CodeNoRevocationLineage     Code = "no_revocation_lineage"
 	CodeCopyCountersNotMetered  Code = "copy_counters_not_metered"
 	CodeCursorRepeated          Code = "cursor_repeated"
+	CodeStoreUnavailable        Code = "store_unavailable"
+	CodeStoreTimeout            Code = "store_timeout"
 	CodeInvalidConfig           Code = "invalid_config"
 	CodeInternal                Code = "internal"
 )

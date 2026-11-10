@@ -269,7 +269,7 @@ func (s *Store) IsRevoked(ctx context.Context, id uuid.UUID) (bool, error) {
 	err := s.db.QueryRow(ctx, sqlIsRevoked, id, limes.MaxDelegationDepth).Scan(&self, &deepest, &inChain)
 	switch {
 	case err != nil:
-		return false, err
+		return false, reportFailure(ctx, s.log, err, false)
 	case self:
 		return true, nil
 	case deepest > limes.MaxDelegationDepth:
@@ -294,7 +294,7 @@ func (s *Store) RevocationLineage(ctx context.Context, id uuid.UUID) (limes.Revo
 	err := s.db.QueryRow(ctx, sqlRevocationLineage, id, limes.MaxDelegationDepth).Scan(&self, &deepest, &inChain, &ancestors, &known)
 	switch {
 	case err != nil:
-		return limes.RevocationAnswer{}, err
+		return limes.RevocationAnswer{}, reportFailure(ctx, s.log, err, false)
 	case !known:
 		return limes.RevocationAnswer{}, limes.ErrNotFound
 	case self:
@@ -558,7 +558,7 @@ func (s *Store) IsBiscuitRevoked(ctx context.Context, revocationIDs [][]byte) (b
 	}
 	var revoked bool
 	err := s.db.QueryRow(ctx, sqlIsBiscuitRevoked, revocationIDs).Scan(&revoked)
-	return revoked, err
+	return revoked, reportFailure(ctx, s.log, err, false)
 }
 
 // RevokeBiscuit lists one copy's revocation id under its capability; the
