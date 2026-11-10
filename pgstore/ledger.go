@@ -265,7 +265,7 @@ func (c sumCursor) encode() string { return encodeCursor(c) }
 // ErrInvalidRequest.
 func decodeSumCursor(s string) (sumCursor, error) {
 	var c sumCursor
-	if err := decodeCursor(s, &c); err != nil || limes.Nanos(c.Charged).Validate() != nil {
+	if err := decodeCursor(s, &c); err != nil || limes.Nanos(c.Charged).Validate() != nil || !storableText(c.Unit, c.Op, c.Actor) {
 		return sumCursor{}, fmt.Errorf("%w: pgstore: charge sum cursor %q", limes.ErrInvalidRequest, s)
 	}
 	return c, nil
