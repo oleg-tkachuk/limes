@@ -5,19 +5,18 @@ import (
 	"errors"
 	"log/slog"
 
+	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/internal/errs"
 	"github.com/oleg-tkachuk/limes/meter"
 )
-
-// sqlDeadlockDetected is PostgreSQL's code for a transaction it aborted to
-// break a cycle of waits.
-const sqlDeadlockDetected = "40P01"
 
 // isDeadlock reports whether err is PostgreSQL breaking a deadlock.
 func isDeadlock(err error) bool {
 	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == sqlDeadlockDetected
+	return errors.As(err, &pgErr) && pgErr.Code == pgerrcode.DeadlockDetected
 }
 
 // logKeyOp names the meter call a log line is about, one of the op names
@@ -49,7 +48,8 @@ const logKeyError = "error"
 // can (docs/adr/0018-fewer-round-trips-per-charge.md). The transaction was
 // rolled back whole, so running it again — onCharged or onRefunded among
 // it — moves
-// nothing twice. A second deadlock is returned.
+// nothing twice. A second deadlock is returned as limes.ErrStoreUnavailable
+// wrapping it: sent again, the call may find the old order gone.
 //
 // A call whose COMMIT went unanswered (meter.ErrOutcomeUnknown) is not run
 // again: it may have committed, and only its caller knows whether it is
@@ -60,6 +60,11 @@ func (c conn) retryDeadlock(ctx context.Context, op string, call func() error) e
 		c.log.WarnContext(ctx, "pgstore: retrying a meter call PostgreSQL aborted to break a deadlock",
 			slog.String(logKeyOp, op), slog.Any(logKeyError, err))
 		err = call()
+		if isDeadlock(err) {
+			c.log.WarnContext(ctx, "pgstore: a meter call deadlocked again; answered with a code to retry",
+				slog.String(logKeyOp, op), slog.String(logKeyCode, string(limes.CodeStoreUnavailable)), slog.Any(logKeyError, err))
+			return errs.Errorf("%w: %w", limes.ErrStoreUnavailable, err)
+		}
 	}
 	if errors.Is(err, meter.ErrOutcomeUnknown) {
 		c.log.WarnContext(ctx, "pgstore: lost the answer to a meter call's commit; it may have committed",

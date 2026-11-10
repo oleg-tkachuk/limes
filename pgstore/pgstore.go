@@ -562,13 +562,13 @@ func (c conn) inReadTx(ctx context.Context, fn func(pgx.Tx) error) error {
 
 // runTx is inReadTx for a call that writes when writes, whose COMMIT's
 // answer, lost, is meter.ErrOutcomeUnknown on a store that reports
-// outcomes.
+// outcomes, and whose database's failure is limes's (storeFailure).
 func (c conn) runTx(ctx context.Context, writes bool, fn func(pgx.Tx) error) error {
 	commitErr := func(err error) error { return err }
 	if writes && c.outcomes {
 		commitErr = outcomeOf
 	}
-	return beginFunc(ctx, c.txs, func(tx pgx.Tx) error {
+	return reportFailure(ctx, c.log, beginFunc(ctx, c.txs, func(tx pgx.Tx) error {
 		deferred, ok := tx.(*deferTx)
 		if !ok {
 			deferred = &deferTx{Tx: tx}
@@ -580,7 +580,7 @@ func (c conn) runTx(ctx context.Context, writes bool, fn func(pgx.Tx) error) err
 			return errScope(err)
 		}
 		return fn(deferred)
-	}, commitErr)
+	}, commitErr), writes)
 }
 
 // inTenantTx is inTx for a call whose request names tenant: it refuses a

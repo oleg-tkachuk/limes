@@ -70,6 +70,18 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## pgstore/v0.76.0
+
+- A call whose database failed returns an error wrapping
+  `limes.ErrStoreUnavailable` (`store_unavailable`, 503) or
+  `limes.ErrStoreTimeout` (`store_timeout`, 504) around the driver's error,
+  as [errors.md](errors.md#formats) tabulates, where it returned the
+  driver's error alone: `limes.ProblemOf` now reports it, where it reported
+  false and `ProblemFor` answered 500. `errors.As` still reaches the
+  `*pgconn.PgError`. A mapping of your own for the driver's errors may go;
+  one that retried every error not limes's retries now only what these
+  codes say may be served again.
+
 ## v0.175.0
 
 - Every request that hands a store text refuses, with `ErrInvalidRequest`,
