@@ -90,3 +90,30 @@ func TestProblemDetailOnlyForClientInput(t *testing.T) {
 		t.Errorf("an error not limes's: detail %q", p.Detail)
 	}
 }
+
+// A refusal whose text holds the values involved carries a detail that
+// names the field and the rule, and none of them.
+func TestProblemDetailOfFormattedRefusals(t *testing.T) {
+	tenant := uuid.New()
+	for name, tc := range map[string]struct {
+		err    error
+		detail string
+	}{
+		"a negative limit":          {ListRecordsRequest{TenantID: tenant, Limit: -7}.Validate(), "list records: limit is negative"},
+		"a subject beside a prefix": {ListRecordsRequest{TenantID: tenant, Subject: secret, SubjectPrefix: secret}.Validate(), "list records: a subject beside a subject prefix"},
+		"a unit code not ISO 4217":  {BudgetCeiling{Max: 1, UnitCode: secret}.Validate(), "unit_code is not an ISO 4217 code in upper case"},
+		"on behalf of another tenant": {
+			validateOnBehalfOf(Principal{Type: PrincipalTypeUser, TenantID: uuid.New(), Subject: secret}, Principal{TenantID: tenant}),
+			"OnBehalfOf is of another tenant than the subject",
+		},
+		"text no store can keep": {RevokeRequest{CapabilityID: uuid.New(), Note: secret + "\x00"}.Validate(), "text that is not valid UTF-8 or holds a NUL"},
+	} {
+		p, ok := ProblemOf(tc.err)
+		if !ok || p.Detail != tc.detail {
+			t.Errorf("%s: %s %q, want %q", name, p.Code, p.Detail, tc.detail)
+		}
+		if strings.Contains(p.Detail, secret) || strings.Contains(p.Detail, tenant.String()) {
+			t.Errorf("%s: the detail repeats a value: %q", name, p.Detail)
+		}
+	}
+}

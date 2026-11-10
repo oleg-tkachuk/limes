@@ -42,7 +42,7 @@ func (r LeaseRequest) Validate() error {
 		return err
 	}
 	if r.Requests < 0 {
-		return invalidRequest("lease of %d requests", r.Requests)
+		return refuseRequestf("a lease of a negative number of requests", "lease of %d requests", r.Requests)
 	}
 	if r.Amount == 0 && r.Requests == 0 {
 		return refuseRequest("lease of no amount and no requests")
@@ -51,10 +51,10 @@ func (r LeaseRequest) Validate() error {
 		return err
 	}
 	if len(r.Subject.Copies()) > 0 {
-		return invalidRequest("lease of a Biscuit copy of %s", r.Subject.CapabilityID())
+		return refuseRequestf("a Biscuit copy cannot be leased", "lease of a Biscuit copy of %s", r.Subject.CapabilityID())
 	}
 	if r.TTL < 0 {
-		return invalidRequest("lease TTL %s is negative", r.TTL)
+		return refuseRequestf("lease TTL is negative", "lease TTL %s is negative", r.TTL)
 	}
 	return nil
 }

@@ -144,7 +144,7 @@ func (s AuthScheme) Validate() error {
 	case AuthSchemeUnspecified, AuthSchemeBearer, AuthSchemeDPoP:
 		return nil
 	}
-	return invalidRequest("unknown authorization scheme %q", s)
+	return refuseRequestf("the authorization scheme is unknown", "unknown authorization scheme %q", s)
 }
 
 // checkScheme holds a token's scheme to its binding (RFC 9449 §7.1, §7.2).

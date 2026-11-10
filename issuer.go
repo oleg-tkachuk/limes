@@ -137,7 +137,7 @@ func (i *Issuer) DefaultTTL() time.Duration { return i.defaultTTL }
 // unread is a capability nobody can use.
 func (i *Issuer) fits(token string) error {
 	if len(token) > i.maxTokenBytes {
-		return invalidRequest("the token would be %d bytes, past MaxTokenBytes %d; narrow its caveats", len(token), i.maxTokenBytes)
+		return refuseRequestf("the token would be past the largest one; narrow its caveats", "the token would be %d bytes, past MaxTokenBytes %d; narrow its caveats", len(token), i.maxTokenBytes)
 	}
 	return nil
 }
@@ -443,7 +443,7 @@ func mintRefusal(err error) error {
 // request error rather than an already-expired capability.
 func (i *Issuer) expiry(now time.Time, ttl time.Duration) (time.Time, error) {
 	if ttl < 0 {
-		return time.Time{}, invalidRequest("TTL %s is negative", ttl)
+		return time.Time{}, refuseRequestf("TTL is negative", "TTL %s is negative", ttl)
 	}
 	if ttl == 0 {
 		ttl = i.defaultTTL
@@ -457,7 +457,7 @@ func (i *Issuer) expiry(now time.Time, ttl time.Duration) (time.Time, error) {
 // parent's expiry is a whole second, and one already reached is refused.
 func checkLifetime(c Capability) error {
 	if !c.ExpiresAt.After(c.IssuedAt) {
-		return invalidRequest("the capability would expire at %s, no later than it is issued: a token's times are whole seconds", c.ExpiresAt.Format(time.RFC3339))
+		return refuseRequestf("the capability would expire no later than it is issued; a token's times are whole seconds", "the capability would expire at %s, no later than it is issued: a token's times are whole seconds", c.ExpiresAt.Format(time.RFC3339))
 	}
 	return nil
 }
@@ -480,7 +480,7 @@ func setNotBefore(c *Capability, nbf time.Time) error {
 		nbf = t.Add(tokenTimeResolution) // up: never valid before it was asked to be
 	}
 	if !nbf.Before(c.ExpiresAt) {
-		return invalidRequest("NotBefore %s is not before ExpiresAt %s", nbf, c.ExpiresAt)
+		return refuseRequestf("NotBefore is not before ExpiresAt", "NotBefore %s is not before ExpiresAt %s", nbf, c.ExpiresAt)
 	}
 	c.NotBefore = nbf
 	return nil
@@ -616,7 +616,7 @@ func (i *Issuer) checkDelegable(p VerifiedCapability) error {
 		// it instead.
 		return refuseRequest("parent is a Biscuit copy; attenuate it instead")
 	case parent.Issuer != i.issuerName:
-		return invalidRequest("parent %s was issued by %q, not %q", parent.ID, parent.Issuer, i.issuerName)
+		return refuseRequestf("the parent was issued by another issuer", "parent %s was issued by %q, not %q", parent.ID, parent.Issuer, i.issuerName)
 	case !slices.Contains(parent.Caveats.Ops, OpShare):
 		return fmt.Errorf("%w: parent %s does not allow %q", ErrOpNotAllowed, parent.ID, OpShare)
 	}
@@ -660,12 +660,12 @@ func checkChildRun(a *AgentPrincipal, parentRun uuid.UUID) error {
 		return nil
 	}
 	if a.ParentRunID != uuid.Nil() && a.ParentRunID != parentRun {
-		return invalidRequest("Subject.Agent.ParentRunID %s is not the parent's RunID %s", a.ParentRunID, parentRun)
+		return refuseRequestf("Subject.Agent.ParentRunID is not the parent's RunID", "Subject.Agent.ParentRunID %s is not the parent's RunID %s", a.ParentRunID, parentRun)
 	}
 	// A child run is another run than the one it was delegated from: the
 	// same id would make the run its own parent in an audit's run graph.
 	if parentRun != uuid.Nil() && a.RunID == parentRun {
-		return invalidRequest("Subject.Agent.RunID %s is the parent's own run", a.RunID)
+		return refuseRequestf("Subject.Agent.RunID is the parent's own run", "Subject.Agent.RunID %s is the parent's own run", a.RunID)
 	}
 	return nil
 }
@@ -773,7 +773,7 @@ func GenerateKey() (SigningKey, error) {
 // A malformed binding could match no key, minting a capability nobody can use.
 func validateThumbprint(jkt string) error {
 	if jkt != "" && !dpop.IsThumbprint(jkt) {
-		return invalidRequest("ConfirmationJKT %q is not a base64url SHA-256 thumbprint", jkt)
+		return refuseRequestf("ConfirmationJKT is not a base64url SHA-256 thumbprint", "ConfirmationJKT %q is not a base64url SHA-256 thumbprint", jkt)
 	}
 	return nil
 }

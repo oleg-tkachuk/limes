@@ -61,13 +61,13 @@ func (r RevokeMatchingRequest) Validate() error {
 	case r.TenantID == uuid.Nil() && !r.AllTenants:
 		return refuseRequest("revoke matching: a tenant id or AllTenants required")
 	case r.TenantID != uuid.Nil() && r.AllTenants:
-		return invalidRequest("revoke matching: tenant id %s beside AllTenants", r.TenantID)
+		return refuseRequestf("revoke matching: a tenant id beside AllTenants", "revoke matching: tenant id %s beside AllTenants", r.TenantID)
 	case r.Subject == "" && r.OnBehalfOf == "" && r.ClientID == "" && r.Session == "" && r.RunID == uuid.Nil() && r.SubjectIssuer == "":
 		return refuseRequest("revoke matching: no selector; name a subject, an on-behalf-of, a client, a session, an agent run or a subject issuer")
 	case r.AllTenants && (r.Subject != "" || r.OnBehalfOf != "" || r.RunID != uuid.Nil()):
 		return refuseRequest("revoke matching: AllTenants matches by client, session or subject issuer alone; a subject or an agent run names one tenant's")
 	case r.Limit < 0:
-		return invalidRequest("revoke matching: limit %d is negative", r.Limit)
+		return refuseRequestf("revoke matching: limit is negative", "revoke matching: limit %d is negative", r.Limit)
 	}
 	return checkText("revoke matching", r.Subject, r.OnBehalfOf, r.ClientID, r.Session, r.SubjectIssuer, r.Note, r.Actor)
 }

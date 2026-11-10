@@ -43,7 +43,7 @@ func (r ReleaseMatchingRequest) Validate() error {
 	case r.TenantID == uuid.Nil() && !r.AllTenants:
 		return refuseRequest("release matching: a tenant id or AllTenants required")
 	case r.TenantID != uuid.Nil() && r.AllTenants:
-		return invalidRequest("release matching: tenant id %s beside AllTenants", r.TenantID)
+		return refuseRequestf("release matching: a tenant id beside AllTenants", "release matching: tenant id %s beside AllTenants", r.TenantID)
 	case r.Subject == "" && r.OnBehalfOf == "" && r.ClientID == "" && r.Session == "" && r.SubjectIssuer == "" && r.RunID == uuid.Nil() && r.CapabilityID == uuid.Nil():
 		return refuseRequest("release matching: no selector; name a subject, an on-behalf-of, a client, a session, a subject issuer, an agent run or a capability")
 	case r.AllTenants && (r.Subject != "" || r.OnBehalfOf != "" || r.RunID != uuid.Nil() || r.CapabilityID != uuid.Nil()):

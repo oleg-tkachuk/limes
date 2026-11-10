@@ -136,9 +136,9 @@ func (i *Issuer) checkSealable(ctx context.Context, vc VerifiedCapability) error
 	case c.ID == uuid.Nil():
 		return refuseRequest("Biscuit requires a capability the verifier accepted")
 	case vc.fromBiscuit:
-		return invalidRequest("capability %s was read from a Biscuit; attenuate that instead", c.ID)
+		return refuseRequestf("the capability was read from a Biscuit; attenuate that instead", "capability %s was read from a Biscuit; attenuate that instead", c.ID)
 	case c.Issuer != i.issuerName:
-		return invalidRequest("capability %s was issued by %q, not %q", c.ID, c.Issuer, i.issuerName)
+		return refuseRequestf("the capability was issued by another issuer", "capability %s was issued by %q, not %q", c.ID, c.Issuer, i.issuerName)
 	}
 	return i.checkLive(ctx, c, i.clock(), "biscuit of")
 }
@@ -208,10 +208,10 @@ func (a Attenuation) Validate() error {
 // capability's.
 func checkCopyCeilings(r *RequestCeiling, b *BudgetCeiling) error {
 	if r != nil && (r.Unlimited || r.Validate() != nil) {
-		return invalidRequest("a copy's request ceiling is a bound within 0..%d", int64(MaxIJSONInteger))
+		return refuseRequestf("a copy's request ceiling is out of range", "a copy's request ceiling is a bound within 0..%d", int64(MaxIJSONInteger))
 	}
 	if b != nil && (b.Unlimited || b.Max.Validate() != nil || b.UnitCode != "") {
-		return invalidRequest("a copy's budget ceiling is a bound within 0..%s, in its capability's unit, which it does not name", MaxNanos)
+		return refuseRequestf("a copy's budget ceiling is out of range or names a unit", "a copy's budget ceiling is a bound within 0..%s, in its capability's unit, which it does not name", MaxNanos)
 	}
 	return nil
 }
