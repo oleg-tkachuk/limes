@@ -2,6 +2,21 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.75.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.74.0...pgstore%2Fv0.75.0) (2026-11-10)
+
+### ⚠ BREAKING CHANGES
+
+* **core:** requests carrying a NUL or invalid UTF-8 are refused, and a token whose subject holds a NUL no longer verifies (docs/migration.md).
+
+### Bug Fixes
+
+* **core:** refuse text no store can keep ([97bc2be](https://github.com/oleg-tkachuk/limes/commit/97bc2be1a7d448648f5e15c5e2b5d777c2d5c364))
+* **pgstore:** refuse a cursor whose text holds a NUL ([1ac5454](https://github.com/oleg-tkachuk/limes/commit/1ac54543012e702528cf9a734af5129f63adefbd))
+
+### Dependencies
+
+* require limes v0.175.0
+
 ## [0.74.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.73.0...pgstore%2Fv0.74.0) (2026-11-09)
 
 ### Features

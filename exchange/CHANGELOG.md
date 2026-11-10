@@ -2,6 +2,25 @@
 
 Every release of the exchange module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.24.0](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.23.0...exchange%2Fv0.24.0) (2026-11-10)
+
+### ⚠ BREAKING CHANGES
+
+* **core:** requests carrying a NUL or invalid UTF-8 are refused, and a token whose subject holds a NUL no longer verifies (docs/migration.md).
+
+### Features
+
+* **exchange:** read a token endpoint's error response as its sentinel ([520a2e7](https://github.com/oleg-tkachuk/limes/commit/520a2e73ace6d29c586e5669ce5cfa2ab5d4b11a))
+
+### Bug Fixes
+
+* **core:** refuse text no store can keep ([97bc2be](https://github.com/oleg-tkachuk/limes/commit/97bc2be1a7d448648f5e15c5e2b5d777c2d5c364))
+* **jwks:** keep the password out of a refused keys URL ([22eb255](https://github.com/oleg-tkachuk/limes/commit/22eb255a4eaa8591822a9bdfd09b4bf5987ba5cc))
+
+### Dependencies
+
+* require limes v0.175.0
+
 ## [0.23.0](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.22.1...exchange%2Fv0.23.0) (2026-11-08)
 
 ### ⚠ BREAKING CHANGES
