@@ -1,0 +1,672 @@
+[
+  {
+    "code": "already_exists",
+    "status": 409,
+    "category": "already_exists",
+    "title": "The request conflicts with what is on record",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#conflict",
+    "permanent": false
+  },
+  {
+    "code": "audience_mismatch",
+    "status": 401,
+    "category": "unauthenticated",
+    "title": "The access token is invalid",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#audience_mismatch",
+    "reason": "audience_mismatch",
+    "permanent": true
+  },
+  {
+    "code": "auth_scheme_mismatch",
+    "status": 401,
+    "category": "unauthenticated",
+    "title": "The access token is invalid",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#auth_scheme_mismatch",
+    "reason": "auth_scheme_mismatch",
+    "permanent": false
+  },
+  {
+    "code": "biscuit_attenuation",
+    "status": 401,
+    "category": "unauthenticated",
+    "title": "The access token is invalid",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#biscuit_attenuation",
+    "reason": "biscuit_attenuation",
+    "permanent": true
+  },
+  {
+    "code": "budget_exceeded",
+    "status": 403,
+    "category": "exhausted",
+    "title": "The token's request or budget limit is exhausted",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#budget_exceeded",
+    "reason": "budget_exceeded",
+    "permanent": false
+  },
+  {
+    "code": "caveat_violation",
+    "status": 403,
+    "category": "denied",
+    "title": "The token does not allow this request",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#insufficient-scope",
+    "permanent": false
+  },
+  {
+    "code": "charge_not_found",
+    "status": 404,
+    "category": "not_found",
+    "title": "The charge is not on record",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#charge_not_found",
+    "permanent": false
+  },
+  {
+    "code": "conflict",
+    "status": 409,
+    "category": "conflict",
+    "title": "The request conflicts with what is on record",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#conflict",
+    "permanent": false
+  },
+  {
+    "code": "copy_counters_not_metered",
+    "status": 500,
+    "category": "internal",
+    "title": "Copy limits need a verifier that meters copies",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#copy_counters_not_metered",
+    "permanent": false
+  },
+  {
+    "code": "copy_limit_exceeded",
+    "status": 403,
+    "category": "exhausted",
+    "title": "The token's request or budget limit is exhausted",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#request_limit_exceeded",
+    "reason": "request_limit_exceeded",
+    "permanent": true
+  },
+  {
+    "code": "counter_overflow",
+    "status": 409,
+    "category": "precondition",
+    "title": "The counter has no room for the amount",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#counter_overflow",
+    "permanent": false
+  },
+  {
+    "code": "cursor_mismatch",
+    "status": 400,
+    "category": "invalid",
+    "title": "The cursor is of another listing",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#cursor_mismatch",
+    "permanent": false
+  },
+  {
+    "code": "cursor_repeated",
+    "status": 502,
+    "category": "unavailable",
+    "title": "The store returned a cursor already fetched",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#cursor_repeated",
+    "permanent": false
+  },
+  {
+    "code": "delegation_depth_exceeded",
+    "status": 403,
+    "category": "denied",
+    "title": "The delegation would exceed the maximum chain depth",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#delegation_depth_exceeded",
+    "permanent": false
+  },
+  {
+    "code": "delegation_too_deep",
+    "status": 401,
+    "category": "unauthenticated",
+    "title": "The access token is invalid",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#revoked",
+    "reason": "revoked",
+    "permanent": true
+  },
+  {
+    "code": "delegation_too_wide",
+    "status": 403,
+    "category": "denied",
+    "title": "The delegation asks for more than its parent holds",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#delegation_too_wide",
+    "permanent": false
+  },
+  {
+    "code": "effect_conflict",
+    "status": 400,
+    "category": "invalid",
+    "title": "The declared effect conflicts with the operation",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#effect_conflict",
+    "permanent": false
+  },
+  {
+    "code": "expired",
+    "status": 401,
+    "category": "unauthenticated",
+    "title": "The access token is invalid",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#expired",
+    "reason": "expired",
+    "permanent": true
+  },
+  {
+    "code": "external_ref_conflict",
+    "status": 409,
+    "category": "conflict",
+    "title": "The external reference names another charge",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#external_ref_conflict",
+    "permanent": false
+  },
+  {
+    "code": "feature_disabled",
+    "status": 500,
+    "category": "internal",
+    "title": "A feature is disabled by the store's configuration",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#feature_disabled",
+    "permanent": false
+  },
+  {
+    "code": "idempotency_key_required",
+    "status": 403,
+    "category": "denied",
+    "title": "The token does not allow this request",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#idempotency_key_required",
+    "reason": "idempotency_key_required",
+    "permanent": false
+  },
+  {
+    "code": "internal",
+    "status": 500,
+    "category": "internal",
+    "title": "Internal error",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#internal",
+    "permanent": false
+  },
+  {
+    "code": "invalid_amount",
+    "status": 400,
+    "category": "invalid",
+    "title": "The amount is invalid",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#invalid_amount",
+    "permanent": false
+  },
+  {
+    "code": "invalid_authorization_details",
+    "status": 400,
+    "category": "denied",
+    "title": "The authorization details were refused",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#invalid_authorization_details",
+    "permanent": false
+  },
+  {
+    "code": "invalid_caveats",
+    "status": 400,
+    "category": "invalid",
+    "title": "The caveats are invalid",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#invalid_caveats",
+    "permanent": false
+  },
+  {
+    "code": "invalid_client",
+    "status": 401,
+    "category": "unauthenticated",
+    "title": "The client is not authenticated",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#invalid_client",
+    "permanent": false
+  },
+  {
+    "code": "invalid_config",
+    "status": 500,
+    "category": "internal",
+    "title": "The server is misconfigured",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#invalid_config",
+    "permanent": false
+  },
+  {
+    "code": "invalid_grant",
+    "status": 400,
+    "category": "unauthenticated",
+    "title": "The subject token was refused",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#invalid_grant",
+    "permanent": false
+  },
+  {
+    "code": "invalid_request",
+    "status": 400,
+    "category": "invalid",
+    "title": "The request is invalid",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#invalid_request",
+    "permanent": false
+  },
+  {
+    "code": "invalid_scope",
+    "status": 400,
+    "category": "denied",
+    "title": "The scope was refused",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#invalid_scope",
+    "permanent": false
+  },
+  {
+    "code": "invalid_target",
+    "status": 400,
+    "category": "denied",
+    "title": "The resource or audience was refused",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#invalid_target",
+    "permanent": false
+  },
+  {
+    "code": "invalid_token",
+    "status": 401,
+    "category": "unauthenticated",
+    "title": "The access token is invalid",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#invalid_token",
+    "reason": "invalid_token",
+    "permanent": true
+  },
+  {
+    "code": "keys_unavailable",
+    "status": 503,
+    "category": "unavailable",
+    "title": "The issuer's keys cannot be fetched",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#keys_unavailable",
+    "reason": "keys_unavailable",
+    "permanent": false
+  },
+  {
+    "code": "lease_exhausted",
+    "status": 403,
+    "category": "exhausted",
+    "title": "The token's request or budget limit is exhausted",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#budget_exceeded",
+    "reason": "budget_exceeded",
+    "permanent": false
+  },
+  {
+    "code": "lease_nested",
+    "status": 409,
+    "category": "precondition",
+    "title": "An ancestor of the capability holds a lease",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#lease_nested",
+    "permanent": false
+  },
+  {
+    "code": "lease_not_found",
+    "status": 404,
+    "category": "not_found",
+    "title": "The capability holds no lease",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#lease_not_found",
+    "permanent": false
+  },
+  {
+    "code": "lease_requests_exhausted",
+    "status": 403,
+    "category": "exhausted",
+    "title": "The token's request or budget limit is exhausted",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#request_limit_exceeded",
+    "reason": "request_limit_exceeded",
+    "permanent": true
+  },
+  {
+    "code": "leasing_disabled",
+    "status": 500,
+    "category": "internal",
+    "title": "Leasing is not enabled on the store",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#leasing_disabled",
+    "permanent": false
+  },
+  {
+    "code": "malformed_authorization",
+    "status": 400,
+    "category": "invalid",
+    "title": "The Authorization header is malformed",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#malformed_authorization",
+    "reason": "malformed_authorization",
+    "permanent": true
+  },
+  {
+    "code": "no_credentials",
+    "status": 401,
+    "category": "unauthenticated",
+    "title": "Credentials are required",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#no_credentials",
+    "reason": "no_credentials",
+    "permanent": false
+  },
+  {
+    "code": "no_revocation_lineage",
+    "status": 502,
+    "category": "unavailable",
+    "title": "The revocation upstream names no lineage",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#no_revocation_lineage",
+    "permanent": false
+  },
+  {
+    "code": "nonce_required",
+    "status": 401,
+    "category": "unauthenticated",
+    "title": "A DPoP proof with the server's nonce is required",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#nonce_required",
+    "reason": "nonce_required",
+    "permanent": false
+  },
+  {
+    "code": "not_found",
+    "status": 404,
+    "category": "not_found",
+    "title": "Not found",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#not_found",
+    "permanent": false
+  },
+  {
+    "code": "not_yet_valid",
+    "status": 401,
+    "category": "unauthenticated",
+    "title": "The access token is invalid",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#not_yet_valid",
+    "reason": "not_yet_valid",
+    "permanent": false
+  },
+  {
+    "code": "op_not_allowed",
+    "status": 403,
+    "category": "denied",
+    "title": "The token does not allow this request",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#op_not_allowed",
+    "reason": "op_not_allowed",
+    "permanent": true
+  },
+  {
+    "code": "outcome_unknown",
+    "status": 503,
+    "category": "unavailable",
+    "title": "The store lost the answer to the call's commit",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#outcome_unknown",
+    "permanent": false
+  },
+  {
+    "code": "proof_invalid",
+    "status": 401,
+    "category": "unauthenticated",
+    "title": "The DPoP proof is missing or invalid",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#proof_invalid",
+    "reason": "proof_invalid",
+    "permanent": false
+  },
+  {
+    "code": "proof_of_possession",
+    "status": 401,
+    "category": "unauthenticated",
+    "title": "The DPoP proof is missing or invalid",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#invalid-dpop-proof",
+    "permanent": false
+  },
+  {
+    "code": "proof_quota_exceeded",
+    "status": 429,
+    "category": "exhausted",
+    "title": "Too many DPoP proofs inside the replay window",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#proof_quota_exceeded",
+    "reason": "proof_quota_exceeded",
+    "permanent": false
+  },
+  {
+    "code": "proof_replayed",
+    "status": 401,
+    "category": "unauthenticated",
+    "title": "The DPoP proof is missing or invalid",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#proof_replayed",
+    "reason": "proof_replayed",
+    "permanent": false
+  },
+  {
+    "code": "proof_required",
+    "status": 401,
+    "category": "unauthenticated",
+    "title": "The DPoP proof is missing or invalid",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#proof_required",
+    "reason": "proof_required",
+    "permanent": false
+  },
+  {
+    "code": "proof_unsupported",
+    "status": 500,
+    "category": "internal",
+    "title": "The capability is bound to a key and no proof is checked",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#proof_unsupported",
+    "permanent": false
+  },
+  {
+    "code": "refund_conflict",
+    "status": 409,
+    "category": "conflict",
+    "title": "The refund id names another refund",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#refund_conflict",
+    "permanent": false
+  },
+  {
+    "code": "refund_exceeds_charge",
+    "status": 409,
+    "category": "precondition",
+    "title": "The refund exceeds what the charge took",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#refund_exceeds_charge",
+    "permanent": false
+  },
+  {
+    "code": "request_limit_exceeded",
+    "status": 403,
+    "category": "exhausted",
+    "title": "The token's request or budget limit is exhausted",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#request_limit_exceeded",
+    "reason": "request_limit_exceeded",
+    "permanent": true
+  },
+  {
+    "code": "reservation_not_found",
+    "status": 404,
+    "category": "not_found",
+    "title": "The reservation is not on record, released or expired",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#reservation_not_found",
+    "permanent": false
+  },
+  {
+    "code": "reserve_conflict",
+    "status": 409,
+    "category": "conflict",
+    "title": "The reservation id names another hold",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#reserve_conflict",
+    "permanent": false
+  },
+  {
+    "code": "resource_not_allowed",
+    "status": 403,
+    "category": "denied",
+    "title": "The token does not allow this request",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#resource_not_allowed",
+    "reason": "resource_not_allowed",
+    "permanent": true
+  },
+  {
+    "code": "revocation_unavailable",
+    "status": 503,
+    "category": "unavailable",
+    "title": "The revocation status cannot be checked",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#revocation_unavailable",
+    "reason": "revocation_unavailable",
+    "permanent": false
+  },
+  {
+    "code": "revoked",
+    "status": 401,
+    "category": "unauthenticated",
+    "title": "The access token is invalid",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#revoked",
+    "reason": "revoked",
+    "permanent": true
+  },
+  {
+    "code": "scope_mismatch",
+    "status": 500,
+    "category": "internal",
+    "title": "The call is scoped to another tenant than its request names",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#scope_mismatch",
+    "permanent": false
+  },
+  {
+    "code": "server_error",
+    "status": 500,
+    "category": "internal",
+    "title": "The server could not decide on the request",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#server_error",
+    "permanent": false
+  },
+  {
+    "code": "settle_conflict",
+    "status": 409,
+    "category": "conflict",
+    "title": "The reservation was settled for another amount",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#settle_conflict",
+    "permanent": false
+  },
+  {
+    "code": "source_ip_not_allowed",
+    "status": 403,
+    "category": "denied",
+    "title": "The token does not allow this request",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#source_ip_not_allowed",
+    "reason": "source_ip_not_allowed",
+    "permanent": true
+  },
+  {
+    "code": "tainted_read_not_allowed",
+    "status": 403,
+    "category": "denied",
+    "title": "The token does not allow this request",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#tainted_read_not_allowed",
+    "reason": "tainted_read_not_allowed",
+    "permanent": false
+  },
+  {
+    "code": "tenant_budget_busy",
+    "status": 503,
+    "category": "unavailable",
+    "title": "The tenant's calls in flight held its budget too long",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#tenant_budget_busy",
+    "permanent": false
+  },
+  {
+    "code": "tenant_budget_exceeded",
+    "status": 403,
+    "category": "exhausted",
+    "title": "The token's request or budget limit is exhausted",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#tenant_budget_exceeded",
+    "reason": "tenant_budget_exceeded",
+    "permanent": false
+  },
+  {
+    "code": "tenant_budget_not_found",
+    "status": 404,
+    "category": "not_found",
+    "title": "The tenant has no budget on record",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#tenant_budget_not_found",
+    "permanent": false
+  },
+  {
+    "code": "tenant_budget_version_mismatch",
+    "status": 409,
+    "category": "conflict",
+    "title": "The tenant budget changed since it was read",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#tenant_budget_version_mismatch",
+    "permanent": false
+  },
+  {
+    "code": "tenant_deleted",
+    "status": 410,
+    "category": "not_found",
+    "title": "The tenant is deleted",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#tenant_deleted",
+    "permanent": false
+  },
+  {
+    "code": "tenant_erased",
+    "status": 401,
+    "category": "unauthenticated",
+    "title": "The access token is invalid",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#revoked",
+    "reason": "revoked",
+    "permanent": true
+  },
+  {
+    "code": "tenant_gone",
+    "status": 410,
+    "category": "not_found",
+    "title": "The tenant is erased",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#tenant_gone",
+    "permanent": false
+  },
+  {
+    "code": "unauthenticated",
+    "status": 401,
+    "category": "unauthenticated",
+    "title": "The access token is invalid",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#invalid-token",
+    "permanent": false
+  },
+  {
+    "code": "unauthorized_client",
+    "status": 400,
+    "category": "denied",
+    "title": "The client may not exchange tokens",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#unauthorized_client",
+    "permanent": false
+  },
+  {
+    "code": "unit_code_mismatch",
+    "status": 409,
+    "category": "precondition",
+    "title": "The request conflicts with what is on record",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#conflict",
+    "permanent": false
+  },
+  {
+    "code": "unknown_kid",
+    "status": 401,
+    "category": "unauthenticated",
+    "title": "The key id names no key",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#unknown_kid",
+    "permanent": false
+  },
+  {
+    "code": "unknown_tenant",
+    "status": 404,
+    "category": "not_found",
+    "title": "The tenant is unknown",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#unknown_tenant",
+    "permanent": false
+  },
+  {
+    "code": "unrecorded",
+    "status": 401,
+    "category": "unauthenticated",
+    "title": "The access token is invalid",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#unrecorded",
+    "reason": "unrecorded",
+    "permanent": false
+  },
+  {
+    "code": "unsupported_grant_type",
+    "status": 400,
+    "category": "invalid",
+    "title": "The grant type is not supported",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#unsupported_grant_type",
+    "permanent": false
+  },
+  {
+    "code": "usage_not_found",
+    "status": 404,
+    "category": "not_found",
+    "title": "The capability has no usage on record",
+    "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#usage_not_found",
+    "permanent": false
+  }
+]

@@ -132,6 +132,7 @@ export function reachesCode(paths: readonly string[]): boolean {
 export const READ_BY_TESTS: Readonly<Record<string, readonly Group[]>> = {
   "README.md": [Group.Examples],
   "docs/errors.md": [Group.Root, Group.Exchange],
+  "docs/errors.json": [Group.Exchange],
   "docs/defaults.md": [Group.Root],
 };
 

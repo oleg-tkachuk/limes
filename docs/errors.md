@@ -186,6 +186,11 @@ has a reason, and the store's own error stays in the text only.
   that caller ends it, or the database's
   `idle_in_transaction_session_timeout` does.
 
+[errors.json](errors.json) is the same table for a consumer that is not
+written in Go: every code, its HTTP status, category, title, problem type,
+reason and whether that reason is permanent, generated from the code table
+the functions below read, which a test holds it to.
+
 `limes.Codes()` lists every code, the meter's among them and, in a
 binary that links the exchange in, the exchange's, so a consumer's test can prove its own mapping covers them all
 (`limestest`, under [Categories](#categories)). A code's status, category and

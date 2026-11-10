@@ -257,9 +257,16 @@ tasks:
       - go test -race -count=1 -run '^TestContractOnRedis$' ./...
 
   docs:api:
-    desc: "Regenerate docs/api, the API reference, from every public package's doc comments (internal/apidoc) — the unit suite fails while it differs"
+    desc: "Regenerate docs/api, the API reference, from every public package's doc comments (internal/apidoc), and docs/errors.json from the code table — the unit suites fail while either differs"
     cmds:
       - go test -count=1 -run '^TestReferenceIsCurrent$' ./internal/apidoc -args -update
+      - task: docs:errors-json
+
+  docs:errors-json:
+    desc: "Regenerate docs/errors.json, every code's status, category, title, reason and permanence, in the exchange's tests: the one binary that links every code"
+    dir: '{{.EXCHANGE_DIR}}'
+    cmds:
+      - go test -count=1 -run '^TestErrorsJSONIsCurrent$' . -args -update
 
   fmt:
     desc: "gofmt -s -w over every module — the half of fmt:check that rewrites; goimports is not run, as it adds imports this tree does not use"
