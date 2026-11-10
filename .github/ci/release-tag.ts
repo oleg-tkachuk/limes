@@ -45,6 +45,7 @@ import { lastStableTag, loadPolicy, type Policy } from "./lib/release-policy.ts"
 import { publish, publishLeftBehind, warmGoProxy, type Fetch } from "./lib/releases.ts";
 import { seedLine } from "./lib/seed.ts";
 import { parentsOf, planBaseOf, short, staleLines, staleModules } from "./lib/stale-plan.ts";
+import { tagPusher } from "./lib/tag-push.ts";
 
 // Tagger is what tagging needs, its effects injected so a test can stand in
 // for GitHub, the push and the Go proxy.
@@ -188,7 +189,7 @@ async function main(): Promise<void> {
       repository,
       root,
       fetchInfo: (url) => fetch(url),
-      pushTag: async (tag) => void (await git(["push", "--quiet", push, `refs/tags/${tag}`], root)),
+      pushTag: tagPusher(push, root),
       commits: releaseCommits(),
       policy: loadPolicy(root),
     }),

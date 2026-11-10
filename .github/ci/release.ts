@@ -34,6 +34,7 @@ import { candidateTag, previousCandidate, RC, releasesSince, sinceCandidate } fr
 import { lastStableTag, pendingCommits } from "./lib/release-policy.ts";
 import { notesFrom, publish, publishLeftBehind, warmGoProxy, type Fetch } from "./lib/releases.ts";
 import { seedLine } from "./lib/seed.ts";
+import { tagPusher } from "./lib/tag-push.ts";
 import { candidateReleases } from "./lib/candidate-releases.ts";
 import { DRY_RUN_ARG, PUSH_URL_ENV, semanticRelease, semanticReleaseCommand } from "./lib/semantic-release.ts";
 
@@ -238,7 +239,7 @@ async function main(): Promise<boolean> {
     return releaseAll({
       ...options,
       commits: releaseCommits(),
-      pushTag: async (tag) => void (await git(["push", "--quiet", push, `refs/tags/${tag}`], root)),
+      pushTag: tagPusher(push, root),
       github: gitHubFor(token, repository),
       repository,
       root,
