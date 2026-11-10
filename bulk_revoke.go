@@ -59,13 +59,13 @@ type RevokeMatchingRequest struct {
 func (r RevokeMatchingRequest) Validate() error {
 	switch {
 	case r.TenantID == uuid.Nil() && !r.AllTenants:
-		return invalidRequest("revoke matching: a tenant id or AllTenants required")
+		return refuseRequest("revoke matching: a tenant id or AllTenants required")
 	case r.TenantID != uuid.Nil() && r.AllTenants:
 		return invalidRequest("revoke matching: tenant id %s beside AllTenants", r.TenantID)
 	case r.Subject == "" && r.OnBehalfOf == "" && r.ClientID == "" && r.Session == "" && r.RunID == uuid.Nil() && r.SubjectIssuer == "":
-		return invalidRequest("revoke matching: no selector; name a subject, an on-behalf-of, a client, a session, an agent run or a subject issuer")
+		return refuseRequest("revoke matching: no selector; name a subject, an on-behalf-of, a client, a session, an agent run or a subject issuer")
 	case r.AllTenants && (r.Subject != "" || r.OnBehalfOf != "" || r.RunID != uuid.Nil()):
-		return invalidRequest("revoke matching: AllTenants matches by client, session or subject issuer alone; a subject or an agent run names one tenant's")
+		return refuseRequest("revoke matching: AllTenants matches by client, session or subject issuer alone; a subject or an agent run names one tenant's")
 	case r.Limit < 0:
 		return invalidRequest("revoke matching: limit %d is negative", r.Limit)
 	}

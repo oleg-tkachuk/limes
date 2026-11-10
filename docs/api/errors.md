@@ -465,6 +465,17 @@ func Codes() []Code
 Codes returns every code this package answers, the meter's among them and, once module exchange is linked in, the exchange's, each once, so a consumer can prove its own mapping covers them all. The order is fixed within a release, and no contract: it may change in any release.
 
 <sub>[code.go](../../code.go)</sub>
+<a id="limes.DetailCodes"></a>
+
+#### limes.DetailCodes
+
+```go
+func DetailCodes() []Code
+```
+
+DetailCodes are the codes whose problem may carry a Detail (ProblemOf): refusals of what the client sent — a request, its caveats, an amount, a delegation wider than its parent.
+
+<sub>[code.go](../../code.go)</sub>
 <a id="limes.ErrorResponse"></a>
 
 ### limes.ErrorResponse
@@ -502,7 +513,9 @@ type Problem struct {
 	Title string `json:"title"`
 	// Status repeats the HTTP status.
 	Status int `json:"status"`
-	// Detail explains this occurrence, in terms safe to show the client.
+	// Detail explains this occurrence, in terms safe to show the client:
+	// set by ProblemOf, for a code of DetailCodes, as a constant naming the
+	// part of the request refused and the rule it broke, never a value.
 	Detail string `json:"detail,omitempty"`
 	// Reason is the refusal's Reason, an extension member (RFC 9457 §3.2):
 	// the stable name a client branches on, which the Type URI ends with.
@@ -541,7 +554,9 @@ ProblemFor is ProblemOf for any error: one that is not limes's — a store's own
 func ProblemOf(err error) (Problem, bool)
 ```
 
-ProblemOf is the RFC 9457 problem details of err, an error limes returned, for a consumer's own API, whatever its transport: its type URI, a fixed title, its HTTP status, its code, its category and, for a refusal, its Reason. A refusal's is the body Verifier.ErrorResponse writes. It carries no detail: an error's text can name kids, issuers or stores, which is for the server's log. False for an error that is not limes's: answer that as the server's failure.
+ProblemOf is the RFC 9457 problem details of err, an error limes returned, for a consumer's own API, whatever its transport: its type URI, a fixed title, its HTTP status, its code, its category and, for a refusal, its Reason. A refusal's is the body Verifier.ErrorResponse writes. False for an error that is not limes's: answer that as the server's failure.
+
+Its Detail is set for a refusal of the client's own input — a code of DetailCodes — when the refusal says which part of the request it refused and which rule that broke, and is empty otherwise. A detail is written where the refusal is, as a constant: it never holds an id, a key id, an issuer, a tenant, a resource or any other value — the client's or the server's. The error's text, which may name all of those, is for the server's log alone.
 
 <sub>[code.go](../../code.go)</sub>
 <a id="limes.ProblemOfCode"></a>

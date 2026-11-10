@@ -3,6 +3,7 @@ package limes
 import (
 	"errors"
 
+	"github.com/oleg-tkachuk/limes/internal/detail"
 	"github.com/oleg-tkachuk/limes/internal/errs"
 )
 
@@ -194,6 +195,18 @@ func (e *familyError) Is(target error) bool {
 
 // invalidRequest is an ErrInvalidRequest saying what was wrong.
 func invalidRequest(format string, args ...any) error { return errs.Request(format, args...) }
+
+// refuse is family, saying what format and args make, carrying text: what
+// a client may be shown of it (internal/detail, ProblemOf).
+func refuse(family error, text detail.Text, format string, args ...any) error {
+	return detail.Wrap(errs.Errorf("%w: "+format, append([]any{family}, args...)...), text)
+}
+
+// refuseRequest is an ErrInvalidRequest whose text, a constant, is all it
+// says, and so what a client may be shown of it as well.
+func refuseRequest(text detail.Text) error {
+	return detail.Wrap(errs.Request("%s", text), text)
+}
 
 // invalidConfig is an ErrInvalidConfig saying what was wrong.
 func invalidConfig(format string, args ...any) error { return errs.Config(format, args...) }

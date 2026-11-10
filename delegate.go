@@ -5,8 +5,6 @@ import (
 	"net/netip"
 	"slices"
 	"time"
-
-	"github.com/oleg-tkachuk/limes/internal/errs"
 )
 
 // Narrows reports whether `child` is a narrowing of `parent`: every operation
@@ -22,16 +20,14 @@ import (
 func Narrows(parent, child Capability) error {
 	// Audience: child audience must be subset of parent audience.
 	if !subset(child.Audience, parent.Audience) {
-		return fmt.Errorf("%w: audience %v widens parent %v",
-			ErrDelegationTooWide, child.Audience, parent.Audience)
+		return refuse(ErrDelegationTooWide, "the audience is wider than the parent's", "audience %v widens parent %v", child.Audience, parent.Audience)
 	}
 
 	// TTL: child cannot outlive parent. We compare ExpiresAt rather
 	// than a derived TTL so capabilities issued back-to-back at the
 	// same instant don't drift due to clock skew.
 	if child.ExpiresAt.After(parent.ExpiresAt) {
-		return fmt.Errorf("%w: child expires_at %s outlives parent %s",
-			ErrDelegationTooWide, child.ExpiresAt, parent.ExpiresAt)
+		return refuse(ErrDelegationTooWide, "it expires after the parent", "child expires_at %s outlives parent %s", child.ExpiresAt, parent.ExpiresAt)
 	}
 
 	// Start: child cannot begin before parent. A capability with no
@@ -40,21 +36,20 @@ func Narrows(parent, child Capability) error {
 	// back from its token compares equal to itself, and rounding a parent's
 	// start down would let a child begin up to a second before it.
 	if ps := validFrom(parent); !ps.IsZero() && validFrom(child).Before(ps) {
-		return fmt.Errorf("%w: child starts %s, before parent %s",
-			ErrDelegationTooWide, validFrom(child), ps)
+		return refuse(ErrDelegationTooWide, "it starts before the parent", "child starts %s, before parent %s", validFrom(child), ps)
 	}
 
 	// Tenant: must match. Cross-tenant delegation is impossible — a
 	// capability is forever pinned to its issuing tenant.
 	if child.Subject.TenantID != parent.Subject.TenantID {
-		return fmt.Errorf("%w: tenant_id mismatch", ErrDelegationTooWide)
+		return refuse(ErrDelegationTooWide, "it names another tenant than the parent", "tenant_id mismatch")
 	}
 
 	// Key binding: a bound parent cannot delegate an unbound child — that
 	// would turn a token useless without its key into one any holder can
 	// replay. The child may be bound to a different key: the sub-agent's.
 	if parent.ConfirmationJKT != "" && child.ConfirmationJKT == "" {
-		return fmt.Errorf("%w: parent is key-bound, child is not", ErrDelegationTooWide)
+		return refuse(ErrDelegationTooWide, "the parent is bound to a key and it is not", "parent is key-bound, child is not")
 	}
 
 	return narrowsCaveats(parent.Caveats, child.Caveats)
@@ -91,8 +86,7 @@ func narrowsCaveats(parent, child Caveats) error {
 func narrowsOps(parent, child []Op) error {
 	for _, op := range child {
 		if !slices.Contains(parent, op) {
-			return fmt.Errorf("%w: child op %q not in parent ops %v",
-				ErrDelegationTooWide, op, parent)
+			return refuse(ErrDelegationTooWide, "an op is not among the parent's", "child op %q not in parent ops %v", op, parent)
 		}
 	}
 	return nil
@@ -103,14 +97,12 @@ func narrowsOps(parent, child []Op) error {
 func narrowsLimits(parent, child Caveats) error {
 	// Requests: a child's ceiling may not lift or raise its parent's.
 	if !child.Requests.Within(parent.Requests) {
-		return fmt.Errorf("%w: child requests %s would exceed parent %s",
-			ErrDelegationTooWide, child.Requests, parent.Requests)
+		return refuse(ErrDelegationTooWide, "the request ceiling exceeds the parent's", "child requests %s would exceed parent %s", child.Requests, parent.Requests)
 	}
 
 	// Copies: a child counts no more Biscuit copies than its parent.
 	if !child.Copies.Within(parent.Copies) {
-		return fmt.Errorf("%w: child copies %s would exceed parent %s",
-			ErrDelegationTooWide, child.Copies, parent.Copies)
+		return refuse(ErrDelegationTooWide, "the copy quota exceeds the parent's", "child copies %s would exceed parent %s", child.Copies, parent.Copies)
 	}
 
 	// Unit code: a child budget counts in the parent's unit. We don't
@@ -127,8 +119,7 @@ func narrowsLimits(parent, child Caveats) error {
 	// Budget: same rule. Compared in the shared unit_code (validated
 	// just above) so we don't need an FX rate.
 	if !child.Budget.Within(parent.Budget) {
-		return fmt.Errorf("%w: child budget %s exceeds parent %s",
-			ErrDelegationTooWide, child.Budget, parent.Budget)
+		return refuse(ErrDelegationTooWide, "the budget exceeds the parent's", "child budget %s exceeds parent %s", child.Budget, parent.Budget)
 	}
 	return nil
 }
@@ -138,15 +129,13 @@ func narrowsLimits(parent, child Caveats) error {
 func narrowsFlags(parent, child Caveats) error {
 	// AllowTaintedRead: child cannot grant a privilege the parent lacks.
 	if child.AllowTaintedRead && !parent.AllowTaintedRead {
-		return fmt.Errorf("%w: child grants tainted_read; parent does not",
-			ErrDelegationTooWide)
+		return refuse(ErrDelegationTooWide, "it allows tainted reads and the parent does not", "child grants tainted_read; parent does not")
 	}
 
 	// IdempotencyKeyRequired: enforcement-tightening only — child may
 	// raise the bar but not lower it.
 	if parent.IdempotencyKeyRequired && !child.IdempotencyKeyRequired {
-		return fmt.Errorf("%w: child relaxes idempotency_key requirement",
-			ErrDelegationTooWide)
+		return refuse(ErrDelegationTooWide, "it drops the parent's idempotency key requirement", "child relaxes idempotency_key requirement")
 	}
 	return nil
 }
@@ -168,25 +157,21 @@ func narrowsResources(parent, child Caveats) error {
 		return nil
 	}
 	if !child.RestrictsResources() {
-		return fmt.Errorf("%w: parent restricts resources (prefixes %v, URIs %v), child unrestricted",
-			ErrDelegationTooWide, parent.ResourcePrefixes, parent.ResourceURIs)
+		return refuse(ErrDelegationTooWide, "the parent restricts resources and it does not", "parent restricts resources (prefixes %v, URIs %v), child unrestricted", parent.ResourcePrefixes, parent.ResourceURIs)
 	}
 	for _, c := range child.ResourcePrefixes {
 		if !parent.coversPrefix(c) {
-			return fmt.Errorf("%w: child prefix %q not under any parent prefix %v",
-				ErrDelegationTooWide, c, parent.ResourcePrefixes)
+			return refuse(ErrDelegationTooWide, "a resource prefix is not under the parent's", "child prefix %q not under any parent prefix %v", c, parent.ResourcePrefixes)
 		}
 	}
 	for _, c := range child.ResourceNamePrefixes {
 		if !parent.coversNamePrefix(c) {
-			return fmt.Errorf("%w: child name prefix %q not within the parent's prefixes %v or name prefixes %v",
-				ErrDelegationTooWide, c, parent.ResourcePrefixes, parent.ResourceNamePrefixes)
+			return refuse(ErrDelegationTooWide, "a resource name prefix is not within the parent's", "child name prefix %q not within the parent's prefixes %v or name prefixes %v", c, parent.ResourcePrefixes, parent.ResourceNamePrefixes)
 		}
 	}
 	for _, c := range child.ResourceURIs {
 		if !parent.AllowsResource(c) {
-			return fmt.Errorf("%w: child URI %q not in parent allowance",
-				ErrDelegationTooWide, c)
+			return refuse(ErrDelegationTooWide, "a resource URI is not among the parent's", "child URI %q not in parent allowance", c)
 		}
 	}
 	return nil
@@ -202,20 +187,18 @@ func narrowsSourceIP(parent, child []string) error {
 		return nil
 	}
 	if len(child) == 0 {
-		return fmt.Errorf("%w: parent restricts source IP, child unrestricted",
-			ErrDelegationTooWide)
+		return refuse(ErrDelegationTooWide, "the parent restricts source IPs and it does not", "parent restricts source IP, child unrestricted")
 	}
 	for _, c := range child {
 		cp, err := netip.ParsePrefix(c)
 		if err != nil {
-			return errs.Errorf("%w: child CIDR %q: %w", ErrDelegationTooWide, c, err)
+			return refuse(ErrDelegationTooWide, "a source IP CIDR is malformed", "child CIDR %q: %w", c, err)
 		}
 		if !slices.ContainsFunc(parent, func(p string) bool {
 			pp, err := netip.ParsePrefix(p)
 			return err == nil && prefixContains(pp, cp)
 		}) {
-			return fmt.Errorf("%w: child CIDR %q not inside any parent CIDR %v",
-				ErrDelegationTooWide, c, parent)
+			return refuse(ErrDelegationTooWide, "a source IP CIDR is not inside the parent's", "child CIDR %q not inside any parent CIDR %v", c, parent)
 		}
 	}
 	return nil

@@ -72,7 +72,7 @@ type CountRecordsRequest struct {
 func (r CountRecordsRequest) Validate() error {
 	switch {
 	case r.TenantID == uuid.Nil() && !r.AllTenants:
-		return invalidRequest("count records: a tenant id or AllTenants required")
+		return refuseRequest("count records: a tenant id or AllTenants required")
 	case r.TenantID != uuid.Nil() && r.AllTenants:
 		return invalidRequest("count records: tenant id %s beside AllTenants", r.TenantID)
 	case r.ExpiringWithin < 0:

@@ -252,7 +252,7 @@ func (i *Issuer) Reissue(ctx context.Context, id uuid.UUID) (IssueResult, error)
 func (i *Issuer) reissue(ctx context.Context, id uuid.UUID) (IssueResult, error) {
 	records, ok := i.store.(RecordReader)
 	if !ok {
-		return IssueResult{}, invalidRequest("IssuerConfig.Store reads no record back (RecordReader), so nothing can be reissued")
+		return IssueResult{}, refuseRequest("IssuerConfig.Store reads no record back (RecordReader), so nothing can be reissued")
 	}
 	rec, err := records.GetRecord(ctx, id)
 	if err != nil {
@@ -309,10 +309,10 @@ func checkIssueRequest(req IssueRequest) error {
 		return err
 	}
 	if req.IssuedBy.Subject == "" {
-		return invalidRequest("IssuedBy is required")
+		return refuseRequest("IssuedBy is required")
 	}
 	if req.ClientID == "" {
-		return invalidRequest("ClientID is required (RFC 9068 client_id)")
+		return refuseRequest("ClientID is required (RFC 9068 client_id)")
 	}
 	return validateTerms(req.Audience, req.Caveats, req.ConfirmationJKT)
 }
@@ -321,10 +321,10 @@ func checkIssueRequest(req IssueRequest) error {
 // or acting for a principal it may not act for.
 func checkIssueSubject(req IssueRequest) error {
 	if req.Subject.TenantID == uuid.Nil() {
-		return invalidRequest("Issue requires Subject.TenantID")
+		return refuseRequest("Issue requires Subject.TenantID")
 	}
 	if req.Subject.Subject == "" {
-		return invalidRequest("Issue requires Subject.Subject (RFC 9068 sub)")
+		return refuseRequest("Issue requires Subject.Subject (RFC 9068 sub)")
 	}
 	if err := req.Subject.Validate(); err != nil {
 		return err
@@ -355,7 +355,8 @@ func validateTerms(audience []string, caveats Caveats, jkt string) error {
 // can be done with it. Set Requests explicitly, Unlimited or a Max.
 func checkUsable(requests RequestCeiling) error {
 	if !requests.Unlimited && requests.Max == 0 {
-		return fmt.Errorf("%w: requests: a ceiling of no request leaves the capability unusable; set Max or Unlimited", ErrInvalidCaveats)
+		return refuse(ErrInvalidCaveats, "a request ceiling of no request leaves the capability unusable; set Max or Unlimited",
+			"requests: a ceiling of no request leaves the capability unusable; set Max or Unlimited")
 	}
 	return nil
 }
@@ -482,10 +483,10 @@ func setNotBefore(c *Capability, nbf time.Time) error {
 // validateAudience requires a non-empty audience of non-empty entries.
 func validateAudience(aud []string) error {
 	if len(aud) == 0 {
-		return invalidRequest("non-empty Audience required")
+		return refuseRequest("non-empty Audience required")
 	}
 	if slices.Contains(aud, "") {
-		return invalidRequest("Audience contains an empty entry")
+		return refuseRequest("Audience contains an empty entry")
 	}
 	return nil
 }
@@ -601,13 +602,13 @@ func (i *Issuer) checkDelegable(p VerifiedCapability) error {
 	parent := p.c
 	switch {
 	case parent.ID == uuid.Nil():
-		return invalidRequest("Delegate requires a Parent the verifier accepted")
+		return refuseRequest("Delegate requires a Parent the verifier accepted")
 	case p.fromBiscuit || len(p.copies) > 0:
 		// A Biscuit copy delegates nothing: the child would be an ordinary
 		// token of the capability, which neither RevokeBiscuit of the copy
 		// reaches nor the copy's own counters bound. Its holder attenuates
 		// it instead.
-		return invalidRequest("parent is a Biscuit copy; attenuate it instead")
+		return refuseRequest("parent is a Biscuit copy; attenuate it instead")
 	case parent.Issuer != i.issuerName:
 		return invalidRequest("parent %s was issued by %q, not %q", parent.ID, parent.Issuer, i.issuerName)
 	case !slices.Contains(parent.Caveats.Ops, OpShare):
@@ -624,7 +625,7 @@ func childRequest(req DelegateRequest, parent Capability) (DelegateRequest, erro
 		req.Subject.TenantID = parent.Subject.TenantID
 	}
 	if req.Subject.Subject == "" {
-		return req, invalidRequest("Delegate requires Subject.Subject (RFC 9068 sub)")
+		return req, refuseRequest("Delegate requires Subject.Subject (RFC 9068 sub)")
 	}
 	if err := req.Subject.Validate(); err != nil {
 		return req, err

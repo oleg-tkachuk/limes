@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/internal/detail"
 )
 
 // The meter's own sentinels. The refusals ErrorResponse answers —
@@ -154,6 +155,13 @@ func (e *familyError) LimesErrorCode() string { return string(e.code) }
 // invalidRequest is a limes.ErrInvalidRequest saying what was wrong.
 func invalidRequest(format string, args ...any) error {
 	return fmt.Errorf("%w: "+format, append([]any{limes.ErrInvalidRequest}, args...)...)
+}
+
+// refuseRequest is a limes.ErrInvalidRequest whose text, a constant, is
+// all it says, and so what a client may be shown of it as well
+// (internal/detail).
+func refuseRequest(text detail.Text) error {
+	return detail.Wrap(invalidRequest("%s", text), text)
 }
 
 // noCompare makes a struct that holds it not comparable with ==, as

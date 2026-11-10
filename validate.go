@@ -1,13 +1,10 @@
 package limes
 
 import (
-	"fmt"
 	"net/netip"
 	"strings"
 	"unicode"
 	"unicode/utf8"
-
-	"github.com/oleg-tkachuk/limes/internal/errs"
 )
 
 // ErrInvalidCaveats is returned when a caveat bag is malformed: a budget
@@ -59,13 +56,13 @@ func (op Op) Validate() error {
 	s := string(op)
 	ns, name, ok := strings.Cut(s, ":")
 	if !ok || ns == "" || name == "" {
-		return fmt.Errorf("%w: unknown op %q: the built-in ops are %s; a custom op is namespaced, e.g. \"tool:search\"",
-			ErrInvalidCaveats, s, builtinOpNames)
+		return refuse(ErrInvalidCaveats, "an op is neither built in nor namespaced as \"<namespace>:<name>\"",
+			"unknown op %q: the built-in ops are %s; a custom op is namespaced, e.g. \"tool:search\"", s, builtinOpNames)
 	}
 	for _, r := range s {
 		if r > unicode.MaxASCII || !unicode.IsPrint(r) || unicode.IsSpace(r) {
-			return fmt.Errorf("%w: op %q contains a non-printable or space character",
-				ErrInvalidCaveats, s)
+			return refuse(ErrInvalidCaveats, "an op contains a non-printable or space character",
+				"op %q contains a non-printable or space character", s)
 		}
 	}
 	return nil
@@ -90,7 +87,7 @@ func (c Caveats) Validate() error {
 // validateOps refuses no op at all, or one that is not well formed.
 func validateOps(ops []Op) error {
 	if len(ops) == 0 {
-		return fmt.Errorf("%w: at least one op required", ErrInvalidCaveats)
+		return refuse(ErrInvalidCaveats, "at least one op is required", "at least one op required")
 	}
 	for _, op := range ops {
 		if err := op.Validate(); err != nil {
@@ -133,13 +130,13 @@ func validResources(kind string, values []string) error {
 // validateLimits refuses a request, budget or copy ceiling out of range.
 func (c Caveats) validateLimits() error {
 	if err := c.Requests.Validate(); err != nil {
-		return errs.Errorf("%w: %w", ErrInvalidCaveats, err)
+		return refuse(ErrInvalidCaveats, "the request ceiling is malformed or out of range", "%w", err)
 	}
 	if err := c.Budget.Validate(); err != nil {
-		return errs.Errorf("%w: %w", ErrInvalidCaveats, err)
+		return refuse(ErrInvalidCaveats, "the budget ceiling is malformed or out of range", "%w", err)
 	}
 	if err := c.Copies.Validate(); err != nil {
-		return errs.Errorf("%w: %w", ErrInvalidCaveats, err)
+		return refuse(ErrInvalidCaveats, "the copy quota is malformed or out of range", "%w", err)
 	}
 	return nil
 }
@@ -150,12 +147,12 @@ func validateSourceIPCIDRs(cidrs []string) error {
 	for _, cidr := range cidrs {
 		p, err := netip.ParsePrefix(cidr)
 		if err != nil {
-			return errs.Errorf("%w: source_ip_cidr %q: %w", ErrInvalidCaveats, cidr, err)
+			return refuse(ErrInvalidCaveats, "a source IP CIDR is malformed", "source_ip_cidr %q: %w", cidr, err)
 		}
 		// CheckSource unmaps the client's address, so an IPv4-mapped IPv6
 		// prefix would admit no client at all: write it as IPv4.
 		if p.Addr().Is4In6() {
-			return fmt.Errorf("%w: source_ip_cidr %q is IPv4-mapped IPv6; write it as IPv4", ErrInvalidCaveats, cidr)
+			return refuse(ErrInvalidCaveats, "a source IP CIDR is IPv4-mapped IPv6; write it as IPv4", "source_ip_cidr %q is IPv4-mapped IPv6; write it as IPv4", cidr)
 		}
 	}
 	return nil
@@ -168,10 +165,10 @@ func validateSourceIPCIDRs(cidrs []string) error {
 // character at all: the issuer cannot have meant it.
 func wholeCharacters(prefix string) error {
 	if !utf8.ValidString(prefix) {
-		return fmt.Errorf("%w: resource name prefix %q is not whole UTF-8", ErrInvalidCaveats, prefix)
+		return refuse(ErrInvalidCaveats, "a resource name prefix is not whole UTF-8", "resource name prefix %q is not whole UTF-8", prefix)
 	}
 	if i := strings.LastIndexByte(prefix, '%'); i >= 0 && len(prefix)-i < percentEscapeLen {
-		return fmt.Errorf("%w: resource name prefix %q ends inside a percent-escape", ErrInvalidCaveats, prefix)
+		return refuse(ErrInvalidCaveats, "a resource name prefix ends inside a percent-escape", "resource name prefix %q ends inside a percent-escape", prefix)
 	}
 	return nil
 }
@@ -182,16 +179,16 @@ const percentEscapeLen = 3
 
 func validResource(kind, s string) error {
 	if s == "" {
-		return fmt.Errorf("%w: empty %s (leave the list empty for \"any resource\")",
-			ErrInvalidCaveats, kind)
+		return refuse(ErrInvalidCaveats, "a resource is empty; leave the list empty for any resource",
+			"empty %s (leave the list empty for \"any resource\")", kind)
 	}
 	for _, r := range s {
 		if unicode.IsControl(r) {
-			return fmt.Errorf("%w: %s %q contains a control character", ErrInvalidCaveats, kind, s)
+			return refuse(ErrInvalidCaveats, "a resource contains a control character", "%s %q contains a control character", kind, s)
 		}
 	}
 	if hasDotSegment(s) {
-		return fmt.Errorf("%w: %s %q has a \".\" or \"..\" segment", ErrInvalidCaveats, kind, s)
+		return refuse(ErrInvalidCaveats, "a resource has a \".\" or \"..\" segment", "%s %q has a \".\" or \"..\" segment", kind, s)
 	}
 	return nil
 }
@@ -219,7 +216,7 @@ func validateOnBehalfOf(obo, holder Principal) error {
 		return err
 	}
 	if obo.Subject == "" {
-		return invalidRequest("OnBehalfOf names no subject")
+		return refuseRequest("OnBehalfOf names no subject")
 	}
 	if obo.TenantID != holder.TenantID {
 		return invalidRequest("OnBehalfOf is of tenant %s, not the subject's %s", obo.TenantID, holder.TenantID)

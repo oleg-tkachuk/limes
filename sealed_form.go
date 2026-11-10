@@ -134,7 +134,7 @@ func (i *Issuer) checkSealable(ctx context.Context, vc VerifiedCapability) error
 	c := vc.c
 	switch {
 	case c.ID == uuid.Nil():
-		return invalidRequest("Biscuit requires a capability the verifier accepted")
+		return refuseRequest("Biscuit requires a capability the verifier accepted")
 	case vc.fromBiscuit:
 		return invalidRequest("capability %s was read from a Biscuit; attenuate that instead", c.ID)
 	case c.Issuer != i.issuerName:
