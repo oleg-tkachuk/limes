@@ -5,7 +5,7 @@ module github.com/oleg-tkachuk/limes/examples
 
 go 1.27.0
 
-toolchain go1.27.3
+toolchain go1.27.4
 
 // The replaces build the examples against the limes, pgstore and exchange of
 // the same commit, so an example shows the code beside it.

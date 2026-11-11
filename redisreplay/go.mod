@@ -4,7 +4,7 @@ module github.com/oleg-tkachuk/limes/redisreplay
 
 go 1.27.0
 
-toolchain go1.27.3
+toolchain go1.27.4
 
 // The replace builds this module against the limes of the same commit, which
 // is what CI tests; a consumer of this module, whose build ignores the
