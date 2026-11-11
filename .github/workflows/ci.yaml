@@ -147,16 +147,17 @@ jobs:
           checksum: ${{ env.TASK_SHA256 }}
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # --yes accepts the first-fetch trust prompt for the shared task library
-      # include; unattended, that prompt is a hang rather than a question. A
-      # change to the scripts alone runs their part of the gate.
+      # The shared task library is loaded from the lock under .task/remote
+      # (.taskrc.yml), so no job fetches it and none passes --yes: a pin
+      # without its lock fails the load. A change to the scripts alone runs
+      # their part of the gate.
       - name: task verify:gate
         env:
           TASKS: ${{ needs.changes.outputs.verify-tasks }}
         # One of two fixed lists changes.ts sets, a task name a word.
         run: |
           read -r -a tasks <<<"$TASKS"
-          task --yes "${tasks[@]}"
+          task "${tasks[@]}"
 
       - name: Save the Go caches
         if: success()
@@ -212,7 +213,7 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: task lint:all
-        run: task --yes lint:all
+        run: task lint:all
 
       - name: Save the Go caches
         if: success()
@@ -266,7 +267,7 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: task test:pgstore
-        run: task --yes test:pgstore
+        run: task test:pgstore
 
       - name: Save the Go caches
         if: success()
@@ -317,7 +318,7 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: task test:examples:pgstore
-        run: task --yes test:examples:pgstore
+        run: task test:examples:pgstore
 
       - name: Save the Go caches
         if: success()
@@ -382,7 +383,7 @@ jobs:
       - name: task test:redisreplay
         env:
           LIMES_REDIS_ADDR: localhost:6379
-        run: task --yes test:redisreplay
+        run: task test:redisreplay
 
       - name: Save the Go caches
         if: success()

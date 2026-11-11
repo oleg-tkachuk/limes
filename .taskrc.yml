@@ -1,6 +1,10 @@
 # Task's own settings, read by every `task` run from this checkout.
 remote:
-  # The time a fetch of the shared task library (TASKLIB in Taskfile.yaml)
-  # may take. Task's default, 10s, is below what a clone from a CI runner
-  # sometimes takes, and a clone it cuts short fails the whole job.
+  # The shared task library (TASKLIB in Taskfile.yaml) is loaded from the
+  # lock committed under .task/remote and never fetched. Only `task --yes
+  # --offline=false --download tasklib:lock`, and tasklib:bump through it,
+  # go to the network.
+  offline: true
+  # The time that fetch may take. Task's default, 10s, is below what a clone
+  # sometimes takes, and a clone it cuts short fails the refresh.
   timeout: 2m
