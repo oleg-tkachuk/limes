@@ -286,15 +286,52 @@ func (h *Handler) readRequest(w http.ResponseWriter, r *http.Request) (Request, 
 	if err != nil {
 		return Request{}, "", err
 	}
+	scopes, err := parseScope(form.Get(paramScope))
+	if err != nil {
+		return Request{}, "", err
+	}
 	req := Request{
 		Client: client, SubjectToken: form.Get(paramSubjectToken),
-		Resources: form[paramResource], Audiences: form[paramAudience], Scopes: strings.Fields(form.Get(paramScope)),
+		Resources: form[paramResource], Audiences: form[paramAudience], Scopes: scopes,
 		DPoP: proof,
 	}
 	if details := form.Get(paramAuthorizationDetails); details != "" {
 		req.AuthorizationDetails = json.RawMessage(details)
 	}
 	return req, form.Get(paramSubjectTokenType), nil
+}
+
+// scopeDelimiter is what separates the tokens of a scope parameter
+// (RFC 6749 §3.3).
+const scopeDelimiter = " "
+
+// The bytes a scope token is made of, NQCHAR (RFC 6749 Appendix A): every
+// printable ASCII character but space, '"' and '\'.
+const (
+	nqcharFirst byte = 0x21
+	nqcharLast  byte = 0x7e
+	nqcharQuote byte = '"'
+	nqcharSlash byte = '\\'
+)
+
+// parseScope reads a scope parameter: its tokens, split by spaces, extra
+// spaces dropped. A token with any other byte — a tab, a line break, a
+// quote, a backslash, anything not ASCII — is a malformed scope,
+// ErrInvalidScope, never read as two scopes or kept as sent.
+func parseScope(raw string) ([]string, error) {
+	var scopes []string
+	for token := range strings.SplitSeq(raw, scopeDelimiter) {
+		if token == "" {
+			continue
+		}
+		for i := range len(token) {
+			if c := token[i]; c < nqcharFirst || c > nqcharLast || c == nqcharQuote || c == nqcharSlash {
+				return nil, fmt.Errorf("%w: a scope token holds a byte RFC 6749 does not allow, %#x", ErrInvalidScope, c)
+			}
+		}
+		scopes = append(scopes, token)
+	}
+	return scopes, nil
 }
 
 // readForm reads a request's form body, no larger than maxBytes, refusing

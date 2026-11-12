@@ -100,6 +100,26 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
   left the role on the pooled connection for the next call. Set a role
   for the transaction alone with `SET LOCAL ROLE`.
 
+## exchange/v0.25.0
+
+- The token endpoint reads the `scope` parameter as RFC 6749 §3.3 writes
+  it: tokens of printable ASCII split by spaces. A tab, a line break, a
+  quote, a backslash or a byte past ASCII in it refuses the request with
+  `ErrInvalidScope` (`invalid_scope`, 400), where any whitespace split
+  tokens and the rest were kept as sent. Send scopes separated by single
+  spaces.
+- `jwtverify.RemoteKeys` refuses a key set document past
+  `jwks.DefaultMaxDocumentBytes` (1 MiB), as `jwks.Remote` does, where
+  jwx read up to its own process-wide limit: the fetch fails, and the
+  keys are `jwks.ErrUnavailable` until a smaller document is served.
+- The introspection handler asks the verifier about a token only for the
+  audiences the client serves (`limes.Verifier.IntrospectFor`, since
+  #1041), so a token of another audience answers `active: false` before
+  its revocation is looked up: where the revocation store failed it
+  answered 500 `server_error`. A client's view of its own audiences is
+  unchanged. The change came after exchange/v0.24.2 without a breaking
+  marker; it is listed here, under the release that carries it.
+
 ## exchange/v0.24.2
 
 A patch release that changed an answer without the breaking marker that

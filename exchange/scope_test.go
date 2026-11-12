@@ -190,3 +190,31 @@ func TestNarrowHoldsTheGrantedScopes(t *testing.T) {
 		})
 	}
 }
+
+// A scope parameter is read as RFC 6749 §3.3 writes it: tokens of NQCHAR
+// split by spaces, extra spaces dropped. A tab, a line break, a quote or a
+// backslash is no delimiter and no part of a token: the scope is
+// malformed, ErrInvalidScope, never read as two scopes.
+func TestParseScope(t *testing.T) {
+	for name, tc := range map[string]struct {
+		raw  string
+		want []string
+		err  error
+	}{
+		"none":             {raw: "", want: nil},
+		"one":              {raw: scopeRead, want: []string{scopeRead}},
+		"two":              {raw: scopeRead + " " + scopeList, want: asked},
+		"extra spaces":     {raw: " " + scopeRead + "  " + scopeList + " ", want: asked},
+		"a tab between":    {raw: scopeRead + "\t" + scopeList, err: ErrInvalidScope},
+		"a line break":     {raw: scopeRead + "\n" + scopeList, err: ErrInvalidScope},
+		"a quote":          {raw: `tools:"read"`, err: ErrInvalidScope},
+		"a backslash":      {raw: `tools:\read`, err: ErrInvalidScope},
+		"a non-ASCII rune": {raw: "tools:réad", err: ErrInvalidScope},
+		"a no-break space": {raw: scopeRead + " " + scopeList, err: ErrInvalidScope},
+	} {
+		got, err := parseScope(tc.raw)
+		if !errors.Is(err, tc.err) || (tc.err == nil && !slices.Equal(got, tc.want)) {
+			t.Errorf("%s: parseScope(%q) = %q, %v; want %q, %v", name, tc.raw, got, err, tc.want, tc.err)
+		}
+	}
+}
