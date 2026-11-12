@@ -1,8 +1,9 @@
 # Guide
 
-Using limes, one concern at a time. [README.md](../README.md) has the five-minute
-start, [diagrams.md](diagrams.md) draws each path described here, and
-[standards.md](standards.md) maps each to the RFC it follows.
+Using limes, one concern at a time. [README.md](../README.md) has the
+five-minute start, [diagrams.md](diagrams.md) draws each path described
+here, and [standards.md](standards.md) maps each to the RFC it follows.
+Every type, field and limit is in the [API reference](api/README.md).
 
 ## Authorize every call
 
@@ -11,8 +12,8 @@ start, [diagrams.md](diagrams.md) draws each path described here, and
 // DPoP fields, are refused rather than one chosen (RFC 9449 §4.3, §7.2).
 scheme, token, err := limes.ParseAuthorizationValues(r.Header.Values(limes.AuthorizationHeader))
 if err != nil {
-    // No credentials (ErrNoCredentials): 401, a challenge with no error code.
-    // A malformed header, or more than one (ErrMalformedAuthorization): 400.
+    // None (ErrNoCredentials): 401, a challenge with no error code.
+    // Malformed, or more than one (ErrMalformedAuthorization): 400.
     limes.WriteErrorResponse(w, verifier.ErrorResponse(ctx, err, scheme))
     return
 }
@@ -28,87 +29,65 @@ granted, err := verifier.Authorize(ctx, limes.AuthorizeRequest{
         // Needed when the capability is key-bound; ignored when it is not.
         DPoP: dpop.Proof{JWT: proof, Method: r.Method, URL: requestURL},
     },
-    Check: limes.CheckRequest{Op: limes.OpGet, Resource: "corpus/public/report.pdf"},
-    ClientAddr:   clientAddr,
+    Check:      limes.CheckRequest{Op: limes.OpGet, Resource: "corpus/public/report.pdf"},
+    ClientAddr: clientAddr, // netip.Addr
 })
 // verifier.ErrorResponse(ctx, err, scheme) answers a refusal the RFC 6750 /
 // RFC 9449 / RFC 9457 way; or branch on the sentinel yourself:
 switch {
-case errors.Is(err, limes.ErrExpired):          // TTL elapsed
-case errors.Is(err, limes.ErrNotYetValid):      // NotBefore ahead, past Leeway (30s by default)
-case errors.Is(err, limes.ErrRevoked):          // pulled mid-flight
-case errors.Is(err, limes.ErrAudienceMismatch): // token for another service
-case errors.Is(err, limes.ErrCaveatViolation):  // not allowed to do this
+case errors.Is(err, limes.ErrExpired):           // TTL elapsed
+case errors.Is(err, limes.ErrNotYetValid):       // NotBefore ahead, past Leeway (30s by default)
+case errors.Is(err, limes.ErrRevoked):           // pulled mid-flight
+case errors.Is(err, limes.ErrAudienceMismatch):  // token for another service
+case errors.Is(err, limes.ErrCaveatViolation):   // not allowed to do this
 case errors.Is(err, limes.ErrProofOfPossession): // no valid proof that the bearer holds the key
-case errors.Is(err, limes.ErrInvalidToken): // forged, or not this verifier's to accept
-case errors.Is(err, jwks.ErrUnavailable):  // the issuer's keys out of reach: the server's trouble, not the token's
+case errors.Is(err, limes.ErrInvalidToken):      // forged, or not this verifier's to accept
+case errors.Is(err, jwks.ErrUnavailable):        // the issuer's keys out of reach: the server's fault
 }
-// Every refusal Verify or Authorize returns — and ParseAuthorizationValues's
-// ErrNoCredentials — also matches ErrUnauthenticated: the one check for
-// "answer 401". SingleProof's dpop.ErrInvalid does not, though ErrorResponse
-// answers it 401. ErrMalformedAuthorization does not either: it is a bad
-// request, and matches ErrInvalidRequest.
+// Every refusal Verify or Authorize returns, and ErrNoCredentials, also
+// matches ErrUnauthenticated: the one check for "answer 401". SingleProof's
+// dpop.ErrInvalid does not, though ErrorResponse answers it 401.
+// ErrMalformedAuthorization does not either: it matches ErrInvalidRequest.
 ```
 
-`Verify` and `Authorize` return a `VerifiedCapability`: what the token
-grants, which only the verifier makes. `granted.Capability()` is a copy of
-the `Capability` to read — `cap` below — and `Issuer.Delegate` takes the
-`VerifiedCapability` itself, so a parent is always one the verifier checked.
+`Verify` and `Authorize` return a `VerifiedCapability`, which only the
+verifier makes. `granted.Capability()` is a copy of the `Capability` to
+read; `Issuer.Delegate` takes the `VerifiedCapability` itself, so a parent
+is always one the verifier checked.
 
-`Authorize` is `Verify` — the token itself — followed by every caveat that
-needs no state: the operation, the resource, the idempotency key, the tainted
-read and the client's address. Request and budget limits are counted by the
-`Meter` (below), inside your own transaction. Call `Verify` alone only where
-there is no operation to check, such as before a delegation.
+`Authorize` is `Verify` plus every caveat that needs no state: the
+operation, the resource, the idempotency key, the tainted read and the
+client's address. The `Meter` counts request and budget limits, inside your
+own transaction ([Charge against the budget](#charge-against-the-budget)).
+Call `Verify` alone only where there is no operation to check, such as
+before a delegation.
 
-Verification is **local** — the signature is checked against the resolved key,
-with no round trip to the issuer, and nothing in the claims is read until it
-has. Every rejection is a distinct sentinel; map each to whatever status your
-transport uses, or let `ErrorResponse` answer it the HTTP way: status, challenge and an
-RFC 9457 body carrying the error's code ([Answer a refusal](#answer-a-refusal)).
+Verification is local: the signature is checked against the resolved key,
+with no call to the issuer, before any claim is read. Each refusal is a
+distinct sentinel. Map it to your transport's status, or let
+`ErrorResponse` answer it over HTTP ([Answer a refusal](#answer-a-refusal)).
 
-The token must be typed `at+jwt` (`limes.TokenType`), signed under a kid in
-limes's namespace (`jwks.KeyIDPrefix`), with `limes_v` the format the
-package reads, a `client_id`, a tenant and a principal of a
-known kind (`PrincipalTypeUser`, `PrincipalTypeAgent` or `PrincipalTypeService`; agent
-details only on an agent — `Principal.Validate`, which `Issue` and `Delegate`
-run too; an agent's `AgentPrincipal` — `AgentType`, `AgentVersion`, `RunID`,
-`ParentRunID`, `Model`, `MCPClient` — is signed into the token for audit and
-lineage, and none of it is a caveat), its claims must
-hold no member the verifier does not know (a caveat it could not enforce),
-none twice and none in another case, and may be at most
-`VerifierConfig.MaxTokenBytes` long (16 KiB unless set). When several issuers share a verifier, set
-`KeyIssuers` (kid → issuer) so one issuer's key cannot sign for another —
-or, for issuers that do share one trust boundary, `SharedKeys: true`; a
-verifier trusting several issuers with neither is refused — an empty map
-binds nothing, the same as none — and so is one setting both.
-Verifiers running apart from the issuer resolve keys with `jwks.Remote`.
-It fetches the issuer's JWKS on first use, keeps it as `Cache-Control`
-allows within `MinRefreshInterval` (10s) and `RefreshInterval` (5m),
-revalidates by ETag, and picks up a new kid on first sight (at most once per
-`MinRefreshInterval`). A known key past freshness but within `MaxStale` (1h)
-is served at once and refreshed behind it, so a slow endpoint delays no
-request. A fetch runs apart from the caller, bounded by
-`jwks.DefaultFetchTimeout`.
+The verifier accepts a token only when:
 
-It returns `jwks.ErrUnavailable` — the server's fault, matching no
-`ErrUnauthenticated` sentinel — when it holds no set within `MaxStale`, when
-a caller gives up waiting with none, and for a kid the held set lacks while
-the endpoint is failing (it may be one rotated in since). A document with no
-usable entry counts as a failed fetch, so the last good set stays in
-service. The URL must be `https`, and a redirect off its origin is not
-followed: whoever answers the fetch chooses the keys every token is checked
-against. The intervals must nest (`MinRefreshInterval` ≤ `RefreshInterval`
-≤ `MaxStale`):
+- it is typed `at+jwt` (`limes.TokenType`) and at most
+  `VerifierConfig.MaxTokenBytes` long (16 KiB by default);
+- its kid is in limes's namespace (`jwks.KeyIDPrefix`);
+- `limes_v` names a format this package reads, and the claims carry a
+  `client_id`, a tenant and a principal of a known kind
+  (`PrincipalTypeUser`, `PrincipalTypeAgent` or `PrincipalTypeService`,
+  with agent details only on an agent: `Principal.Validate`, which `Issue`
+  and `Delegate` run too);
+- the claims hold no member the verifier does not know (a caveat it could
+  not enforce), none twice and none in another case.
 
-```go
-keys, err := jwks.NewRemote(jwks.RemoteConfig{
-    URL: "https://issuer.example.com/.well-known/jwks.json",
-})
-verifier, err := limes.NewVerifier(limes.VerifierConfig{
-    Keys: keys, Revocations: revocations, TrustedIssuers: []string{"my-issuer"},
-})
-```
+An agent's `AgentPrincipal` — `AgentType`, `AgentVersion`, `RunID`,
+`ParentRunID`, `Model`, `MCPClient` — is signed into the token for audit
+and lineage. None of it is a caveat.
+
+When one verifier trusts several issuers, set `KeyIssuers` (kid → issuer)
+so one issuer's key cannot sign for another, or `SharedKeys: true` for
+issuers in one trust boundary. `NewVerifier` refuses several issuers with
+neither (an empty map counts as none), and refuses both together.
 
 Every constructor in this guide — `NewVerifier`, `jwks.NewRemote`,
 `jwks.NewHandler`, `dpop.NewVerifier`, `dpop.NewHMACNonces`,
@@ -116,34 +95,67 @@ Every constructor in this guide — `NewVerifier`, `jwks.NewRemote`,
 them — refuses a config it cannot work with as `limes.ErrInvalidConfig`
 (code `invalid_config`, 500): the deployment's to fix, not the caller's.
 
-The issuer serves that document with `jwks.NewHandler` — `application/jwk-set+json`,
-a strong ETag answering `If-None-Match` with 304, `Cache-Control: public,
-max-age` in whole seconds (`DefaultMaxAge` unless `MaxAge` says otherwise;
-`Revalidate` serves `no-cache` and excludes a `MaxAge`; a negative `MaxAge`,
-or one under a second, is refused) — over a function returning its keys, such as
-`jwks.Static.Keys`:
+### Resolve the issuer's keys
+
+A verifier running apart from the issuer resolves keys with `jwks.Remote`:
+
+```go
+keys, err := jwks.NewRemote(jwks.RemoteConfig{
+    URL: "https://issuer.example.com/.well-known/jwks.json", // https only
+})
+verifier, err := limes.NewVerifier(limes.VerifierConfig{
+    Keys: keys, Revocations: revocations, TrustedIssuers: []string{"my-issuer"},
+})
+```
+
+- **Fetch.** On first use, then as the response's `Cache-Control` allows,
+  within `MinRefreshInterval` (10s) and `RefreshInterval` (5m). It
+  revalidates by ETag. The intervals must nest: `MinRefreshInterval` ≤
+  `RefreshInterval` ≤ `MaxStale`.
+- **New kid.** Fetched on first sight, at most once per
+  `MinRefreshInterval`.
+- **Slow endpoint.** A known key past freshness but within `MaxStale` (1h)
+  is served at once and refreshed behind it. A fetch runs apart from the
+  caller, bounded by `jwks.DefaultFetchTimeout`.
+- **Failure.** `jwks.ErrUnavailable` — the server's fault, matching no
+  `ErrUnauthenticated` sentinel — when no set is held within `MaxStale`,
+  when a caller gives up waiting with none, and for a kid the held set
+  lacks while the endpoint is failing (it may be newly rotated in). A
+  document with no usable entry counts as a failed fetch, so the last good
+  set stays in service.
+- **Origin.** A redirect to another scheme or host is refused: whoever
+  answers the fetch chooses the keys every token is checked against.
+
+The issuer serves the document with `jwks.NewHandler` over a function
+returning its keys, such as `jwks.Static.Keys`:
 
 ```go
 h, err := jwks.NewHandler(jwks.HandlerConfig{Keys: resolver.Keys, MaxAge: time.Minute})
 mux.Handle("/.well-known/jwks.json", h)
 ```
 
-`jwks.Marshal` writes the same document for a server of your own; `jwks.Parse`
-reads one back, for a resolver of your own. It skips an entry it cannot use — a foreign
-`kty` or `alg`, no kid, a `use` other than `sig` or a `key_ops` without `verify`,
-a malformed key, a member of the wrong JSON type — rather than refusing the set,
-so one bad entry does not take every other key out of service mid-rotation. Two
-Ed25519 keys naming one kid are both skipped: which one signs is not for the
-reader to guess. A document that is not JSON, names a member twice, or has no
-`"keys"` array is refused; only `{"keys":[]}` withdraws every key.
+It serves `application/jwk-set+json` with a strong ETag (304 on a matching
+`If-None-Match`) and `Cache-Control: public, max-age` in whole seconds
+(`DefaultMaxAge` unless `MaxAge` says otherwise). `Revalidate` serves
+`no-cache` instead and excludes `MaxAge`; a negative `MaxAge`, or one under
+a second, is refused.
+
+`jwks.Marshal` writes the same document for a server of your own;
+`jwks.Parse` reads one for a resolver of your own. `Parse` skips an entry
+it cannot use — a foreign `kty` or `alg`, no kid, a `use` other than `sig`
+or `key_ops` without `verify`, a malformed key, a member of the wrong JSON
+type — so one bad entry does not take every other key out of service
+mid-rotation. Two Ed25519 keys naming one kid are both skipped. A document
+that is not JSON, names a member twice, or has no `"keys"` array is
+refused; only `{"keys":[]}` withdraws every key.
 
 ### Tell a capability from an identity provider's token
 
-A route that accepts both a capability and the identity provider's own
-access token cannot tell them apart by type: both are `at+jwt` (RFC 9068).
-`limes.HasLimesKeyID(token)` reads the header alone and answers whether
-its kid is in limes's namespace (`jwks.KeyIDPrefix`, `limes:`); route on it,
-and let the verifier it picks decide:
+A capability and an identity provider's access token are both `at+jwt`
+(RFC 9068), so a route accepting both cannot tell them apart by type.
+`limes.HasLimesKeyID(token)` reads the header alone and reports whether its
+kid is in limes's namespace (`limes:`). Route on it, and let the chosen
+verifier decide:
 
 ```go
 if limes.HasLimesKeyID(token) {
@@ -158,37 +170,31 @@ if limes.HasLimesKeyID(token) {
 }
 ```
 
-It verifies nothing and is never an authorization decision — a forged token
-names any kid it likes — so each branch verifies in full. Routing cannot be
-turned into a way in:
+`HasLimesKeyID` verifies nothing — a forged token names any kid — so each
+branch verifies in full, and routing opens no way in:
 
-- **An access token sent to `Verifier.Verify` is refused before any key is
-  looked up.** A kid outside the namespace names no key a limes issuer signs
-  with (`NewSigner` refuses one).
-- **A token that names a limes kid still needs** a signature under a key the
-  verifier holds, a trusted issuer, and claims read strictly, `limes_v`
-  among them.
-- **The other way, a capability routed to the provider's verifier is
-  refused there,** since its issuer and keys are not the provider's.
-- **`inspect.Decode` is for tooling,** not routing: it reads the claims
-  without verifying them.
+- `Verifier.Verify` refuses a token whose kid is outside the namespace
+  before looking up a key; `NewSigner` refuses such a kid too.
+- A token naming a limes kid still needs a signature under a key the
+  verifier holds, a trusted issuer, and claims read strictly.
+- A capability routed to the provider's verifier is refused there: its
+  issuer and keys are not the provider's.
 
 ### Inspect a token without trusting it
 
-`inspect.Decode` reads a JWT's claims, refusing only one that is malformed or
-longer than `inspect.MaxTokenBytes` —
-it checks no signature, time, audience or revocation; `inspect.VerifySignature`
-checks only its signature against one key. They live in a package of their
-own so they are never mistaken for the API that authorises. Both are for tooling — showing what a
-token grants, or which key signed it. Neither applies expiry, audience or
-revocation, so never authorise a request on either: that is `Verify`.
+`inspect.Decode` reads a token's claims; `inspect.VerifySignature` checks
+only its signature against one key. Both refuse a malformed token or one
+longer than `inspect.MaxTokenBytes`, and check no expiry, audience,
+revocation or proof. They are for tooling — showing what a token grants,
+or which key signed it — and live in a package of their own so they are
+never mistaken for authorization. Authorize only on `Verify`.
 
 ## Enforce the caveats on every operation
 
-Verification proves the token is genuine; it does not know what the bearer is
-about to do. `Authorize` asks the caveats for you; code that checks a second
-operation under a capability it already verified asks them directly, through
-the same one definition:
+Verification proves a token genuine; it does not know what the bearer is
+about to do. `Authorize` checks the caveats for you. Code that checks a
+further operation under a capability it already verified calls the same
+checks directly:
 
 ```go
 if err := cap.Caveats.CheckSource(clientAddr); err != nil { /* per connection: limes.ErrSourceIPNotAllowed */ }
@@ -208,32 +214,34 @@ case errors.Is(err, limes.ErrTaintedReadNotAllowed):
 // every one of these also matches limes.ErrCaveatViolation
 ```
 
-Resource prefixes match at a `/` segment boundary: `corpus/public` covers
-`corpus/public/x` but not `corpus/public-secret`. An operation that cannot name
-its resource (`Resource: ""`) is refused by a resource-restricted capability —
-for an operation over a set, pass the prefix that bounds the set. A resource
-with a `.` or `..` segment, plain or percent-encoded once or twice, is refused by a
-resource-restricted capability and by `Validate`: what it names depends on how
-you resolve it, not on its text. Pass the resource as your storage will
-address it.
+Resources:
 
-To name resources by the start of their names rather than whole segments,
-use `ResourceNamePrefixes`: `drafts/billing-` covers `drafts/billing-q3`
-and `drafts/billing-q3/notes`, and not `drafts/billing`. The match is a
-plain string prefix, across segments, with the same refusal of dot
-segments. A child names a name prefix only within its parent's: one the
-parent's name prefix starts, or one past a parent segment prefix's
-boundary (`a/` under `a`, never `a` itself, which names `ab`).
-`AllowTaintedRead` can only act on a taint signal you supply; if you track
-none, it protects nothing, and you should say so.
+- **`ResourcePrefixes`** match at a `/` segment boundary: `corpus/public`
+  covers `corpus/public/x`, not `corpus/public-secret`.
+- **`ResourceNamePrefixes`** match as plain string prefixes, across
+  segments: `drafts/billing-` covers `drafts/billing-q3` and
+  `drafts/billing-q3/notes`, not `drafts/billing`. A child's name prefix
+  must start with one of its parent's, or lie past a parent segment
+  prefix's boundary (`a/` under `a`; never `a`, which names `ab`).
+- **`ResourceURIs`** pin exact resources.
+- **No resource.** A resource-restricted capability refuses
+  `Resource: ""`. For an operation over a set, pass the prefix that bounds
+  the set.
+- **Dot segments.** A resource with a `.` or `..` segment, plain or
+  percent-encoded once or twice, is refused by a resource-restricted
+  capability and by `Validate`: what it names depends on how you resolve
+  it. Pass the resource as your storage will address it.
 
-The built-in operations are the ones every resource server shares: `get`,
-`put`, `list`, `delete`, `share` and `manage`. Your own operations — searching
-an index, computing embeddings — are namespaced (`tool:retrieve`, `mcp:github/create_issue`)
-and are treated as writes unless you declare otherwise, so an undeclared one
-needs an idempotency key under `IdempotencyKeyRequired` and is never refused as
-a tainted read. Declare the effect where you define the operation — a method
-option, a tool registry — and pass it on every check:
+`AllowTaintedRead` acts only on a taint signal you supply. If you track
+none, it protects nothing.
+
+The built-in operations are those every resource server shares: `get`,
+`put`, `list`, `delete`, `share` and `manage`. Your own operations are
+namespaced (`tool:retrieve`, `mcp:github/create_issue`) and count as writes
+unless declared otherwise: an undeclared one needs an idempotency key under
+`IdempotencyKeyRequired`, and is never refused as a tainted read. Declare
+the effect where you define the operation — a method option, a tool
+registry — and pass it on every check:
 
 ```go
 err := cap.Caveats.Check(limes.CheckRequest{
@@ -243,77 +251,76 @@ err := cap.Caveats.Check(limes.CheckRequest{
 })
 ```
 
-A built-in operation keeps its own effect: declaring `put` a read returns
-`ErrEffectConflict`, a programming error rather than a caveat violation. Gate
-anything else on the effect through `CheckRequest.Mutating`, so it and `Check`
-cannot disagree.
+A built-in operation keeps its own effect: declaring `put` a read is
+`ErrEffectConflict`, a programming error (`ErrInvalidRequest`), not a
+caveat violation. Gate anything else on the effect through
+`CheckRequest.Mutating`, so it and `Check` cannot disagree.
 
 ## Delegate — attenuate, never escalate
 
-An orchestrator narrows its own authority and hands the result to a worker it
-spawned, without calling back to any admin API:
+An orchestrator narrows its own authority and hands the result to a worker
+it spawned, with no call to an admin API:
 
 ```go
 delegated, err := issuer.Delegate(ctx, limes.DelegateRequest{ // .Capability, .Token
-    Parent:  granted,                   // as the verifier accepted it
+    Parent:  granted, // as the verifier accepted it
     Subject: limes.Principal{Type: limes.PrincipalTypeAgent, Subject: "sub-worker"},
     TTL:     2 * time.Minute,
     Caveats: limes.Caveats{
-        Ops:              []limes.Op{limes.OpGet},  // dropped OpShare
-        ResourcePrefixes: []string{"corpus/public/2026/"},     // narrowed
-        Requests:         limes.RequestCeiling{Max: 50},                         // 500 → 50
-        Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("2.00")}, // 25.00 → 2.00, in the parent's USD
+        Ops:              []limes.Op{limes.OpGet},                                // dropped OpShare
+        ResourcePrefixes: []string{"corpus/public/2026/"},                        // narrowed
+        Requests:         limes.RequestCeiling{Max: 50},                          // 500 → 50
+        Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("2.00")}, // 25.00 → 2.00, in the parent's unit
     },
 })
 ```
 
-A ceiling's zero value allows nothing: a capability that should make requests
-or spend names a `Max`, or `Unlimited: true` to lift the ceiling, and so does
-one whose Biscuit copies should carry limits of their own (`Copies`, a
-`CopyQuota`) — so a ceiling left out fails closed instead of opening up.
-`Issue` and `Delegate` refuse a capability whose `Requests` allows none, as
-`ErrInvalidCaveats`: no request could ever use it. A zero `Budget` stands, a
-capability that may not spend.
+A ceiling's zero value allows nothing. A capability that should make
+requests, spend, or count Biscuit copies with limits of their own
+(`Copies`, a `CopyQuota`) names a `Max`, or `Unlimited: true`. A ceiling
+left out thus fails closed. `Issue` and `Delegate` refuse `Requests` that
+allow none (`ErrInvalidCaveats`): no request could use the capability. A
+zero `Budget` stands: a capability that may not spend.
 
-**The rule**: only a parent granted `OpShare` may delegate — without it,
-`ErrOpNotAllowed` — and a child may only be narrower. `Issuer.Biscuit`
-needs no `OpShare`: a copy attenuated from the form allows no more than the
-capability, whose bearer token could be handed on as it is, and a copy with
-limits of its own is counted against `Copies`. So withholding `OpShare` no
-longer keeps a capability JWT-only: an endpoint of yours that turns a
-verified capability into its Biscuit form decides itself whom it serves. Ask for an operation the parent
-lacks, a wider scope, a bigger budget, a larger copy quota, a wider audience or another tenant —
-or drop the parent's key binding or `IdempotencyKeyRequired`, or grant an
-`AllowTaintedRead` it lacks — and you get `ErrDelegationTooWide`; a
-TTL that would outlive the parent is cut to the parent's expiry, and a child
-starts no earlier than its parent (its `NotBefore`, else its issuance). Ask for a budget in a different `UnitCode` and
-you get `ErrUnitCodeMismatch` — units are never converted; name none and the
-child takes its parent's. Each child resource must be
-reachable by the parent (a parent pinned to exact URIs admits no child
-prefix), and each child network must lie inside a parent network.
+**Only a parent granted `OpShare` may delegate** (else `ErrOpNotAllowed`),
+and a child may only be narrower. `ErrDelegationTooWide` refuses a child
+that asks for an operation the parent lacks, a wider resource scope, a
+bigger budget or request ceiling, a larger copy quota, a wider audience or
+another tenant; that drops the parent's key binding or
+`IdempotencyKeyRequired`; or that grants an `AllowTaintedRead` the parent
+lacks. Each child resource must be reachable by the parent (a parent
+pinned to `ResourceURIs` admits no child prefix), and each child network
+must lie inside a parent network.
 
-To hand a child exactly the parent's caveats, say so with
-`InheritCaveats: true`; caveats without any `Ops` are rejected rather than
-silently replaced by the parent's. A parent that has expired (`ErrExpired`),
-that is revoked, itself or any ancestor (`ErrRevoked`), or whose issuer is not
-this one (`ErrInvalidRequest`: its `iss` is not `IssuerConfig.IssuerName`)
-cannot delegate; neither can one read from a Biscuit copy, whose holder
-attenuates it instead.
+- **Time.** A TTL that would outlive the parent is cut to the parent's
+  expiry. A child starts no earlier than its parent (its `NotBefore`, else
+  its issuance).
+- **Unit.** A budget in another `UnitCode` is `ErrUnitCodeMismatch`; units
+  are never converted. A budget naming no unit takes the parent's.
+- **Inheriting.** `InheritCaveats: true` copies the parent's caveats.
+  Caveats with no `Ops` are refused, never read as "inherit".
+- **Parents that cannot delegate.** One expired (`ErrExpired`), revoked
+  itself or through an ancestor (`ErrRevoked`), issued by another issuer
+  (`ErrInvalidRequest`: its `iss` is not `IssuerConfig.IssuerName`), or read
+  from a Biscuit copy (`ErrInvalidRequest`; its holder attenuates instead).
 
-Narrowing bounds each child. The tree as a whole is bounded at use: every
-charge and request also counts against each ancestor, so a parent holding
-25.00 that delegates 20.00 to each of two workers can still spend 25.00 in
-total, not 40.00.
+`Issuer.Biscuit` needs no `OpShare`: a copy attenuated from the Biscuit
+form allows no more than the capability, whose bearer token could be handed
+on as it is, and a copy with limits of its own counts against `Copies`. So
+withholding `OpShare` does not keep a capability JWT-only: an endpoint that
+turns a verified capability into its Biscuit form decides itself whom it
+serves.
 
-This is the property that makes the model safe to hand to an agent: it can
-attenuate itself, but never escalate.
+Narrowing bounds each child; use bounds the tree. Every charge and request
+also counts against each ancestor, so a parent holding 25.00 that delegates
+20.00 to each of two workers still spends at most 25.00 in total, not
+40.00. An agent can attenuate itself, but never escalate.
 
 ## Bind a capability to a key (DPoP)
 
-A capability is a bearer token unless it is bound: whoever holds it can use
-it, and an agent's tokens end up in prompts, tool output and logs. Binding it
-to a key the agent keeps — RFC 9449 DPoP — makes a copy useless without the
-key:
+An unbound capability is a bearer token: whoever holds it can use it, and
+an agent's tokens end up in prompts, tool output and logs. Binding it to a
+key the agent keeps — RFC 9449 DPoP — makes a copy useless without the key:
 
 ```go
 jkt, _ := dpop.Thumbprint(agentKey.Public()) // Ed25519 or P-256
@@ -336,61 +343,76 @@ granted, err := verifier.Verify(ctx, limes.VerifyRequest{
 })
 ```
 
-Behind several replicas, give the `dpop.Verifier` server nonces, with the same
-key on every replica:
+The token carries the thumbprint as `cnf.jkt` (RFC 7800). A delegated
+child keeps its parent's binding or takes the sub-agent's own key; `Narrows`
+refuses a child that drops it.
+
+`Verify` refuses a proof:
+
+- signed by another key, or for another token;
+- for another method (compared exactly: `post` is not `POST`) or URL;
+- issued outside `dpop.VerifierConfig.Window` (a minute by default) of the
+  verifier's clock;
+- seen before.
+
+Each refusal matches `ErrProofOfPossession` and its own `dpop` sentinel. A
+replay cache or nonce store that cannot answer returns its own error: an
+outage, never a refused proof.
+
+A verifier with no `DPoP` refuses every key-bound capability with
+`ErrProofUnsupported` rather than accept it as a bearer token, so a binding
+cannot be lost to a forgotten line of config. That is the deployment's
+fault: it matches no `ErrUnauthenticated` sentinel and is answered 500.
+
+`dpop.Proof.URL` is the absolute URL the client addressed, scheme and host
+included. Behind a proxy that rewrites the host or strips a mount prefix,
+or on a server that sees only the path, set
+`dpop.VerifierConfig.MatchPathOnly`: the server's side of the comparison
+then drops scheme, host and prefix. The proof's `htu` must still be an
+absolute URI, and the root path `/` must match exactly.
+
+### Present it under the right scheme
+
+`ParseAuthorization` reads `Authorization: DPoP <token>` or `Bearer <token>`
+(the scheme in any case, the token as a token68). With
+`VerifyRequest.Scheme` set, `Verify` refuses a key-bound token presented as
+`Bearer` — a downgrade — or an unbound one presented as `DPoP`, with
+`ErrAuthSchemeMismatch`.
+
+- No header, or one under another scheme: `ErrNoCredentials` (401, a
+  challenge with no error code).
+- A `Bearer` or `DPoP` header whose credential is not a token68:
+  `ErrMalformedAuthorization` (400). It matches `ErrInvalidRequest`, whose
+  other members `ErrorResponse` answers 500, as the server's own mistakes.
+- A token from no `Authorization` header — gRPC metadata, a message field —
+  goes in with `AuthSchemeUnspecified`, the zero `Scheme`: no scheme is
+  checked, but a key-bound token still needs its proof.
+
+### Several replicas
+
+Behind several replicas, give the `dpop.Verifier` server nonces, with the
+same key on every replica:
 
 ```go
-nonces, err := dpop.NewHMACNonces(dpop.HMACNoncesConfig{Keys: dpop.SealNonceKeys(key)}) // at least dpop.HMACNonceKeyBytes
+nonces, err := dpop.NewHMACNonces(dpop.HMACNoncesConfig{Keys: dpop.SealNonceKeys(key)}) // each key ≥ dpop.HMACNonceKeyBytes
 proofs, err := dpop.NewVerifier(dpop.VerifierConfig{Replay: replay, Nonces: nonces})
 ```
 
 A proof must then carry a nonce the server issued, so it cannot be signed
-ahead of time; a refusal with `dpop.ErrNonceRequired` carries a fresh nonce in
-the `DPoP-Nonce` header for the client to retry with (RFC 9449 §8) —
-`ErrorResponse` sets it, or call `verifier.DPoPNonce(ctx)` yourself. The first key signs and every key checks, so rotate by
-putting a new key first.
+ahead of time. A refusal with `dpop.ErrNonceRequired` carries a fresh nonce
+in the `DPoP-Nonce` header for the client to retry with (RFC 9449 §8):
+`ErrorResponse` sets it, or call `verifier.DPoPNonce(ctx)`. The first key
+signs and every key checks, so rotate by putting a new key first.
 
-Present a token under the scheme its binding calls for: `ParseAuthorization`
-reads `Authorization: DPoP <token>` or `Bearer <token>` (the scheme in any
-case, the token as a token68), and with `VerifyRequest.Scheme` set, `Verify`
-refuses a key-bound token presented as `Bearer` — a downgrade — or an unbound
-one presented as `DPoP`, with `ErrAuthSchemeMismatch`. No header, or one
-under another scheme, is `ErrNoCredentials` (401, a challenge with no error
-code); a
-Bearer or DPoP header whose credential is not a token68 is
-`ErrMalformedAuthorization` (400), which matches `ErrInvalidRequest` as
-every malformed request does — though `ErrorResponse` answers the rest of
-that family 500, as the server's own call. A token that came from no `Authorization`
-header — gRPC metadata, a message field — goes in with `AuthSchemeUnspecified`,
-the zero `Scheme`: no scheme is checked, but a key-bound token still needs its
-proof.
+`dpop.MemoryReplayCache` is in-process and bounded: at most
+`dpop.DefaultReplayCacheEntries` (100 000) ids, and
+`dpop.DefaultReplayEntriesPerHolder` (1 000) per capability, so one
+capability — whatever keys its copies are bound to — cannot fill it and
+lock the others out. Full, it refuses rather than forgets. Across replicas,
+a proof replayed to another replica inside the window is caught only by
+server nonces or by a `dpop.ReplayCache` over a shared store.
 
-A verifier with no `DPoP` refuses every key-bound capability with
-`ErrProofUnsupported` instead of accepting it as a bearer token, so a binding
-cannot be lost to a forgotten call. It is the deployment's fault, not the
-request's: it matches no `ErrUnauthenticated` sentinel and is answered 500. `dpop.Proof.URL` is the absolute URL the
-client addressed, scheme and host included. Behind a proxy that rewrites the
-host or strips a mount prefix, or for a server that sees only the path, set
-`dpop.VerifierConfig.MatchPathOnly`: only the server's side of the comparison then
-drops scheme, host and prefix — the proof's `htu` must still be an absolute
-URI, and a request to the root path `/` must match it exactly.
-
-The token carries the thumbprint as `cnf.jkt` (RFC 7800), absent from an
-unbound token. A delegated
-child inherits its parent's binding or takes the sub-agent's own key, and
-`Narrows` refuses a child that drops it. `Verify` refuses a proof from another
-key, for another method (compared exactly: `post` is not `POST`), URL or token, outside `dpop.VerifierConfig.Window` (a
-minute by default) of the verifier's clock, or seen before; every refusal
-matches `ErrProofOfPossession` as `Verify` returns it, and still matches its
-`dpop` sentinel. A replay cache or nonce store that cannot answer is an outage
-instead, its own error, never a refused proof. `dpop.MemoryReplayCache` is in-process and bounded
-— `dpop.DefaultReplayCacheEntries` (100 000) ids, and `dpop.DefaultReplayEntriesPerHolder` (1 000) per
-capability, so one capability, whatever keys its copies are bound to, cannot
-fill it and lock the others out; full, it refuses
-rather than forgets:
-behind several replicas, a proof replayed to a different one inside the
-window is caught only by server nonces or a `dpop.ReplayCache` over a shared
-store. The `redisreplay` module is one, over Redis, a module of its own so
+The `redisreplay` module is one, over Redis. It is a module of its own, so
 limes never resolves a Redis client:
 
 ```go
@@ -398,14 +420,14 @@ limes never resolves a Redis client:
 replay, err := redisreplay.New(redisreplay.Config{Client: rdb}) // any redis.UniversalClient
 ```
 
-Run it with `maxmemory-policy noeviction`, and keep `Window` short or
-require server nonces where a failover replaying a proof once matters: the
-key layout, the clock it decides by and why are in
+Run Redis with `maxmemory-policy noeviction`. Where a failover replaying
+a proof once matters, keep `Window` short or require server nonces. The key
+layout and the clock it decides by are in
 [its reference](api/dpop.md#package-redisreplay).
 
-A deployment that runs pgstore already can keep the ids in PostgreSQL
-instead, one table every replica shares (`limes.dpop_seen_proofs`, which
-`pgstore/migrate` creates):
+A deployment that runs pgstore can keep the ids in PostgreSQL instead, in
+one table every replica shares (`limes.dpop_seen_proofs`, created by
+`pgstore/migrate`):
 
 ```go
 replay, err := pgstore.NewReplayCache(pgstore.ReplayConfig{DB: pool}) // the runtime role's pool
@@ -419,37 +441,10 @@ for {
 ```
 
 It counts a holder's live ids and records the next under an advisory lock
-on the holder, so concurrent proofs never take it past its share, and a
-holder refused for its share, unlike a replay, is logged at WARN. A database
-that cannot answer refuses the proof with the error. The table has no
+on the holder, so concurrent proofs never pass its share. A holder refused
+for its share, unlike a replay, is logged at WARN. A database that cannot
+answer is an outage: `Verify` returns its error. The table has no
 row-level security: the check runs before any tenant is known.
-
-### The replay cache's share caps a holder's rate
-
-Every replay cache gives each holder the same share of live ids,
-`EntriesPerHolder`, and keeps an id for `Window` plus
-`dpop.ReplayClockSkew`. So one holder passes at most
-
-```text
-proofs per second ≤ EntriesPerHolder / (Window + ReplayClockSkew)
-```
-
-— with the defaults, 1 000 / 65 s, about 15 a second, sustained; a burst of
-up to 1 000 passes at once. Past it a fresh proof is refused with
-`dpop.ErrReplayQuota`, unrecorded, and the cache logs the holder at WARN:
-the code is `proof_quota_exceeded`, 429, category `exhausted`, never a
-replay. The holder is the capability at a resource server, and the client
-at the exchange's token endpoint (`Request.Client.ID`), so there it caps
-how many DPoP-bound exchanges one client makes a second — a busy client
-meets it first.
-
-To raise it, raise `EntriesPerHolder` (and, for `dpop.MemoryReplayCache`,
-`MaxEntries` with it: a whole cache full refuses every holder), or shorten
-`Window`, which also narrows how far a client's clock may drift. The share
-also bounds what one holder costs the cache, so raise it for the busiest
-holder you expect, not without bound.
-
-Which to pick:
 
 | Verifier | Replay cache |
 |---|---|
@@ -457,23 +452,50 @@ Which to pick:
 | Several replicas, with pgstore | `pgstore.ReplayCache` |
 | Several replicas, with Redis and not pgstore, or a proof rate PostgreSQL should not carry | `redisreplay` |
 
-A deployment that kept proof ids in a table of its own can switch to
-`pgstore.ReplayCache` and drop that table: an id lives for the proof window
-alone, so the new table can start empty. A proof accepted by the old table
-in the last window could be replayed once to the new one; switch with every
-replica at once, or require server nonces across the switch.
+To move proof ids from a table of your own to `pgstore.ReplayCache`, drop
+that table: an id lives for the proof window alone, so the new table can
+start empty. A proof accepted by the old table in the last window could be
+replayed once to the new one, so switch every replica at once, or require
+server nonces across the switch.
+
+### The replay cache's share caps a holder's rate
+
+Every replay cache gives each holder the same share of live ids,
+`EntriesPerHolder`, and keeps an id for `Window` plus
+`dpop.ReplayClockSkew` (5s). So one holder passes at most
+
+```text
+proofs per second ≤ EntriesPerHolder / (Window + ReplayClockSkew)
+```
+
+With the defaults that is 1 000 / 65 s, about 15 a second sustained; a
+burst of up to 1 000 passes at once. Past it a fresh proof is refused with
+`dpop.ErrReplayQuota`, unrecorded, and the cache logs the holder at WARN.
+The code is `proof_quota_exceeded`, 429, category `exhausted` — never a
+replay.
+
+The holder is the capability at a resource server, and the client
+(`Request.Client.ID`) at the exchange's token endpoint. There it caps how
+many DPoP-bound exchanges one client makes a second, so a busy client meets
+it first.
+
+To raise it, raise `EntriesPerHolder` (and, for `dpop.MemoryReplayCache`,
+`MaxEntries` with it: a full cache refuses every holder), or shorten
+`Window`, which also narrows how far a client's clock may drift. The share
+also bounds what one holder costs the cache, so size it for the busiest
+holder you expect, not without bound.
 
 ## Narrow offline (Biscuit)
 
-`Delegate` narrows a capability, but it needs the issuer. The Biscuit form
-of the same capability (Biscuit v3) can be narrowed by whoever holds it, with
-no key and no network, and a narrowing can never be undone. An agent in
+`Delegate` narrows a capability, but needs the issuer. The Biscuit form of
+the same capability (Biscuit v3) can be narrowed by whoever holds it, with
+no key and no network, and a narrowing cannot be undone. An agent in
 another language narrows it with any Biscuit library, writing the facts
 [biscuit-profile.md](biscuit-profile.md) lists.
 
-The form is the module `github.com/oleg-tkachuk/limes/biscuit`, so a service
-of JWT capabilities alone resolves neither biscuit-go nor protobuf. Give
-`biscuit.Form()` to both sides: `IssuerConfig.Biscuit` and
+The form lives in the module `github.com/oleg-tkachuk/limes/biscuit`, so a
+service of JWT capabilities alone resolves neither biscuit-go nor protobuf.
+Give `biscuit.Form()` to both sides: `IssuerConfig.Biscuit` and
 `BiscuitConfig.Form`.
 
 ```go
@@ -493,88 +515,92 @@ worker, _ := biscuit.Attenuate(full.Token, limes.Attenuation{
 granted, err := verifier.Verify(ctx, limes.VerifyRequest{Token: worker, Audience: "my-service"})
 ```
 
-An attenuation block may restrict operations, resources, the audience, the expiry,
-and (on an unbound token) bind a key. The verifier folds each block in
-through `Narrows`, so an attenuated token is checked exactly like a
+An attenuation block may restrict the operations, resources, audience and
+expiry, and bind a key to an unbound token. The verifier folds each block
+in through `Narrows`, so an attenuated token is checked exactly like a
 delegated one. A block that asks for more than the token has, or holds
 anything else (Datalog rules and checks included), makes the whole token
-invalid — `ErrBiscuitAttenuation`, which matches `ErrInvalidToken`; a later
-`ExpiresAt` is ignored rather than refused. An attenuated copy spends its capability's budget and request
-count, and revoking the capability revokes every copy.
+invalid: `ErrBiscuitAttenuation`, which matches `ErrInvalidToken`. A later
+`ExpiresAt` is ignored, not refused. A copy spends its capability's budget
+and request count, and revoking the capability revokes every copy.
 
-A copy can also get limits of its own: `Requests` and `Budget` on the
-`Attenuation` (nil sets none; a ceiling of 0 freezes the copy). A copy's
-`Budget` names no `UnitCode`: it is in its capability's unit, which the block
-does not carry, and the verifier gives it. Each is counted under its capability and the revocation id of the block that
-set it, so siblings narrowed apart count apart, while the capability's own
-limits still bound them all; a limit must fit every limit already in force,
-and an `Unlimited` one is refused: a copy only narrows.
-The verifier hands them to the caller as `VerifiedCapability.Copies`, and the `Meter`
-counts them through the `MeterSubject` the verified capability gives, which
-carries them. A verifier admits such a copy only with
-`BiscuitConfig.MeterCopies` set, which says the `Meter` behind it counts copies; without it
-the token is refused with `ErrCopyCountersNotMetered` rather than accepted
-with its limits unkept — a configuration error, answered as 500, not an
-invalid token, and returned only once the token has passed every other
-check.
-`verifier.BiscuitCopy` names the limits in force on a copy, on any verifier,
-and a `CopyUsageReader` (`memstore` and `pgstore` implement one) reads what each has
-counted: `CopyUsage` takes a `CopyUsageRequest` naming a capability and up to
-`MaxCopyUsageIDs` revocation ids of its copies and returns, in a
-`CopyUsageResult`, the counters of those used; a copy never used is absent. A holder mints copies offline, as many
-as it likes, so the issuer bounds how many a meter counts for the capability
-— `Caveats.Copies`, a `CopyQuota` signed into the token like the request and
-budget ceilings: its zero value counts no copy with limits of its own,
-`CopyQuota{Unlimited: true}` as many as the store allows, and a delegated
-child counts no more than its parent. It bounds the copies of the
-capability and of everything delegated from it together, as the request and
-budget ceilings bound their requests and spend, so delegating does not
-multiply it, and a child's copies stay counted once its usage is dropped. A
-store counts no more than its own bound either —
-`memstore.UsageStoreConfig.MaxCopiesPerCapability` or
-`pgstore.Config.MaxCopiesPerCapability`, `DefaultMaxCopiesPerCapability`
-(1 024) when unset. `Bump`, `Charge` and `Reserve` refuse a call that would
-take the capability's own copies past that bound, or the copies under any
-capability on the chain past its quota, with `ErrCopyLimitExceeded`, a kind
-of `ErrRequestLimitExceeded`, counting nothing. A copy already counted goes on
-being metered. It stays counted under every ancestor once its own
-capability's usage is dropped (`DeleteUsage`, `PurgeOrphans`), as its requests
-and spend do; dropping a capability's own usage restarts its count of copies
-with its other counters.
-A revocation id alone does not name a copy: biscuit-go signs a block without
-the signature before it, so a holder of two Biscuits can graft a block of one
-onto the other, and the same id then turns up under two capabilities. Each
-counts it apart, and neither's metering, refund or deletion reaches the
-other's. A copy cannot delegate — a server-side child would be an ordinary
-token of the capability, which revoking the copy would not reach and the
-copy's limits would not bound — so `Delegate` refuses any capability read
-from a Biscuit (`VerifiedCapability.FromBiscuit`) with
-`ErrInvalidRequest`; its holder attenuates it instead.
-
-One copy can also be revoked on its own. `verifier.BiscuitCopy(ctx, token)`
-checks the token is genuine — but not its expiry, audience or revocation, so a
-copy can be revoked in any state — and returns the copy: its capability and
-the revocation id of its last block, which only it pairs, so a caller cannot
-name another tenant's copy under its own capability. Passing it to
-`Revoker.RevokeBiscuit` (`RevokeBiscuitRequest{Copy: …}`), which a
-`BiscuitRevocationStore` carries out ([Revoke](#revoke)), stops
-that copy and every copy attenuated from it, and leaves the copy it came from,
-its siblings and the capability's JWT working. It is idempotent and returns a
-`RevokeBiscuitResult`: `AlreadyRevoked` when the copy had an entry before the
-call, and the `Revocation` that stands, the first one written.
-`GetBiscuitRevocation` reads it back by the same copy. The revocation belongs to that capability and goes
-only with its record, while a token carrying the id is refused under any
-capability. A verifier that accepts
-Biscuits needs `BiscuitConfig.Revocations`: pass the same `RevocationCache`
+`BiscuitConfig.Revocations` is required: pass the same `RevocationCache`
 as `VerifierConfig.Revocations`, built with the store as
 `RevocationCacheConfig.Biscuits` too, so one `Clear` reaches both kinds of
 answer. `NewVerifier` refuses a cache built without it.
 
-The Biscuit seals an ordinary signed token, so a KMS-held signing key works.
-That token carries the root of the Biscuit's signature chain, whose private
-half is discarded once the Biscuit is built. A sealed token presented on its
-own is refused, so it cannot be lifted out to shed an attenuation, and it
-cannot be re-wrapped in a fresh Biscuit.
+The Biscuit seals an ordinary signed token, so a KMS-held signing key
+works. That token carries the root of the Biscuit's signature chain, whose
+private half is discarded once the Biscuit is built. A sealed token
+presented on its own is refused, so it cannot be lifted out to shed an
+attenuation, and it cannot be re-wrapped in a fresh Biscuit.
+
+### A copy's own limits
+
+`Attenuation.Requests` and `Attenuation.Budget` give a copy limits of its
+own (nil sets none; a ceiling of 0 freezes the copy). A copy's `Budget`
+names no `UnitCode`: it is in its capability's unit, which the verifier
+supplies. Each limit is counted under the capability and the revocation id
+of the block that set it, so siblings narrowed apart count apart while the
+capability's own limits still bound them all. A limit must fit every limit
+already in force, and an `Unlimited` one is refused: a copy only narrows.
+
+- **Admitting them.** A verifier admits such a copy only with
+  `BiscuitConfig.MeterCopies` set, which says the `Meter` behind it counts
+  copies. Without it the token is refused with `ErrCopyCountersNotMetered`
+  — a configuration error, answered 500 — once it has passed every other
+  check.
+- **Counting them.** The verifier returns the limits as
+  `VerifiedCapability.Copies`, and `MeterSubject()` carries them to the
+  `Meter`. `verifier.BiscuitCopy` names the limits in force on a copy, on
+  any verifier. A `meter.CopyUsageReader` (memstore's and pgstore's usage
+  stores) reads what each copy has counted: `CopyUsage` takes up to
+  `meter.MaxCopyUsageIDs` revocation ids of one capability's copies and
+  returns the counters of those used; a copy never used is absent.
+- **How many.** A holder mints copies offline, as many as it likes, so the
+  issuer bounds how many a meter counts: `Caveats.Copies`, a `CopyQuota`
+  signed into the token. Its zero value counts no copy with limits of its
+  own, `CopyQuota{Unlimited: true}` as many as the store allows, and a
+  delegated child no more than its parent. It bounds the copies of the
+  capability and everything delegated from it together, as the request and
+  budget ceilings do. A store also counts no more than its own bound,
+  `MaxCopiesPerCapability` (`meter.DefaultMaxCopiesPerCapability`, 1 024,
+  in memstore's `UsageStoreConfig` and pgstore's `Config`). `Bump`,
+  `Charge` and `Reserve` refuse a call that would pass either with
+  `meter.ErrCopyLimitExceeded`, a kind of `ErrRequestLimitExceeded`, and
+  count nothing. A copy already counted goes on being metered.
+- **After a drop.** A copy stays counted under every ancestor once its own
+  capability's usage is dropped (`DeleteUsage`, `PurgeOrphans`), as its
+  requests and spend do; the dropped capability restarts its own count of
+  copies with its other counters.
+- **One id, two capabilities.** biscuit-go signs a block without the
+  signature before it, so a holder of two Biscuits can graft a block of
+  one onto the other, and one revocation id then turns up under two
+  capabilities. Each counts it apart; neither's metering, refund or
+  deletion reaches the other's.
+
+A copy cannot delegate: a server-side child would be an ordinary token of
+the capability, which revoking the copy would not reach and the copy's
+limits would not bound. `Delegate` refuses a capability read from a Biscuit
+(`VerifiedCapability.FromBiscuit`) with `ErrInvalidRequest`.
+
+### Revoke one copy
+
+`verifier.BiscuitCopy(ctx, token)` checks the token is genuine — not its
+expiry, audience or revocation, so a copy can be revoked in any state — and
+returns the copy: its capability and the revocation id of its last block,
+which only it pairs, so a caller cannot name another tenant's copy under
+its own capability. Pass it to `Revoker.RevokeBiscuit`
+(`RevokeBiscuitRequest{Copy: …}`), which a `BiscuitRevocationStore`
+carries out ([Revoke](#revoke)). That stops the copy and every copy
+attenuated from it; the copy it came from, its siblings and the
+capability's JWT keep working.
+
+It is idempotent. The `RevokeBiscuitResult` says `AlreadyRevoked` when the
+copy had an entry before the call, and carries the `Revocation` that
+stands, the first written. `GetBiscuitRevocation` reads it back by the same
+copy. The revocation belongs to that capability and goes only with its
+record, while a token carrying the id is refused under any capability.
 
 ## Charge against the budget
 
@@ -588,16 +614,17 @@ if errors.Is(err, limes.ErrBudgetExceeded) {
 }
 ```
 
-The subject carries the capability's id, tenant, ceilings, quota of copies,
-unit and the Biscuit copy's limits, all as the token states them: a request has no field
-to type a ceiling into, or to leave at zero and so lift one.
+The subject carries the capability's id, tenant, ceilings, copy quota and
+unit, and the Biscuit copy's limits, all as the token states them. A
+request has no field to type a ceiling into, or to leave at zero and so
+lift one.
 
-Every ceiling is checked: each Biscuit copy's own, the capability's, each ancestor's, then the tenant aggregate. If **any**
-rejects, no counter moves, so a retry after rejection is safe. A copy's,
-the capability's or an ancestor's ceiling refuses as `ErrBudgetExceeded`, the tenant's as
-`ErrTenantBudgetExceeded`. Requests are counted apart, by `Meter.Bump` with
-the same subject, against the request ceilings of the same copies, capability and ancestors; past one
-it is `ErrRequestLimitExceeded`.
+`Charge` checks, in order, each Biscuit copy's own budget, the
+capability's, each ancestor's (all `ErrBudgetExceeded`), then the tenant
+aggregate (`ErrTenantBudgetExceeded`). If any refuses, no counter moves, so
+a retry after a refusal is safe. `Meter.Bump` counts requests with the same
+subject, against the request ceilings of the same copies, capability and
+ancestors; past one it is `ErrRequestLimitExceeded`.
 
 `receipt.ChargeID` names the ledger row. Refund against it:
 
@@ -606,78 +633,83 @@ usage.Refund(ctx, meter.RefundRequest{ChargeID: receipt.ChargeID, Amount: limes.
 usage.Refund(ctx, meter.RefundRequest{ChargeID: receipt.ChargeID, Remaining: true}, nil)                       // the rest
 ```
 
-A refund returns spend to every counter the charge took it from — except the
-tenant aggregate when the charge fell in an accounting period since closed
-with `ResetSpend` — and never more than the charge: `Remaining: true` refunds
-what is left, so a retried full refund is a no-op; a request with neither an
-`Amount` nor `Remaining`, or both, is `ErrInvalidRequest`, and more than is
-left is `ErrRefundExceedsCharge`. `RefundReceipt.Amount` says what moved, and names
-the charge's tenant and unit.
+A refund returns spend to every counter the charge took it from, and never
+more than the charge. It skips the tenant aggregate when the charge fell in
+an accounting period since closed with `ResetSpend`, and a counter
+restarted since (`DeleteUsage`). `Remaining: true` refunds what is left, so
+a retried full refund is a no-op. A request with neither `Amount` nor
+`Remaining`, or both, is `ErrInvalidRequest`; more than is left is
+`meter.ErrRefundExceedsCharge`. `RefundReceipt.Amount` says what moved, and
+the receipt names the charge's tenant and unit.
 
-Every counter counts in one unit. A charge or reservation in another unit than
-the capability, an ancestor or the tenant already counts in is
-`ErrUnitCodeMismatch`, never a sum of two currencies. The unit is part of
-the ceiling, as a currency is part of an amount: a `BudgetCeiling` that lets
-anything be spent — a `Max` above zero, or `Unlimited` — names its
-`UnitCode`, and one that does not is `ErrInvalidRequest` (`ErrInvalidCaveats`
-in caveats). Only the zero ceiling, which spends nothing, may name none: such
-a capability counts requests (`Bump`) but no amount — its `Charge`, `Reserve`
-and `Settle` are `ErrInvalidRequest`. A tenant ceiling names its unit the same
-way; the zero one, a freeze, keeps the unit the tenant counts in. The tenant
-aggregate counts from its first charge or reservation, in that charge's unit,
-whether or not a ceiling is set: `SetTenantBudget` later measures the new
-ceiling against that spend and those holds, and refuses a ceiling in another
-unit while anything is held in the old one, or spent in it unless `ResetSpend`
-closes that spend. It is guarded by
-`ExpectedVersion` — 0 while no ceiling has been set, else the version read —
-and a conflict is `ErrTenantBudgetVersionMismatch`. Until one is set the
-tenant's ceiling reads `Unlimited`; a ceiling of 0 freezes its spend.
+### One unit per counter
 
-To find the tenants near their ceiling, `ListTenantBudgets` takes a `Filter`:
-`TenantBudgetFilterAll` (the default), `TenantBudgetFilterUnlimited`, or
-`TenantBudgetFilterAtOrPast` with a `ThresholdBasisPoints` of
-0..`BasisPointsPerWhole` — hundredths of a percent, so 110 is 1.1% — compared
-in integers, without rounding.
-Rows come most at risk first: ceilings of 0, then bounded ceilings by spent /
-max descending, unclamped, then unlimited ones; ties by tenant id.
-`TenantBudget.Utilization()` reports the same percentage clamped to 0..100,
-and `limited` false for an unlimited tenant. A tenant never charged and never
-given a ceiling has no row: `GetTenantBudget` is `ErrTenantBudgetNotFound`.
+Every counter counts in one unit. A charge or reservation in another unit
+than the capability, an ancestor or the tenant already counts in is
+`ErrUnitCodeMismatch`, never a sum of two currencies.
+
+- **The unit is part of the ceiling.** A `BudgetCeiling` that lets anything
+  be spent — a `Max` above zero, or `Unlimited` — names its `UnitCode`;
+  one that does not is `ErrInvalidRequest` (`ErrInvalidCaveats` in
+  caveats). Only the zero ceiling may name none: such a capability counts
+  requests (`Bump`) but no amount, and its `Charge`, `Reserve` and `Settle`
+  are `ErrInvalidRequest`.
+- **The tenant aggregate** counts from its first charge or reservation, in
+  that unit, whether or not a ceiling is set. Until one is set its ceiling
+  reads `Unlimited`; a ceiling of 0 freezes its spend.
+- **`SetTenantBudget`** measures a new ceiling against the spend and holds
+  already counted. It refuses a ceiling in another unit while anything is
+  held in the old one, or spent in it and not reset (`ResetSpend`). It is
+  guarded by `ExpectedVersion` — 0 while no ceiling has been set, else the
+  `ResourceVersion` read — and a conflict is
+  `meter.ErrTenantBudgetVersionMismatch`.
+
+To find the tenants near their ceiling, `ListTenantBudgets` takes a
+`Filter`: `meter.TenantBudgetFilterAll` (the default),
+`TenantBudgetFilterUnlimited`, or `TenantBudgetFilterAtOrPast` with a
+`ThresholdBasisPoints` of 0..`meter.BasisPointsPerWhole` (hundredths of a
+percent: 110 is 1.1%), compared in integers. Rows come most at risk first:
+ceilings of 0, then bounded ceilings by spent / max descending, unclamped,
+then unlimited ones; ties by tenant id. `TenantBudget.Utilization()`
+reports the same percentage clamped to 0..100, and `limited` false for an
+unlimited tenant. A tenant never charged and never given a ceiling has no
+row: `GetTenantBudget` is `meter.ErrTenantBudgetNotFound`.
 
 ## Amounts are exact
 
-Every amount is `limes.Nanos`: an `int64` count of billionths of the
-unit, so 0.35 USD is `350_000_000`. Sums, ceilings, holds and refunds are
-integer arithmetic, exact however many charges they take: a tenth and two
-tenths fit under a ceiling of three tenths, and ten tenths make one. Nothing
-on your side needs rounding, summing apart or correcting.
+Every amount is `limes.Nanos`, an `int64` count of billionths of the unit:
+0.35 USD is `350_000_000`. Sums, ceilings, holds and refunds are integer
+arithmetic, exact however many charges they take: a tenth and two tenths
+fit under a ceiling of three tenths, and ten tenths make one.
 
-- **Writing one.** `ParseAmount("0.35")` reads a decimal exactly — digits, an
-  optional fraction and an optional exponent (`1e-7`), no sign, so `-0` is refused too — and refuses anything finer than a nano
-  rather than round it; `MustParseAmount` is the
-  same for a literal in your code. A price that reaches you as a `float64`
-  goes through `AmountFromFloat`, which rounds once, to the nearest nano.
+- **Writing one.** `ParseAmount("0.35")` reads a decimal exactly — digits,
+  an optional fraction and an optional exponent (`1e-7`), no sign — and
+  refuses anything finer than a nano rather than round it.
+  `MustParseAmount` does the same for a literal in your code, panicking on
+  what `ParseAmount` refuses. A
+  price that arrives as a `float64` goes through `AmountFromFloat`, which
+  rounds once, to the nearest nano.
 - **Reading one.** `String()` writes the exact decimal (`"0.35"`);
   `Float64()` is for display and metrics only.
-- **In configuration.** `Nanos` is a `TextMarshaler` and `TextUnmarshaler`
-  that write and read the same exact decimal, so a YAML scalar or an
+- **In configuration.** `Nanos` implements `encoding.TextMarshaler` and
+  `TextUnmarshaler` with the same exact decimal, so a YAML scalar or an
   environment variable carries an amount with no `float64` in between.
-- **Range.** Up to `MaxNanos`, just under a billion units. An amount outside
-  it is `ErrInvalidAmount`, which matches `ErrInvalidRequest`; a charge of a
-  valid amount that would take a counter past it is `ErrCounterOverflow`.
-- **Units.** `BudgetCeiling.UnitCode` is any ISO 4217 code in upper case (`IsUnitCode`);
-  XXX (`AbstractUnitCode`), ISO 4217's code for "no currency", is the one for
-  a budget that is not money.
+- **Range.** Up to `MaxNanos`, just under a billion units. An amount
+  outside it is `ErrInvalidAmount`, which matches `ErrInvalidRequest`; a
+  valid amount that would take a counter past it is
+  `meter.ErrCounterOverflow`.
+- **Units.** `BudgetCeiling.UnitCode` is an ISO 4217 code in upper case
+  (`IsUnitCode`). `XXX` (`AbstractUnitCode`), ISO 4217's "no currency", is
+  the code for a budget that is not money.
 
-In a token the budget is a decimal in a JSON string (`"max_budget": "1.5"`),
-so a reader whose numbers are float64 — JavaScript's `JSON.parse` among them —
-cannot round it.
-
+In a token the budget is a decimal in a JSON string
+(`"max_budget": "1.5"`), so a reader whose numbers are float64 — JavaScript's
+`JSON.parse` among them — cannot round it.
 
 ## Reserve before a cost is known
 
-An LLM call is priced by the tokens it ends up using. Hold an estimate first,
-then settle the actual cost:
+An LLM call is priced by the tokens it ends up using. Hold an estimate
+first, then settle the actual cost:
 
 ```go
 subject := granted.MeterSubject()
@@ -690,54 +722,49 @@ receipt, err := usage.Settle(ctx, meter.SettleRequest{
 }, nil)
 ```
 
-A hold counts against every ceiling — each presented Biscuit copy's own
-budget, the capability's, each ancestor's, the tenant's — exactly as spend does, so two callers cannot both hold the last
-budget. `Settle` charges the actual cost in place of the hold; above the hold,
-the excess must fit, or the hold stays for you to settle lower or `Release`.
-A hold never settled lapses after its TTL (`DefaultReservationTTL`, five
-minutes, unless the request says), or when its capability expires, if that
-comes sooner — in `pgstore`, up to `limes.MaxLeeway` plus
-`limes.PurgeClockSkew` past it, the most a verifier's leeway and clock may
-still accept the token for. Revoking the capability does not end it: the cost may already be
-incurred, and it can still be settled until then. Run `ReleaseExpired` on a timer, again
-while a batch comes back full (`DefaultHousekeepingLimit` unless set). Settling
-the zero reservation id, a hold of another capability than the subject's, or
-one made under other Biscuit copies than the subject carries, is
-`ErrReservationNotFound`: a hold is settled by the copy that made it. The receipt names the
-charge's tenant and unit, on a refusal by a ceiling or by the callback too, so a caller can attribute it from
-the receipt alone. `GetReservation` reads a hold back while it
-still counts — open, or expired and not yet released — and is
-`ErrReservationNotFound` once settled or released; `ListReservations` pages a
-capability's own holds.
+A hold counts against every ceiling — each presented Biscuit copy's, the
+capability's, each ancestor's, the tenant's — exactly as spend does, so two
+callers cannot both hold the last of a budget. `Settle` charges the actual
+cost in place of the hold. Above the hold, the excess must fit, or the hold
+stays for you to settle lower or `Release`.
 
-The trailing `nil` is an optional in-transaction callback. If your store has
-transactions, pass a function: its context carries the store's transaction,
-which the store's own accessor reads, so your side effects commit atomically
-with the spend. It also hands over the receipt the call will return, so the
-side effect can name the charge:
+- **Expiry.** A hold never settled lapses after its TTL
+  (`meter.DefaultReservationTTL`, five minutes, unless the request says) or
+  when its capability expires, whichever is sooner. In `pgstore` that is up
+  to `limes.MaxLeeway` plus `limes.PurgeClockSkew` past the expiry, the
+  longest a verifier may still accept the token. Revoking the capability
+  does not end a hold: the cost may already be incurred, and can still be
+  settled. Run `ReleaseExpired` on a timer, again while a batch comes back
+  full (`DefaultHousekeepingLimit` unless set).
+- **Which holds settle.** Settling the zero reservation id, a hold of
+  another capability than the subject's, or one made under other Biscuit
+  copies than the subject carries, is `meter.ErrReservationNotFound`: a
+  hold is settled by the copy that made it.
+- **Reading holds.** `GetReservation` reads a hold while it still counts —
+  open, or expired and not yet released — and is
+  `meter.ErrReservationNotFound` once settled or released.
+  `ListReservations` pages a capability's own holds, soonest to expire
+  first.
+- **Receipts.** The receipt names the charge's tenant and unit, on a
+  refusal by a ceiling or by the callback too, so a caller can attribute it
+  from the receipt alone.
+
+### Commit side effects with the charge
+
+The trailing `nil` is an optional callback that runs inside the call. If
+your store has transactions, its context carries the store's transaction,
+which the store's own accessor reads, so your side effects commit
+atomically with the spend. It is handed the receipt the call will return:
 
 ```go
 usage.Charge(ctx, req, func(ctx context.Context, c meter.Charged) error {
     tx, _ := pgstore.TxFrom(ctx) // commits with the charge
-    return myOutbox.Enqueue(ctx, tx, c.Receipt.ChargeID, c.Receipt.SpentAmount)
+    return myOutbox.Enqueue(ctx, tx, c.Receipt.ChargeID, req.Amount)
 })
 ```
 
-Whether the ledger row is there to read yet is the store's — `pgstore`
-writes it before the callback, so an outbox row may reference it, `memstore`
-after; the receipt is what every store hands it.
-
-`Settle` takes the same callback. It must not call back into the `Meter`: a
-store may hold its counters while the callback runs. The module never names
-the transaction's type — the store puts it in the callback's context and its
-own accessor reads it — which is why this library has no database dependency.
-
-`Refund` takes a callback of its own, on the same terms: it runs inside the
-refund, atomically with it, and its error rolls the refund back whole.
-Whether the refund's writes are there to read yet is the store's —
-`pgstore` makes them before the callback, `memstore` after. It is handed the
-receipt the call will return, so an outbox event names the charge, the
-amount actually refunded and the refund's `RefundID`:
+`Settle` takes the same callback; `Refund` takes its own, on the same terms,
+and is handed a `meter.Refunded`:
 
 ```go
 usage.Refund(ctx, req, func(ctx context.Context, r meter.Refunded) error {
@@ -746,23 +773,34 @@ usage.Refund(ctx, req, func(ctx context.Context, r meter.Refunded) error {
 })
 ```
 
-It does not run when nothing is refunded (`Remaining` once nothing is
-left), nor on a replay under a `RefundID`: a keyed refund whose answer was
-lost (`ErrOutcomeUnknown`) is retried under the same id, and either replays
-— its event committed with it — or refunds and runs the callback then.
+- An error from the callback rolls the call back whole.
+- It must not call back into the `Meter`: a store may hold its counters
+  while it runs. Keep it short, on the store's own database, with no
+  network call.
+- Whether the call's own rows are there to read yet is the store's:
+  `pgstore` writes them before the callback, so an outbox row may reference
+  the ledger row; `memstore` after.
+- It does not run on a replay, nor for a refund of nothing (`Remaining`
+  once nothing is left). A keyed refund whose answer was lost
+  (`meter.ErrOutcomeUnknown`) is retried under the same `RefundID`: it
+  either replays — its event committed with it — or refunds and runs the
+  callback then.
+
+The module never names the transaction's type, which is why this library
+has no database dependency. A store with no transactions takes `nil`.
 
 ## Charge a cost reported after the fact
 
 Some costs never pass through your verifier: a call made straight to a
 provider whose price arrives later, in a usage record or on an event stream
-delivered at least once. Two things change for such a cost.
+delivered at least once.
 
-**It may arrive twice.** Name it with the id your records already give it, and
-the capability is charged once per name while that charge stays in the
-ledger — at least `meter.MinChargeRetention`, 401 days; a repeat returns the
-first receipt with `Replayed` set and runs no callback. A name arriving again with a
-different amount, unit or tenant, or under another Biscuit copy, is
-`ErrExternalRefConflict`: one name is one cost.
+**It may arrive twice.** Name it with the id your records already give it.
+The capability is charged once per name while that charge stays in the
+ledger — at least `meter.MinChargeRetention`, 401 days. A repeat returns
+the first receipt with `Replayed` set and runs no callback. A name arriving
+again with a different amount, unit or tenant, or under other Biscuit
+copies, is `meter.ErrExternalRefConflict`: one name is one cost.
 
 ```go
 subject, err := limes.StoredMeterSubject(ctx, records, capID) // no token in hand
@@ -774,51 +812,53 @@ receipt, err := usage.Charge(ctx, meter.ChargeRequest{
 }, nil)
 ```
 
-A settle is idempotent on its reservation in the same way: settling one twice
-for the same amount returns the first charge, and for another amount is
-`ErrSettleConflict`. A repeat is answered even once the capability's
-record is purged, while the charge stays in the ledger; past its retention
-the settled reservation is `ErrReservationNotFound`. A new charge is not: the `Meter` refuses a capability not on
-record with `ErrNotFound`, since no ancestor's ceiling could be read — so keep
-records (`PurgeRequest.ExpiredFor`) as long as costs may still arrive. `ChargeByRef` reads a named charge back, so a
-reporter can reconcile its own records with the ledger.
+**It has already been spent.** Refusing it would only leave the ledger
+short. `OverrunPolicyRecord` charges it past every ceiling it crosses and
+sets `receipt.Overrun`. The crossed ceiling then refuses every later charge
+and reservation made with the default `OverrunPolicyReject`, which stops
+the next cost before it is incurred. Keep `OverrunPolicyReject` for
+anything you can still decline.
 
-**It has already been spent.** Refusing it would only leave the ledger short.
-`OverrunPolicyRecord` charges it past every ceiling it crosses and sets
-`receipt.Overrun`; the crossed ceiling then refuses every later charge and
-reservation made with the default `OverrunPolicyReject`, which is what stops the
-next cost before it is incurred. Keep `OverrunPolicyReject` for anything you can
-still decline.
+With no token in hand, `StoredMeterSubject` reads the subject from the
+capability's record through a `RecordReader` (any `Store` is one), as the
+meter reads every ancestor's ceiling. Keep records
+(`PurgeRequest.ExpiredFor`) as long as costs may arrive: the `Meter`
+refuses a new charge for a capability not on record with `ErrNotFound`,
+since no ancestor's ceiling could be read. A repeat is still answered once
+the record is purged, while the charge stays in the ledger.
+`ChargeByRef` reads a named charge back, so a reporter can reconcile its
+records with the ledger.
 
-A reporter with no token in hand takes the subject from the capability's
-stored record (`StoredMeterSubject`, which reads it through a `RecordReader`, as any `Store` is one), as the meter
-already reads every ancestor's ceiling. A price that is not known yet is not a price of zero: hold the estimate and
-settle when it is known, or let the hold lapse and count against the ceilings
-until `ReleaseExpired` runs. `Reserve` refuses a capability whose record has
-expired (`ErrExpired`) — `pgstore` only once no verifier could still accept
-its token, as above; a cost reported after that is charged with
+A settle is idempotent on its reservation in the same way: settling one
+twice for the same amount returns the first charge, and for another amount
+is `meter.ErrSettleConflict`. Past the ledger's retention the settled
+reservation is `meter.ErrReservationNotFound`.
+
+A price not known yet is not a price of zero: hold the estimate and settle
+when it is known, or let the hold lapse and count against the ceilings
+until `ReleaseExpired` runs. `Reserve` refuses a capability whose record
+has expired (`ErrExpired`) — in `pgstore`, only once no verifier could
+still accept its token — so charge a cost reported after that with
 `OverrunPolicyRecord`.
 
 ## Retrying a lost answer
 
-A store over a database can lose its answer after a call's commit has
+A store over a database can lose its answer after the call's commit has
 left: the connection drops in a failover, or the context ends, before the
 database replies. The call then returns an error matching
 `meter.ErrOutcomeUnknown` (`outcome_unknown`, 503), wrapping the cause: it
 may have committed, or not. Send it again only when it is keyed to its
 cost, so that a repeat of one that committed is answered as a replay:
 
-- `Charge` with an `ExternalRef`: the first receipt, `Replayed`.
-- `Reserve` with a `ReservationID` of your own: the hold on record,
-  `Replayed`, its expiry unchanged. The same id for another hold — another
-  amount, unit, op, actor, capability or Biscuit copy — or for a hold
-  already settled is `ErrReserveConflict`. Once the hold is released, the
-  id may hold anew.
-- `Refund` with a `RefundID` of your own: the first receipt, `Replayed`,
-  with what that refund returned. The same id for another charge or amount
-  is `ErrRefundConflict`. The id goes with its charge when the ledger
-  removes it.
-- `Settle`: keyed to its reservation already.
+| Call | Key | A repeat | The same key for another request |
+|---|---|---|---|
+| `Charge` | `ExternalRef` | the first receipt, `Replayed` | `meter.ErrExternalRefConflict` |
+| `Reserve` | `ReservationID` of your own | the hold on record, `Replayed`, its expiry unchanged | `meter.ErrReserveConflict` (another amount, unit, op, actor, tenant, capability or Biscuit copy, or a hold already settled) |
+| `Refund` | `RefundID` of your own | the first receipt, `Replayed`, with what that refund returned | `meter.ErrRefundConflict` (another charge or amount) |
+| `Settle` | its reservation | the first charge | `meter.ErrSettleConflict` |
+
+A released hold frees its `ReservationID` to hold anew. A `RefundID` goes
+with its charge when the ledger removes it.
 
 ```go
 id := uuid.New() // kept with the work it pays for, before the first try
@@ -829,63 +869,57 @@ if errors.Is(err, meter.ErrOutcomeUnknown) {
 }
 ```
 
-An unkeyed call sent again may count twice, and one not sent again may
-never count. The in-memory store commits in memory and never returns
-`ErrOutcomeUnknown`.
+An unkeyed call sent again may count twice; one not sent again may never
+count. memstore commits in memory and never returns `ErrOutcomeUnknown`.
 
 ## Lease a sub-agent its budget
 
 Every charge locks the counters of the whole chain and the tenant's
-aggregate, so the charges of many sub-agents under one orchestrator queue on
-the same rows. A usage store that is a `meter.Leaser` — memstore's and pgstore's are — lets
-a capability hold part of its chain's budget in advance
-([ADR-0017](adr/0017-budget-leases.md)):
+aggregate, so the charges of many sub-agents under one orchestrator queue
+on the same rows. A usage store that is a `meter.Leaser` — memstore's and
+pgstore's are — lets a capability hold part of its chain's budget in
+advance ([ADR-0017](adr/0017-budget-leases.md)):
 
 ```go
 leaser := usage.(meter.Leaser)
 lease, err := leaser.Lease(ctx, meter.LeaseRequest{Subject: sub.MeterSubject(), Amount: limes.MustParseAmount("2.00")})
 ```
 
-pgstore opens leases unless `Config.DisableLeases` is set: a release
-before pgstore/v0.58.0 reads none of their state, so set it while one
-still writes the database, and before going back to one, then settle every
-lease (the [migration notes](migration.md)). With it `Lease` is
-`meter.ErrLeasingDisabled`, and a caller charges without one; leases
-already open are still charged under and settled.
-
 `Lease` holds the amount against every ancestor and the tenant at once,
 checking every ceiling as a `Reserve` of it would. From then on, a `Charge`
 of the leaseholder, or of a capability delegated from it, with the default
-`OverrunPolicyReject` locks only the counters up to the leaseholder and the
-lease's balance: the ancestors above and the tenant are not touched. A charge
-the balance does not cover is `meter.ErrLeaseExhausted`, a kind of
-`ErrBudgetExceeded`; lease more and charge again. `SettleLease` ends it:
-what it spent is charged to the ancestors and the tenant, and the rest is
-released. So does `ReleaseExpired` once it expired (`LeaseRequest.TTL`, at
-most the capability's own expiry), `ReleaseMatching` once its capability is
-revoked, `DeleteUsage` and `PurgeOrphans` before its counters go, and a
-`SetTenantBudget` that resets the spend, into the period it closes.
+`OverrunPolicyReject`, locks only the counters up to the leaseholder and
+the lease's balance; the ancestors above and the tenant are not touched.
 
-Until it is settled, an ancestor's `GetUsage` and the tenant's aggregate show
-the lease as reserved and its spend not yet; the ledger, and `SumCharges`,
-have every charge at once. A capability whose ancestor holds a lease cannot
-lease one of its own (`meter.ErrLeaseNested`), and a Biscuit copy cannot
-lease at all (`limes.ErrInvalidRequest`): lease for the capability it was
-attenuated from instead. A charge that records an
-overrun, one of a Biscuit copy with limits of its own, and `Reserve`,
-`Settle` and `Release`, go through the whole chain
-under a lease as without one — the lease holds its share of every ceiling,
-so they stay correct, only not faster. Lease a few minutes of a sub-agent's
-expected spend, and top it up when half is gone.
+- **Exhausted.** A charge the balance does not cover is
+  `meter.ErrLeaseExhausted`, a kind of `ErrBudgetExceeded`: lease more and
+  charge again. A charge refused as `limes.ErrConflict` met a lease moving
+  under it, and moved nothing: send it again.
+- **Settled.** `SettleLease` charges what the lease spent to the ancestors
+  and the tenant and releases the rest. So do `ReleaseExpired` once it
+  expires (`LeaseRequest.TTL`, `meter.DefaultLeaseTTL` unless set, at most
+  the capability's own expiry), `ReleaseMatching` once its capability is
+  revoked, `DeleteUsage` and `PurgeOrphans` before its counters go, and a
+  `SetTenantBudget` that resets the spend, into the period it closes.
+- **Reads.** Until settled, an ancestor's `GetUsage` and the tenant's
+  aggregate show the lease as reserved and its spend not yet; the ledger,
+  and `SumCharges`, have every charge at once.
+- **Not under a lease.** A capability whose ancestor holds a lease cannot
+  lease (`meter.ErrLeaseNested`), and a Biscuit copy cannot lease at all
+  (`limes.ErrInvalidRequest`): lease for the capability it was attenuated
+  from. A charge that records an overrun, a charge of a Biscuit copy with
+  limits of its own, and `Reserve`, `Settle` and `Release` go through the
+  whole chain as without a lease: correct, since the lease holds its share
+  of every ceiling, but not faster.
 
-A top-up — `Lease` on a capability whose lease is open — settles that lease
-and opens a new one in the same call: what it spent is charged to the
-ancestors and the tenant, so their `SpentAmount`, which budget listings and
-risk rankings read, lags by at most one lease however long a sub-agent runs.
-The new lease holds what the old one had left and the top-up, for the
-request's `TTL` from now, under a new `ID`: a refund of a charge taken
-before the top-up goes to the chain the settlement charged, and one taken
-after it to the new lease. A top-up refused at a ceiling leaves the open
+Lease a few minutes of a sub-agent's expected spend, and top it up when
+half is gone. A top-up — `Lease` on a capability whose lease is open —
+settles that lease and opens a new one in the same call, so the ancestors'
+and tenant's `SpentAmount`, which budget listings read, lags by at most one
+lease. The new lease holds what the old one had left plus the top-up, for
+the request's `TTL` from now, under a new `ID`. A refund of a charge taken
+before the top-up goes to the chain the settlement charged; one taken
+after, to the new lease. A top-up refused at a ceiling leaves the open
 lease as it was.
 
 A lease holds requests too, for a sub-agent whose every call is a `Bump`:
@@ -895,36 +929,48 @@ lease, err := leaser.Lease(ctx, meter.LeaseRequest{Subject: sub.MeterSubject(), 
 ```
 
 `Requests` are held against every ancestor's request ceiling at once, and
-shown in their `GetUsage` as `ReservedRequests`, which a `Bump` outside
-the lease counts as made. A `Bump` of the leaseholder, or of a capability
-delegated from it, then counts only up to the leaseholder; one the lease has
-no requests left for is `meter.ErrLeaseRequestsExhausted`, a kind of
-`ErrRequestLimitExceeded`. Settled, the requests it made are counted on the
-ancestors and the rest released. One lease may hold both an amount and
+shown in their `GetUsage` as `ReservedRequests`, which a `Bump` outside the
+lease counts as made. A `Bump` of the leaseholder, or of a capability
+delegated from it, then counts only up to the leaseholder; one with no
+leased requests left is `meter.ErrLeaseRequestsExhausted`, a kind of
+`ErrRequestLimitExceeded`. Settled, the requests made count on the
+ancestors and the rest are released. One lease may hold both an amount and
 requests, each covering only its own calls: a lease of no amount covers no
-`Charge`, and one of no requests no `Bump`. A `Bump` of a Biscuit copy with
-limits of its own goes through the whole chain, as a charge of one does.
+`Charge`, one of no requests no `Bump`. A `Bump` of a Biscuit copy with
+limits of its own goes through the whole chain.
+
+pgstore opens leases unless `Config.DisableLeases` is set. A release before
+pgstore/v0.58.0 reads none of their state, so set it while one still
+writes the database, and before going back to one, then settle every lease
+([migration notes](migration.md)). With it set, `Lease` is
+`meter.ErrLeasingDisabled`; leases already open are still charged under and
+settled.
 
 ## Observe the meter
 
 The nested module `github.com/oleg-tkachuk/limes/otelmetric` — a module of
-its own, so limes itself resolves no OpenTelemetry dependency — wraps a
-usage store in OpenTelemetry instruments (`otelmetric.Instrument`): charges,
+its own, so limes resolves no OpenTelemetry dependency — wraps a usage
+store in OpenTelemetry instruments (`otelmetric.Instrument`): charges,
 settles, reservations and request bumps by outcome and by the ceiling that
 refused them, amounts by unit, and a capability's spend after each charge.
 `otelmetric.NewStoreEvents` records `limes.tenant.wait`, how long each
-metered call waited for its tenant's aggregate row: the measure of a
-tenant's queue, and so of when its calls should lease
-([Lease a sub-agent its budget](#lease-a-sub-agent-its-budget)). The
-instruments, their attributes and the options are in
+metered call waited for its tenant's aggregate row: the length of a
+tenant's queue, and so the sign that its calls should lease. The
+instruments, attributes and options are in
 [the package's reference](api/observing.md#package-otelmetric).
+
+`otelmetric.Instrument` keeps every optional `meter` interface the wrapped
+store implements — `CopyUsageReader`, `TenantUsageEraser`,
+`MatchingReleaser`, `TenantReservationLister`, `Leaser` — and forwards
+`meter.FeatureGate`. A decorator of your own must do the same: assert each optional interface on the store it
+wraps and forward it, or a caller checking for it finds it gone.
 
 ## Observing the issuer, verifier and revoker
 
 The issuer, the verifier and the revoker log through `log/slog`
-(`IssuerConfig.Logger`, `VerifierConfig.Logger`, `RevokerConfig.Logger`; nil
-logs to `slog.Default()`). A capability is named by its id, issuer, kid,
-subject and tenant; no line holds a token, a key or a proof.
+(`IssuerConfig.Logger`, `VerifierConfig.Logger`, `RevokerConfig.Logger`;
+nil logs to `slog.Default()`). A capability is named by its id, issuer,
+kid, subject and tenant; no line holds a token, a key or a proof.
 
 | Event | Level |
 |---|---|
@@ -936,35 +982,37 @@ subject and tenant; no line holds a token, a key or a proof.
 | A token refused before: absent, malformed, forged, an unknown kid | DEBUG |
 | A store, signer, key set or revocation lookup failed | ERROR |
 
-A refusal of a genuine token is worth a warning: only its holder can cause
-one. Garbage costs anyone nothing to send, so it stays at DEBUG, where a
-flood of it fills no log. Each line carries `op` and `duration`, the call's
-elapsed time, and a refusal its `code`, `reason` and `error`.
+Only the holder of a genuine token can cause a refusal after its signature
+verified, so that is worth a warning. Garbage costs nothing to send, so it
+stays at DEBUG, where a flood of it fills no log. Each line carries `op` and
+`duration`, and a refusal its `code`, `reason` and `error`.
 
-A revocation's line names the capability, or a bulk revoke's tenant and
-selectors, with the request's `actor` and `note`, and what the store
-answered: `already_revoked` and the `prior` disposition, or how many it
-`revoked`, in which `tenants`, and whether there is `more`. A Biscuit copy is
-named by its capability alone. A store call that returned an error may still
-have written, so a `Revoker` given a cache clears it as on success, and its
-line says `cache_cleared`. A `Revoker` built without the store a method
-needs (`RevokerConfig.Bulk`, `RevokerConfig.Biscuits`) fails that method
-with `ErrInvalidConfig`, logged at ERROR.
+A revocation's line names the capability (a Biscuit copy by its capability
+alone), or a bulk revoke's tenant and selectors, with the request's `actor`
+and `note`, and what the store answered: `already_revoked` and the `prior`
+disposition, or how many it `revoked`, in which `tenants`, and whether
+there is `more`. A store call that returned an error may still have
+written, so a `Revoker` given a cache clears it as on success, and its line
+says `cache_cleared`. A `Revoker` built without the store a method needs
+(`RevokerConfig.Bulk`, `RevokerConfig.Biscuits`) fails that method with
+`ErrInvalidConfig`, logged at ERROR.
 
 `IssuerConfig.Events`, `VerifierConfig.Events` and `RevokerConfig.Events`
-call back beside the log, for metrics or an audit sink: `OnIssued`,
-`OnRefused` and `OnFailed`; `OnVerified`, `OnRefused` and `OnFailed`;
-`OnRevoked`, `OnRefused` and `OnFailed`. Every callback is
-optional and takes one event struct, so a field added later breaks none;
-each event carries `Duration`, the call's elapsed time on the monotonic
-clock. They run on the caller's goroutine before the method returns: a
-callback must not block, and must not panic.
+call back beside the log, for metrics or an audit sink:
 
-The callbacks are independent: each outcome calls exactly one, and a nil
-one drops its events silently. An audit consumer that must see every call
-sets every callback of the side it audits, not only the one it counts.
-[ADR-0021](adr/0021-observing-issuer-and-verifier.md) records why the hooks
-take this shape.
+| Side | Callbacks |
+|---|---|
+| `IssuerEvents` | `OnIssued`, `OnRefused`, `OnFailed` |
+| `VerifierEvents` | `OnVerified`, `OnRefused`, `OnFailed` |
+| `RevokerEvents` | `OnRevoked`, `OnRefused`, `OnFailed` |
+
+Each outcome calls exactly one callback; a nil one drops its events. An
+audit consumer that must see every call sets every callback of the side it
+audits. Each takes one event struct, so a field added later breaks none,
+and each event carries `Duration`, the call's elapsed time on the monotonic
+clock. Callbacks run on the caller's goroutine before the method returns:
+they must not block or panic.
+[ADR-0021](adr/0021-observing-issuer-and-verifier.md) records why.
 
 ```go
 verifier, err := limes.NewVerifier(limes.VerifierConfig{
@@ -981,18 +1029,16 @@ verifier, err := limes.NewVerifier(limes.VerifierConfig{
 ## Check your own store
 
 Much of each contract lives in request fields and in which sentinel comes
-back, so a store that gets one wrong still compiles. Run the module's checks
-from your store's tests — `storetest.Run` for a `Store` (and a
-`BiscuitRevocationStore`), `metertest.Run` for a `UsageStore` and
-`metertest.RunCounter` for a store that is a `RequestCounter` alone,
-`jwks/jwkstest.Run` for a `KeyResolver`, and `dpop/dpoptest.RunReplayCache`
-and `RunNonces` for a `dpop.ReplayCache` or `dpop.Nonces`. `storetest.Env`
-also takes `Census`, `Lister`, `Exchanges` and `BulkRevoker`, each turning
-on the checks of that interface. The suites check more than the compiler
-sees — what a revoke reports, a cursor of another listing, Biscuit
-revocations, lineage answers, a listing's `StoppedBy` — so a store that
-passed an earlier release may fail a later one; [migration.md](migration.md)
-lists each addition:
+back, so a store that gets one wrong still compiles. Run the module's
+suites from your store's tests:
+
+| Suite | For |
+|---|---|
+| `storetest.Run` | a `Store`, and a `BiscuitRevocationStore`; `Env.Census`, `Lister`, `Exchanges` and `BulkRevoker` turn on the checks of those interfaces (`Census` and `Lister` with `Now` set) |
+| `metertest.Run` | a `meter.UsageStore` |
+| `metertest.RunCounter` | a store that is a `meter.RequestCounter` alone |
+| `jwks/jwkstest.Run` | a `KeyResolver` |
+| `dpop/dpoptest.RunReplayCache`, `RunNonces` | a `dpop.ReplayCache`, `dpop.Nonces` |
 
 ```go
 func TestMeterContract(t *testing.T) {
@@ -1004,68 +1050,62 @@ func TestMeterContract(t *testing.T) {
 }
 ```
 
-`Ctx` is the context of every call for `Tenant`. `NewCapability` records each
-spec's ceilings and its quota of copies (`spec.CopyQuota()`: a nil `Copies` is unlimited) on the
-record, as the `Meter` reads an ancestor's from it. `MaxCopiesPerCapability`
-names the bound the store was built with; without it, the check of that bound
-is skipped. A store that refers to its
-tenants, or scopes each tenant's rows, also sets `NewTenant` (another tenant
-it can charge), `TenantCtx` (the context a write for that tenant runs under)
-and `ListCtx` (the context of `ListTenantBudgets`, a read across tenants). One
-that scopes rows by the call's context sets `ScopesTenants` too, and the
-suites check that a call for `Tenant` under another tenant's context returns
-`ErrScopeMismatch` and moves nothing.
-Without them the checks that need a second tenant use a random id and `Ctx`.
-`DeleteCapability` removes a record as `Store.Purge` would, for the
-`PurgeOrphans` checks; some remove an ancestor whose children stay, so a store
-whose records refer to their parent unhooks the children first. `Ledger` turns
-on the checks of a `LedgerReader`; with `Now` (the store's clock) and
-`Advance` as well, the checks of its UTC buckets. A store that measures
-expiry by a clock other than its own — `pgstore`'s, with no `Config.Now`,
-by the database's — sets `ExpiryNow` and `AdvanceExpiry` to read and move
-that one: the checks of expiry run on it, and with `Now` and `Advance`
-unset, those that need the store's own clock to move are skipped. `storetest.Env` takes the same `NewTenant`,
-`TenantCtx` and `Advance`, so one setup can serve both suites, plus `Now` (the
-store's clock, for the checks at an expiry's exact instant) and
-`DeleteTenant` (moves a tenant to the trash, for the `ErrUnknownTenant` and
-`ErrTenantDeleted` checks). Both take `ScopesTenants` and `ReadOnlyCtx`,
-a context that reads every tenant's rows and writes none: the suites then
-check that every write under it is `ErrScopeMismatch`, changes nothing and,
-in `metertest`, runs no `onCharged` or `onRefunded`.
+`Ctx` is the context of every call for `Tenant`. `NewCapability` records
+each spec's ceilings and copy quota (`spec.CopyQuota()`) on the record, as
+the `Meter` reads an ancestor's from it. Every other field is optional and
+skips its checks while unset; each is described on
+[`metertest.Env`](api/conformance.md#metertest.Env) and
+[`storetest.Env`](api/conformance.md#storetest.Env). The ones a store
+usually needs:
 
-The checks include charges racing one ceiling, so run them against the
-database itself: a store that reads a counter and writes it back outside one
-statement or lock overspends, and fails them. Give the store a pool of one or
-two connections there: a call holds one connection for its transaction, and
-one that takes a second while it holds the first deadlocks once as many calls
-run as the pool has connections. Every suite bounds each check by
-`CheckTimeout` (a minute unless the Env sets it); a check that outlives it
-stops the test binary with every goroutine's stack, naming the check.
+- **A store that scopes tenants** — pgstore's row-level security, say —
+  sets `NewTenant`, `TenantCtx`, `ListCtx`, `AllTenantsCtx` and
+  `ScopesTenants`. The suites then check that a call for `Tenant` under
+  another tenant's context is `ErrScopeMismatch` and moves nothing. With
+  `ReadOnlyCtx`, a context that reads every tenant and writes none, they
+  check that every write under it is `ErrScopeMismatch`, changes nothing
+  and runs no `onCharged` or `onRefunded`.
+- **Clocks.** `Now` and `Advance` read and move the store's clock. A store
+  that measures expiry by another clock — `pgstore` with no `Config.Now`,
+  by the database's — sets `ExpiryNow` and `AdvanceExpiry` too.
+- **Optional interfaces.** `Ledger` turns on the `LedgerReader` checks,
+  `Revoke` the `MatchingReleaser` ones, `DeleteCapability` the
+  `PurgeOrphans` ones, `MaxCopiesPerCapability` the check of the store's
+  copy bound, and `DeleteTenant` (`storetest`) those of `ErrUnknownTenant`
+  and `ErrTenantDeleted`.
+
+`storetest.Env` shares `NewTenant`, `TenantCtx`, `AllTenantsCtx`,
+`Advance`, `Now`, `ScopesTenants` and `ReadOnlyCtx` with `metertest.Env`,
+so one setup can serve both.
+
+The checks race charges against one ceiling, so run them against the
+database itself: a store that reads a counter and writes it back outside
+one statement or lock overspends, and fails. Give the store a pool of one
+or two connections there: a call that takes a second connection while it
+holds the first deadlocks once as many calls run as the pool has
+connections. Each check is bounded by `CheckTimeout` (a minute unless set);
+one that outlives it stops the test binary with every goroutine's stack,
+naming the check.
 
 The suites grow: a minor release may add a check of a promise the contract
-already made, which a store that broke the promise then fails — that is the
-suite finding a bug, not a break of the API. A new optional Env field skips
-its checks while unset, so an Env written for an earlier release still
-compiles and runs everything it ran before.
+already made, which a store that broke the promise then fails. That is the
+suite finding a bug, not a break of the API; [migration.md](migration.md)
+lists each addition. A new optional `Env` field skips its checks while
+unset, so an `Env` written for an earlier release still compiles and runs
+everything it ran before.
 
-`memstore` and `pgstore` run the same checks from their own tests — `pgstore`
-against PostgreSQL in a container, as a role that owns no table, on a pool of
-two connections — `dpop` and `jwks` run theirs against their shipped
-implementations, and `redisreplay` and `pgstore` run `dpoptest` against
-their replay caches.
-
-`otelmetric.Instrument` wraps a `meter.UsageStore` and keeps every interface of `meter` the
-store implements — the optional `CopyUsageReader`, `TenantUsageEraser`, `MatchingReleaser` and `TenantReservationLister`. A decorator of your
-own should do the same: assert each optional interface on the store it wraps
-and forward it, or a caller checking for it finds it gone.
+`memstore` and `pgstore` run the same suites from their own tests —
+`pgstore` against PostgreSQL in a container, as a role that owns no table,
+on a pool of two connections — and `pgstore` and `redisreplay` run
+`dpoptest` against their replay caches.
 
 ## Revoke
 
 Revoke through a `Revoker`, the admin plane's component beside the issuer
-and the verifier. It holds no signing key: a service that revokes needs
-the store and nothing more. Each method carries the request to the store
-and returns its answer unchanged, and logs it — revocation is the audit
-event that matters most — with an event for metrics or an audit sink.
+and the verifier. It holds no signing key: a service that revokes needs the
+store and nothing more. Each method carries the request to the store,
+returns its answer unchanged, and logs it with an event — revocation is the
+audit event that matters most.
 
 ```go
 revoker, err := limes.NewRevoker(limes.RevokerConfig{
@@ -1081,143 +1121,150 @@ result, err := revoker.Revoke(ctx, limes.RevokeRequest{
 })
 ```
 
-Given a `Cache`, the revoker drops what each revocation outdates from it as
-soon as the store has carried it out: `ClearRevoked` of the capability
-after `Revoke`, which reaches every descendant the cache holds an answer
-for, and `Clear` after `RevokeMatching`, whose result names no capability,
-and after `RevokeBiscuit`. That is this process's cache alone: a verifier
-in another process learns of the revocation through
-`pgstore.RevocationWatcher`, or once its cache's TTL runs out.
+Revoking a capability revokes everything delegated from it, with or
+without `CascadeChildren`: `IsRevoked` answers for the whole chain. The
+flag also writes an entry per descendant, so the audit trail names each
+capability stopped.
 
-Idempotent: a repeat keeps the first entry, and `result.AlreadyRevoked`
-says the capability had one before this call; `result.Revocation` is the
-entry that stands, so a caller learns whether it stopped the capability
-without a read beforehand, which a concurrent revoke could outdate.
-`result.PriorDisposition` is the capability's disposition just before the
-call, by the census's rules and clock: only a revoke of an `active` one
-stopped something new. A capability already revoked through an ancestor, or expired, still
-gets its own entry, for the audit and in case the ancestor's is purged. An id
-not on record is `ErrNotFound` and writes nothing. In pgstore a revoke first
-takes the tenant's revoke lock alone, which every insert of a child shares,
-so it waits for the tenant's inserts and revokes already running and later
-ones wait for it; it then marks every record below the capability revoked,
-a generation at a time by key and by parent, holding those rows until it
-commits, and its cost grows with the subtree. A charge's lineage lock
-(`FOR KEY SHARE`) does not conflict with the mark: charges neither wait for
-a revoke nor hold one back. A cascade marks the subtree once.
-`GetRecord` reads the record back with `IssuedBy` and its own `Revocation`,
-whose `Cascaded` says a cascading revoke wrote it; a capability stopped only
-through an ancestor has none, so ask `IsRevoked` whether it verifies.
-`ListByPrincipal` leaves expired and revoked records out unless
-`IncludeExpired` or `IncludeRevoked` asks for them.
-Verifiers that cache revocation answers learn of it within the cache TTL
-(`DefaultRevocationCacheTTL`, two seconds), or at once if you call `RevocationCache.Clear` when a
-revocation is announced — on a Postgres `NOTIFY`, for example. `Clear`
-drops the whole cache: an answer cached for a descendant is also an answer
-about the revoked ancestor. `RevocationCache.ClearRevoked(ids...)` drops
-only what a revocation of `ids` outdates — their answers and those of every
-descendant the cache holds one for — when the store is a
-`RevocationLineageLookup`, which names the ancestors each answer covers
-(memstore's and pgstore's `Store` are); over any other store it is `Clear`.
-A decorator that embeds `limes.Store` has no `RevocationLineage` to promote
-and turns that off without a word: forward the method, set
-`RevocationCacheConfig.RequireLineage` to have `NewRevocationCache` refuse
-an upstream without it (`ErrNoRevocationLineage`), and read
-`Stats().Lineage` to see which the cache has. `Stats().ClearsWithoutLineage`
-counts the `ClearRevoked` calls that cleared whole for want of it, apart from
-a `Clear` asked for, though both count in `Clears`.
-A consumer that revokes often keeps every answer it did not touch, where
-`Clear` would make the next check of each id ask the store again, and the
-lookups in flight when it runs: only one about a revoked id, or whose
-answer names one among its ancestors, is kept out of the cache, so the
-notifications of a bulk revocation do not stop every other concurrent
-check from being cached or shared. An answer is fresh for the TTL from
-when the store was asked, however long the store took to answer.
+- **Idempotent.** A repeat keeps the first entry. `result.AlreadyRevoked`
+  says the capability had one before the call, and `result.Revocation` is
+  the entry that stands, so a caller learns whether it stopped the
+  capability without a read beforehand, which a concurrent revoke could
+  outdate.
+- **`result.PriorDisposition`** is the capability's disposition just
+  before the call, by the census's rules and clock: only a revoke of an
+  `active` one stopped something new. One already revoked through an
+  ancestor, or expired, still gets its own entry, for the audit and in case
+  the ancestor's is purged.
+- **Not on record.** `ErrNotFound`, writing nothing.
+- **Reading it back.** `GetRecord` returns the record with `IssuedBy` and
+  its own `Revocation`, whose `Cascaded` says a cascading revoke wrote it.
+  A capability stopped only through an ancestor has none: ask `IsRevoked`
+  whether it verifies. `ListByPrincipal` leaves expired and revoked records
+  out unless `IncludeExpired` or `IncludeRevoked` asks for them.
+- **Cost.** A store may do work per descendant: pgstore marks each one
+  revoked, so a revoke's cost grows with the subtree. It first takes the
+  tenant's revoke lock alone, which every insert of a child shares, so
+  delegations in the tenant wait for it; charges neither wait for it nor
+  hold it back ([`pgstore.Store.Revoke`](api/storage.md#pgstore.Store.Revoke)).
 
-Choose the TTL from how often one token is verified, not from a request
-burst. The two-second default serves the requests of one HTTP exchange; an
-agent that calls a tool once per model step, seconds or minutes apart,
-finds every answer expired and gains nothing from it. A long TTL is safe
-only while a revocation signal reaches the cache: before a watcher's first
-`LISTEN`, and while it reconnects (`pgstore.RevocationWatcher` waits up to
-ten seconds between attempts), nothing clears the cache, and the TTL alone
-bounds how long a revoked capability still verifies. So the cache has two
-bounds. `TTL` — keep it as short as a revocation may go unseen — serves
-answers while no signal vouches for the cache; `SyncedTTL`, a little above
-the interval between two verifications of one token, serves them while
-the cache's revocation signals listen. `pgstore.RevocationWatcher` opens
-one on every cache that takes one (`limes.RevocationSignalTarget`) when
-`Run` starts and closes it when `Run` returns; through it, it says
-`Listening` and `NotListening` as its connection comes and goes, and
-passes each notification on as `Revoked` or, naming no id, `RevokedAll`.
-A connection that dies without a word — a host gone, a network cut — is
-found by the watcher's heartbeat: it pings a quiet connection every
-`RevocationWatcher.Heartbeat` (30 seconds by default) and drops one that
-does not answer within as long again, so a dead connection vouches for
-the caches for at most twice the heartbeat. A signal vouches for a lease
-at a time: `Listening(lease)` grants the first, and `Renew` extends it
-each time the signal knows itself still listening — the watcher renews on
-every notification and every heartbeat answered, for three heartbeats at
-a time. A signal that stops without `NotListening`, its goroutine stuck
-or gone, lets the lease lapse and the cache falls back to `TTL` then,
-counted in `Stats().SyncsLost`. `NotListening` cuts short the answers
-cached under `SyncedTTL` at once. `Listening` drops nothing: an answer
-read before it may have missed a revocation made while nothing listened,
-so it stays on `TTL` from when it was read — as long as it could be
-served with no signal at all — and only an answer read after it is
-served for `SyncedTTL`. A connection that flaps thus leaves every
-verifier's answers in place rather than send them all to the store as it
-recovers, and a revocation made in the gap shows within `TTL` of the
-answer it outdates. Closing the one signal that kept the cache on `TTL`
-counts as a `Listening` of the others. `SyncedTTL` is at most
-`MaxRevocationCacheSyncedTTL`, a day: a signal that listens and still
-carries nothing cannot keep an answer past it. `Stats().Synced` says
-which bound is in force,
-the other fields count the watchers' connections, their losses and the
-notifications they passed on (see `RevocationCacheStats`). A cache no signal is open on serves for `TTL` alone,
-as before. A cache fed by more than one watcher — one per database, say —
-holds `SyncedTTL` only while every one of their signals listens; one
-started later is not waited for, so start them together. Build the cache with `NewRevocationCache` over your store, as
-`Capabilities` and, if the verifier reads Biscuits, `Biscuits`; `Sweep` drops
-its expired entries on a timer of yours, optional since lookups skip and replace
-them anyway. `Stats` reads what the cache has counted, for each kind of
-answer: the questions answered from it (`Hits`) and not (`Misses`), the
-upstream lookups those ran (`Lookups`, fewer when concurrent misses share
-one), the live answers dropped to stay within the bound (`Evictions`, which
-growing says `MaxEntries` is too small), the answers held (`Entries`), and
-the `Clears` and `NarrowClears`; `otelmetric.InstrumentRevocationCache`
-exports them.
+Given a `Cache`, the revoker drops what each revocation outdates as soon as
+the store has carried it out: `ClearRevoked` of the capability after
+`Revoke`, reaching every descendant the cache holds an answer for, and
+`Clear` after `RevokeMatching`, whose result names no capability, and after
+`RevokeBiscuit`. That is this process's cache alone. A verifier in another
+process learns of the revocation through `pgstore.RevocationWatcher`, or
+once its cache's TTL runs out.
+
+A chain is at most `MaxDelegationDepth` (64) ancestors deep. Past it
+`Delegate` returns `ErrDelegationDepthExceeded` (403,
+`delegation_depth_exceeded`) and no token; the parent stays valid, so
+delegate from a shallower capability. A deeper chain, which only a store
+that does not refuse one can hold, is refused at verification as
+`ErrDelegationTooDeep`, a kind of `ErrRevoked` (401).
+
+### Cache revocation answers
+
+A verifier asks about revocation on every call. A `RevocationCache` keeps
+the answers, so the per-call cost stays flat:
+
+```go
+revocations, err := limes.NewRevocationCache(limes.RevocationCacheConfig{
+    Capabilities: records,
+    Biscuits:     records, // if the verifier reads Biscuits
+})
+```
+
+A revocation reaches a cached answer when the answer's TTL runs out
+(`DefaultRevocationCacheTTL`, two seconds), or at once when you call
+`Clear` or `ClearRevoked` as a revocation is announced.
+
+- **`Clear`** drops the whole cache: an answer cached for a descendant is
+  also an answer about the revoked ancestor.
+- **`ClearRevoked(ids...)`** drops only what a revocation of `ids`
+  outdates — their answers and those of every descendant the cache holds
+  one for — when the store is a `RevocationLineageLookup`, which names the
+  ancestors each answer covers (memstore's and pgstore's `Store` are).
+  Over any other store it is `Clear`. Every other answer stays, and so do
+  lookups in flight that touch no revoked id, so the notifications of a
+  bulk revocation do not stop every other check from being cached.
+- **A decorator** that embeds `limes.Store` has no `RevocationLineage` to
+  promote, and silently turns `ClearRevoked` into `Clear`. Forward the
+  method. Set `RevocationCacheConfig.RequireLineage` to have
+  `NewRevocationCache` refuse an upstream without it
+  (`ErrNoRevocationLineage`); `Stats().Lineage` says which the cache has,
+  and `Stats().ClearsWithoutLineage` counts the `ClearRevoked` calls that
+  cleared whole for want of it.
+
+An answer is fresh for the TTL from when the store was asked, however long
+the store took. Choose the TTL from how often one token is verified, not
+from a request burst: the two-second default serves the requests of one
+HTTP exchange, while an agent calling a tool once per model step, seconds
+or minutes apart, finds every answer expired.
+
+A long TTL is safe only while a revocation signal reaches the cache, so the
+cache has two bounds:
+
+- **`TTL`** serves answers while no signal vouches for the cache. Keep it
+  as short as a revocation may go unseen.
+- **`SyncedTTL`** (at least `TTL`, at most `MaxRevocationCacheSyncedTTL`,
+  a day) serves them while every open revocation signal listens. Set it a
+  little above the interval between two verifications of one token.
+
+A signal is a `RevocationSignal`, which `pgstore.RevocationWatcher` opens on
+every cache that takes one (`RevocationSignalTarget`) when `Run` starts, or
+which a signal of your own — a message bus, another database — opens with
+`RevocationCache.NewSignal`. Through it the source says `Listening` and
+`NotListening` as its connection comes and goes, `Revoked` or `RevokedAll`
+per notification, and `Renew` while it knows itself listening.
+
+- **Leases.** `Listening(lease)` vouches for the cache for a lease, which
+  `Renew` extends. A signal that stops without `NotListening` — its
+  goroutine stuck or gone — lets the lease lapse, and the cache falls back
+  to `TTL` (counted in `Stats().SyncsLost`).
+- **Losing the signal.** `NotListening` cuts short the answers cached
+  under `SyncedTTL` at once.
+- **Regaining it.** `Listening` drops nothing: an answer read before it
+  may have missed a revocation made while nothing listened, so it stays on
+  `TTL`. Only answers read afterwards are served for `SyncedTTL`. A
+  flapping connection thus leaves answers in place rather than send every
+  verifier to the store as it recovers.
+- **Several signals** — one watcher per database, say — hold `SyncedTTL`
+  only while every one listens. One started later is not waited for, so
+  start them together.
+
+`Stats()` reports, for each kind of answer, `Hits`, `Misses`, `Lookups`,
+`Evictions` (growing: `MaxEntries` is too small), `Entries` and `Stale`,
+plus `Synced` and the signals' counts ([`RevocationCacheStats`](api/revocation.md#limes.RevocationCacheStats));
+`otelmetric.InstrumentRevocationCache` exports them. `Sweep` drops expired
+entries on a timer of yours; it is optional, since lookups skip and
+replace them anyway.
 
 The cache fails closed: an upstream that fails is a failed check, and the
-verifier refuses. `MaxStale` trades that for availability through a short
-outage of the store: an answer past its TTL is kept as long again as
-`MaxStale`, and stands in for a lookup that fails — answered as it was,
-counted in `Stale`, logged at WARN through `Logger`. A revocation the store
-holds then goes unseen while it is down, for `MaxStale` at most, which
-`MaxRevocationCacheStale`, an hour, bounds. `ErrNotFound` is the store's
-answer and is never covered, nor a caller whose context ended. A
-revocation the cache learned is not undone by a stale answer: a live
-answer covering a capability or revocation id revoked since is served
-revoked, and while a revoked answer the cache dropped to make room would
-still be kept, a stale live answer about a delegated capability, or about a
-Biscuit's revocation ids asked together, is not served at all. Stale
-answers make room before any fresh one does, and `Clear` and
-`ClearRevoked` drop them with the rest. Point the store a `RevocationCache` reads, and the watcher's
-connection, at the primary, not at a read replica. A standby applies a revocation after
-the primary commits it and notifies, so a cache cleared by the notification
-can read "not revoked" from a standby still behind and keep it for its
-`SyncedTTL`; and a standby refuses `LISTEN`, so a watcher pointed at one
-never listens. Reports — `SumCharges`, `CountRecords`, `ListRecords` — may
-read a replica. Over `pgstore`, run a `pgstore.RevocationWatcher` beside each
-verifier: the schema notifies `pgstore.RevocationChannel` on every
-revocation, naming the capabilities revoked (migrations 018 and 021), and the watcher
-passes them to each `RevocationCache` through its `RevocationSignal` — the
-cache then drops what they outdate with `ClearRevoked` — calls
-`ClearRevoked` with them on any other cache that has it
-(`pgstore.RevokedClearer`), and `Clear` on the rest, on a notification that
-names none, and after each connection it opens. A signal of your own — a
-message bus, another database — opens one with `RevocationCache.NewSignal`
-and says through it what it hears, as the watcher does:
+verifier refuses. `MaxStale` (at most `MaxRevocationCacheStale`, an hour)
+trades that for availability through a short store outage: an answer past
+its TTL stands in for a failed lookup for as long again, counted in `Stale`
+and logged at WARN. A revocation the store holds then goes unseen for up
+to `MaxStale`. `ErrNotFound`, an answer, is never covered, nor a caller
+whose context ended, and a revocation the cache already learned is never
+undone by a stale answer ([`RevocationCacheConfig.MaxStale`](api/revocation.md#limes.RevocationCacheConfig)).
+
+Point the store a `RevocationCache` reads, and the watcher's connection, at
+the primary. A standby applies a revocation after the primary commits and
+notifies it, so a cache cleared by the notification can read "not revoked"
+from a standby still behind and keep it for its `SyncedTTL`; and a standby
+refuses `LISTEN`, so a watcher pointed at one never listens. Reports —
+`SumCharges`, `CountRecords`, `ListRecords` — may read a replica.
+
+### Propagate revocations with pgstore
+
+Run a `pgstore.RevocationWatcher` beside each verifier. The schema notifies
+`pgstore.RevocationChannel` on every revocation, naming the capabilities
+revoked. The watcher passes each notification to every `RevocationCache`
+through its signal, which drops what it outdates; calls `ClearRevoked` on
+any other cache that has it (`pgstore.RevokedClearer`); and calls `Clear`
+on the rest, on a notification naming no id, and after each connection it
+opens.
 
 ```go
 w := pgstore.RevocationWatcher{
@@ -1235,108 +1282,107 @@ w := pgstore.RevocationWatcher{
 go w.Run(ctx) // reconnects with backoff until ctx ends
 ```
 
-A statement that writes no new revocation entry notifies nothing, and one
-that revokes only capabilities whose parent was revoked before names none of
-them and notifies nothing either: their answers were outdated by the
-parent's. A cascade names its top capability alone, whose descendants'
-answers name it. A statement's ids come `pgstore.MaxNotifiedRevocations`
-(100) to a notification, so a batch of `RevokeMatching` at its default
-limit drops only what it outdates (migration 028). A Biscuit copy's
-revocation, a statement naming more than
-`pgstore.MaxNotifiedRevocationsPerStatement` (1 000) capabilities, and one
-revoking a capability the writer's row-level security hides (migration 021)
-notify with no id, and the watcher clears whole.
-Revoking a capability revokes everything delegated from it, with or
-without the flag: `IsRevoked` answers for the whole chain. `CascadeChildren`
-also writes a revocation entry per descendant, so the audit trail names each
-capability that was stopped. A chain is at most `MaxDelegationDepth` (64)
-ancestors deep; past it `Delegate` returns `ErrDelegationDepthExceeded`
-(403, `delegation_depth_exceeded`) and no token. The parent stays valid:
-delegate from a shallower capability instead. A chain already deeper than
-the bound, which only a store that does not refuse one can hold, is refused
-at verification as `ErrDelegationTooDeep`, a kind of `ErrRevoked` (401).
+- **Reconnects** wait up to ten seconds between attempts. Before the
+  first `LISTEN` and while it reconnects, nothing clears the cache: `TTL`
+  alone bounds how long a revoked capability still verifies.
+- **A dead connection** — a host gone, a network cut — is found by the
+  heartbeat: the watcher pings a quiet connection every `Heartbeat` (30s by
+  default) and drops one that does not answer within as long again. It
+  renews its signals on every notification and every answered heartbeat,
+  for three heartbeats at a time, so a dead connection vouches for the
+  caches for at most twice the heartbeat.
+- **What a notification names.** A statement that writes no new entry
+  notifies nothing. A capability under a parent revoked before is not
+  named (its answers name the parent), and a cascade names its top
+  capability alone. Ids come `pgstore.MaxNotifiedRevocations` (100) to a
+  notification, so a `RevokeMatching` batch at its default limit drops
+  only what it outdates. A Biscuit copy's revocation, a statement revoking
+  more than `pgstore.MaxNotifiedRevocationsPerStatement` (1 000)
+  capabilities, and one revoking a capability the writer's row-level
+  security hides notify with no id, and the watcher clears whole.
+
+### Purge expired records
 
 Records do not stay forever. A housekeeping job calls
-`Store.Purge(ctx, limes.PurgeRequest{ExpiredFor: retention})` on a timer, and
-again while a batch comes back full (`Limit`, `DefaultHousekeepingLimit` unless
-set): it removes the capabilities expired for longer than the retention, with
-their revocation entries and those of their Biscuit copies, then
-`UsageHousekeeping.PurgeOrphans` releases what the meter still holds for them.
-It never removes a capability while a child of it stays on record: `Insert`
-refuses a child that would outlive its parent, and among records expiring
-together `Purge` takes the deepest first. The retention is at least
-`MinPurgeRetention` (six minutes, the zero value's): a verifier accepts a
-token for up to its `Leeway` past expiry, never more than `MaxLeeway`, by a
-clock that may run up to `PurgeClockSkew` behind the store's, and a
-revocation purged inside that window would let the revoked token through.
+`Store.Purge(ctx, limes.PurgeRequest{ExpiredFor: retention})` on a timer,
+again while a batch comes back full (`Limit`, `DefaultHousekeepingLimit`
+unless set). It removes the capabilities expired for longer than the
+retention, with their revocation entries and those of their Biscuit
+copies; then `UsageHousekeeping.PurgeOrphans` releases what the meter
+still holds for them. It never removes a capability while a child stays on
+record: `Insert` refuses a child that would outlive its parent, and among
+records expiring together `Purge` takes the deepest first.
 
-These bounds are constants, not settings, because the two sides that rely on
-them are configured apart: the verifiers, in every service that accepts a
-token, and the job that purges, beside the store. A store cannot see the
-leeway of each verifier, so the only bound it can trust is one every verifier
-is held to. Both bounds are floors and ceilings, not values: a verifier takes
-any `Leeway` up to `MaxLeeway`, and `Purge` any `ExpiredFor` from
-`MinPurgeRetention` up. Where clocks may drift further apart than
-`PurgeClockSkew`, keep revocations longer by passing a longer `ExpiredFor`.
+The retention is at least `MinPurgeRetention` (six minutes, the zero
+value's). A verifier accepts a token up to its `Leeway` past expiry, never
+more than `MaxLeeway`, by a clock that may run up to `PurgeClockSkew`
+behind the store's; a revocation purged inside that window would let the
+revoked token through. These bounds are constants, not settings, because
+the verifiers and the purging job are configured apart, and a store cannot
+see each verifier's leeway. Where clocks may drift further apart than
+`PurgeClockSkew`, pass a longer `ExpiredFor`.
 
 ### A lookup that sees every record
 
 A verifier reads revocation through its one `VerifierConfig.Revocations`,
 whatever issuer minted the token, so that lookup must see the records of
-every issuer in `TrustedIssuers`. `IsRevoked` answers a capability it has no
-record of as not revoked: a token from an issuer that records in another
-store would verify, and nothing revoked there would ever stop it. The same
-holds for records a tenant-scoped role cannot read, and for those a restore
-from an older backup lost.
+every issuer in `TrustedIssuers`. `IsRevoked` answers a capability it has
+no record of as not revoked: a token from an issuer that records in
+another store would verify, and nothing revoked there would stop it. The
+same holds for records a tenant-scoped role cannot read, and for those a
+restore from an older backup lost.
 
 So by default the verifier requires a record. A capability the lookup has
-no record of is refused with `ErrUnrecorded` (code and reason `unrecorded`,
-401), which is not `ErrRevoked`: an operator tells a lookup blind to a
-record from a capability someone stopped. It is no permanent refusal, as
-the record may yet appear. A Biscuit's capability is held to its record as
-a JWT's; a copy's own revocation ids are no record, and are asked about as
-before. The lookup must tell a capability not on record from one not
-revoked: a `RevocationLineageLookup`, as memstore's and pgstore's `Store`
-are, or a `RevocationCache` over one. `NewVerifier` refuses any other with
-`ErrInvalidConfig`. A type of yours that wraps the cache is a
-`RevocationLineageLookup` when it forwards (or embeds) the cache's
-`RevocationLineage`; over a cache whose upstream names no lineage, every
-verification through it fails with `ErrNoRevocationLineage` rather than
-pass. A lookup of your own that answers an id not on record as not
-revoked, against the `RevocationLineageLookup` contract, defeats the check
-unseen; `storetest` checks a store for it. The cache keeps the answer that
-an id has no record for its `TTL`, never its `SyncedTTL` — a revocation
-signal says nothing of a record appearing — apart from its other answers
-(`Stats().Unrecorded`); `Clear` drops it, and `ClearRevoked` of the id.
+no record of is refused with `ErrUnrecorded` (code and reason
+`unrecorded`, 401). It is not `ErrRevoked`, so an operator tells a blind
+lookup from a stopped capability, and not permanent: the record may yet
+appear. A Biscuit's capability is held to its record as a JWT's is; a
+copy's own revocation ids need no record.
 
-An `Issuer` returns a token only once its record is written, so a verifier
-reading the primary never refuses a token for want of its record. One
-reading a replica that lags refuses a fresh token until replication brings
-the record there, and for up to `TTL` after through a cache.
+- **The lookup** must tell a capability not on record from one not
+  revoked: a `RevocationLineageLookup`, as memstore's and pgstore's `Store`
+  are, or a `RevocationCache` over one. `NewVerifier` refuses any other
+  with `ErrInvalidConfig`. A type of yours that wraps the cache keeps the
+  check when it forwards `RevocationLineage`, as in
+  [Cache revocation answers](#cache-revocation-answers); over a cache whose
+  upstream names no lineage, every verification fails with
+  `ErrNoRevocationLineage`. A lookup of your own that answers an
+  id not on record as not revoked, against the contract, defeats the check
+  unseen; `storetest` checks a store for it.
+- **The cache** keeps a no-record answer for its `TTL`, never its
+  `SyncedTTL` — a revocation signal says nothing of a record appearing —
+  apart from its other answers (`Stats().Unrecorded`). `Clear` drops it,
+  and so does `ClearRevoked` of the id.
+- **Replicas.** An `Issuer` returns a token only once its record is
+  written, so a verifier reading the primary never refuses a token for
+  want of its record. One reading a lagging replica refuses a fresh token
+  until replication brings the record there, and for up to `TTL` after
+  through a cache.
+
 `VerifierConfig.AllowUnrecorded` accepts such a token instead, reading a
-capability with no record as not revoked, as `IsRevoked` does; it also
-accepts a lookup that names no lineage. Set it only where every trusted
-issuer records where the lookup reads.
+capability with no record as not revoked, and accepts a lookup that names
+no lineage. Set it only where every trusted issuer records where the
+lookup reads.
 
 ### Revoke a user, a client or a session
 
 The events an operator acts on name no capability: a user leaves, a client
 is compromised, the identity provider ends a session. A store that is a
 `limes.BulkRevoker` — memstore's and pgstore's are — revokes every
-capability of one tenant that matches a selector. The selectors are:
+capability of one tenant that matches the selectors:
 
-- `Subject`, the principal a capability authorises;
-- `OnBehalfOf`, every agent acting for a user;
-- `ClientID`;
-- `Session`, the identity provider's session it was issued under;
-- `RunID`, the agent run it was issued to (`Subject.Agent.RunID`): a run
-  gone wrong, whose capabilities issued apart share no lineage;
-- `SubjectIssuer`, the identity provider its subject was authenticated by:
-  beside `ClientID` or `Session`, one provider's where another names the
-  same; alone, every capability of a provider removed.
+| Selector | Matches |
+|---|---|
+| `Subject` | the principal a capability authorises |
+| `OnBehalfOf` | every agent acting for a user |
+| `ClientID` | the OAuth client |
+| `Session` | the identity provider's session it was issued under |
+| `RunID` | the agent run it was issued to (`Subject.Agent.RunID`): a run gone wrong, whose capabilities share no lineage |
+| `SubjectIssuer` | the identity provider that authenticated its subject: beside `ClientID` or `Session`, one provider's where another names the same; alone, every capability of a removed provider |
 
-Given together, they must all match. At least one selector is required, and
-either `TenantID` or `AllTenants` ([ADR-0013](adr/0013-bulk-revocation.md)).
+Selectors given together must all match. At least one is required, and
+either `TenantID` or `AllTenants`
+([ADR-0013](adr/0013-bulk-revocation.md)).
 
 ```go
 req := limes.RevokeMatchingRequest{TenantID: tenant, Session: sid, Note: "IdP logout", Actor: "backchannel-logout"}
@@ -1348,59 +1394,49 @@ for {
 }
 ```
 
-- **A `Revoker` built with `RevokerConfig.Bulk` carries each call** to
-  the store's `BulkRevoker` ([Revoke](#revoke)), logs it, and clears its
-  cache when given one.
-- **Each call writes an entry for at most `Limit` capabilities** (default
-  `DefaultHousekeepingLimit`) that have none, in order of tenant and id. It
-  reports the entries written (`Revoked`), the tenants it wrote in
+- **Batches.** Each call writes an entry for at most `Limit` capabilities
+  (default `DefaultHousekeepingLimit`) that have none, in order of tenant
+  and id, and reports the entries written (`Revoked`), the tenants
   (`Tenants`) and whether more may match (`More`), so no transaction holds
-  a tenant's rows for long.
-- **Descendants stop through their lineage,** as with `Revoke`.
-- **A capability issued while the loop runs** — by a client still holding
-  a token that can delegate — is caught by another pass. Run one after the
-  identity provider has stopped issuing for the session.
-- **The session is issuance metadata, never a claim.** `IssueRequest.Session`
-  records it, `Record.Session` reads it back, and every delegation takes its
-  parent's. An `exchange.Exchanger` records the subject token's `sid`. A
-  capability issued with no session is reached by subject or client
-  instead. In pgstore, records written before migration 025 carry no
-  session (their client and on-behalf-of are backfilled).
-- **So is the subject issuer.** `IssueRequest.SubjectIssuer` records it,
-  `Record.SubjectIssuer` reads it back, and every delegation takes its
-  parent's. An `exchange.Exchanger` records the subject token's `iss`,
-  and refuses a policy naming another. Empty in a request matches any
-  issuer, and none. In pgstore, migration 039 backfills it for the
-  capabilities an `ExchangeStore` recorded an exchange of, and their
-  delegations; any other record written before carries none.
-- **An OIDC back-channel logout** endpoint verifies the provider's logout
-  token, then runs the loop above with its `sid`.
-- **Release the holds it stopped.** A revoked capability's open holds
-  keep counting against the ceilings until they expire, since a cost
-  reserved may still settle. A usage store that is a
-  `meter.MatchingReleaser` — memstore's and pgstore's are — releases them
-  at once: `ReleaseMatching` with the same selectors and a tenant — or
-  `AllTenants`, by client, session or subject issuer — releases the holds of revoked
-  matches and of everything delegated from them, never a live
-  capability's ([ADR-0015](adr/0015-release-matching-holds.md)). Run it
-  with the revocation's own request: it finds what is revoked, not what
-  this call revoked, so a release that failed is retried as it was, though
-  the revocation, repeated, revokes nothing. After a `Revoke` of one
-  capability, `CapabilityID` and its tenant release its holds and those
-  of its descendants. What the holds keep is read
-  before and after: `TenantBudget.ReservedAmount` and
-  `Usage.ReservedAmount` sum it, and a `meter.TenantReservationLister`
-  lists a tenant's holds one by one.
-- **Preview it, and audit it after.** `CountRecordsRequest` and
-  `ListRecordsRequest` take the same selectors — `Subject`, `OnBehalfOf`,
-  `ClientID`, `Session`, `SubjectIssuer`, `RunID` — so a count names what a revocation would reach,
-  tenant by tenant with `AllTenants` and `ByTenant`, and a listing names
-  each record; run again after, the same count reports them revoked.
+  a tenant's rows for long. Descendants stop through their lineage, as
+  with `Revoke`.
+- **Races.** A capability issued while the loop runs — by a client still
+  holding a token that can delegate — is caught by another pass. Run one
+  after the identity provider has stopped issuing for the session.
+- **Session and subject issuer are issuance metadata, never claims.**
+  `IssueRequest.Session` and `IssueRequest.SubjectIssuer` record them,
+  `Record.Session` and `Record.SubjectIssuer` read them back, and every
+  delegation takes its parent's. An `exchange.Exchanger` records the
+  subject token's `sid` and `iss`, and refuses a policy naming another
+  issuer. An empty `SubjectIssuer` in a request matches any issuer, and
+  none. A capability issued with neither is reached by subject or client.
+  In pgstore, records written before migration 025 have no session, and
+  only capabilities an `ExchangeStore` recorded an exchange of, with their
+  delegations, have a subject issuer from before migration 039.
+- **OIDC back-channel logout.** Verify the provider's logout token, then
+  run the loop above with its `sid` and `iss`.
+- **Release the holds it stopped.** A revoked capability's open holds keep
+  counting against the ceilings until they expire, since a reserved cost
+  may still settle. A usage store that is a `meter.MatchingReleaser` —
+  memstore's and pgstore's are — releases them at once: `ReleaseMatching`
+  with the revocation's own selectors and tenant (or `AllTenants`)
+  releases the holds of revoked matches and everything delegated from
+  them, never a live capability's
+  ([ADR-0015](adr/0015-release-matching-holds.md)). It finds what is
+  revoked, not what this call revoked, so a failed release is retried as
+  it was. After a `Revoke` of one capability, `CapabilityID` and its
+  tenant release its holds and its descendants'. `TenantBudget.ReservedAmount`
+  and `Usage.ReservedAmount` sum what holds keep, and a
+  `meter.TenantReservationLister` lists a tenant's holds one by one.
+- **Preview and audit.** `CountRecordsRequest` and `ListRecordsRequest`
+  take the same selectors, so a count names what a revocation would reach
+  — tenant by tenant with `AllTenants` and `ByTenant` — and a listing names
+  each record. Run again after, the same count reports them revoked.
 
 A client registered once at an authorization server that serves many
-tenants holds capabilities in each of them, and so may a session. Deleting
-the client revokes them all with `AllTenants`, under a scope that writes
-every tenant ([ADR-0014](adr/0014-bulk-revocation-across-tenants.md)):
+tenants holds capabilities in each, and so may a session. Deleting the
+client revokes them all with `AllTenants`, under a scope that writes every
+tenant ([ADR-0014](adr/0014-bulk-revocation-across-tenants.md)):
 
 ```go
 for {
@@ -1416,27 +1452,25 @@ for {
 }
 ```
 
-- **Across tenants only `ClientID`, `Session` and `SubjectIssuer` select:**
-  a subject names a principal of one tenant, and the consumer mints run
-  ids, so `Subject`, `OnBehalfOf` and `RunID` beside `AllTenants` are
-  `ErrInvalidRequest`.
+- **Only `ClientID`, `Session` and `SubjectIssuer` select across
+  tenants.** A subject names a principal of one tenant, and the consumer
+  mints run ids, so `Subject`, `OnBehalfOf` or `RunID` beside `AllTenants`
+  is `ErrInvalidRequest`.
 - **With more than one identity provider, name the issuer.** Two providers
   may register a client of the same id, or reuse a `sid`; without
   `SubjectIssuer` a call by client or session revokes both providers'.
-  An OIDC back-channel logout token carries its provider's `iss`: pass it.
 - **pgstore refuses a narrower scope** — one tenant's, or
   `WithAllTenantsReadOnly` — as `ErrScopeMismatch`.
 - **A batch writes in at most 16 tenants,** each under the revoke lock a
   revoke in that tenant takes, so a delegation there waits for it as for
-  any revoke. A client with capabilities in many tenants takes a call per
-  16 of them.
+  any revoke.
 
 ## Bring your own storage
 
 On PostgreSQL, take `pgstore` (`github.com/oleg-tkachuk/limes/pgstore`, a
-module of its own): it implements every contract below but `KeyResolver` and
-`dpop.Nonces`, passes `storetest` and `metertest`, and keeps tenants apart
-with row-level security. It needs PostgreSQL 15 or later.
+module of its own). It implements every contract below but `KeyResolver`
+and `dpop.Nonces`, passes `storetest` and `metertest`, keeps tenants apart
+with row-level security, and needs PostgreSQL 15 or later.
 
 ```go
 // In the migration job, as the owner of the schema, granting the role the
@@ -1453,164 +1487,61 @@ usage, _ := pgstore.NewUsageStore(pgstore.Config{DB: pool})
 _, err = records.Revoke(pgstore.WithTenant(ctx, tenant), limes.RevokeRequest{CapabilityID: id})
 ```
 
+### The schema
+
 **One schema, named `limes`, whatever a consumer uses.** pgstore creates
-every table its stores read, budgets, ledger and holds among them, for a
-consumer that counts requests alone as for one that charges. A table a
-consumer never writes costs a catalog entry and nothing per call:
-- `Bump` reads the subject's records and their lineage;
-- it writes `usage` and `copy_usage`;
-- it reads the erase mark;
-- it never touches `tenant_budgets`, `charges` or `reservations`;
-- no trigger fires on those three, and autovacuum passes over a table with
-  no writes.
+every table its stores read, for a consumer that counts requests alone as
+for one that charges. A table a consumer never writes costs a catalog entry
+and nothing per call: `Bump` never touches `tenant_budgets`, `charges` or
+`reservations`, no trigger fires on them, and autovacuum passes them over.
+A counter-only profile would fork the migrations and their version
+numbers, so there is none. The name is fixed: every function, policy and
+migration names `limes.` outright, and the functions pin their
+`search_path` (migration 007), so no table or function a role creates
+earlier in a path stands in for pgstore's. Keep your own tables in a schema
+of your own beside it.
 
-A counter-only profile of the schema would fork the migrations and their
-version numbers. `CheckSchema` and the conformance suites would then answer
-two schemas, so there is none.
+**Migrations.** `pgstore/migrate` creates and upgrades the schema; only a
+migration job imports it, so a serving binary links neither the
+migrations nor `tern`.
 
-The name is fixed on purpose. Every function, policy and migration names
-`limes.` outright, and the functions pin their `search_path`
-(007_pin_catalog_names.sql). That way, a table or function a role creates
-earlier in a path never stands in for pgstore's. A configurable name would
-make every one of those statements a template. A consumer keeps its own
-tables in a schema of its own beside it.
+- Run `migrate.Run` as the role that owns the schema, and serve as
+  another. `migrate.Options.RuntimeRoles` grants the serving roles the
+  schema, its tables (those of later versions too), its functions — which
+  no other role may call — and only reads of the version table. Run it
+  before any migration of yours that refers to its tables.
+- The policies bind the owner too (`FORCE ROW LEVEL SECURITY`), and
+  `migrate.Run` scopes each migration to every tenant. But the owner may
+  turn them off, and a superuser or a `BYPASSRLS` role is never bound, so
+  `CheckSchema` refuses with `ErrRuntimeRole` a pool of any of the three,
+  of a role owning anything in the schema, or of one able to act as one of
+  these. It checks the session's role and the login role as well as the
+  current one, since a session that switched with `SET ROLE` can switch
+  back.
+- `migrate.Run` holds the advisory lock every `tern` migration takes,
+  which is reentrant per session: a consumer migrating with `tern` calls
+  it on the connection its own run holds.
+- Each transactional migration runs `READ COMMITTED`, whatever the
+  defaults. Every migration that builds an index on an existing table
+  builds it `CONCURRENTLY` and blocks no writes, so a `migrate.Run` at
+  startup blocks none.
+- `CheckSchema` tells a readiness check whether the schema is at the
+  version the package queries: `ErrSchemaMismatch` when it is behind
+  (`migrate.Run` has not run) or ahead (a later pgstore migrated).
+  `ReadSchemaVersion` reports both numbers (`Applied`, `Expected`), with no
+  more than SELECT on the version table.
 
-`Config.DB` is a `pgstore.DB` — `BeginTx` and `QueryRow`, which
-`*pgxpool.Pool` and `*pgx.Conn` implement. Every transaction the store opens
-is READ COMMITTED, whatever the database's default, so a call that waited on
-a lock reads what committed meanwhile; a `DB` of your own passes on the
-`pgx.TxOptions` it is given, or the store runs at the database's default
-isolation.
-
-A `*pgxpool.Pool` or a `*pgx.Conn` also saves each call its `BEGIN` and a
-meter call its `COMMIT`: the store finds, by type assertion, that it can
-run the call on a connection of its own, and sends `BEGIN` with the call's
-first statement and `COMMIT` with the last, so a `Charge` takes four round
-trips and a `Bump` three. Its `BeginTx` then serves no call. A `DB` of your
-own — a wrapper that embeds a pool among them — runs every transaction
-through its `BeginTx`, `BEGIN` and `COMMIT` a round trip each, unless it
-opts in by implementing `pgstore.ConnLender`: its `LendConn` lends the
-call a pool connection, and its `BeginTx` is no longer called for the
-calls it serves. The store logs which it took when it is constructed.
-
-A role that does not own the tables sees only the rows of the tenant a call
-is scoped to, and none when it is scoped to no tenant; the revocation checks
-see every tenant, as the verifier asks them before it knows the token's. A
-call whose request names its tenant — `Insert`, `ListByPrincipal`, `Bump`,
-`RevokeMatching`, `Charge`, `Reserve`, `Settle`, `Release`, `GetTenantBudget`, `SetTenantBudget`, the
-tenant erasers, `Ledger.SumCharges`, `Census.ListRecords` and `Census.CountRecords` for one tenant —
-under a
-scope that does not admit that tenant returns `ErrScopeMismatch`, never
-`ErrNotFound` or `ErrInvalidRequest`. A call that names only an id
-(`GetRecord`, `Revoke`, `Refund`, `GetUsage`, `GetCharge`, …) cannot
-be checked so, and answers a row out of scope as not found.
-`onCharged` runs on the store's own transaction, which `TxFrom` reads from
-its context and which is `onCharged`'s only while it runs — and so does a
-refund's `onRefunded`, on the same terms: kept past it, a
-call fails with `pgx.ErrTxClosed`. It is the store's to end — `Commit` or
-`Rollback` on it returns `ErrChargeTransaction`, and a charge whose
-transaction `onCharged` ended with SQL of its own (`COMMIT`, `ROLLBACK`, or
-either followed by `BEGIN`) is refused with `ErrChargeTransaction` and
-`meter.ErrOutcomeUnknown`, since the charge's writes, sent before
-`onCharged` ran, went with that `COMMIT` or that `ROLLBACK`; a savepoint it
-begins is its own to end. Every time it writes comes from `Config.Now`; with
-`Config.Now` nil, holds' and leases' expiry is measured by the database's
-clock, `now()` as the call's transaction began, so replicas whose clocks
-drift apart agree on which holds are live. A capability's expiry is not
-the store's to decide: the issuer's clock wrote it, and the verifier
-decides it by its own clock and leeway. The store ends a hold or a lease
-no later than that expiry plus `limes.MaxLeeway` and
-`limes.PurgeClockSkew`, and refuses `Reserve` and `Lease` with `ErrExpired`
-only past it — when no verifier could still accept the token, and its
-record may be purged (`limes.MinPurgeRetention`).
-
-A tenant's ceiling is exact because the calls that move its spend or holds
-lock its budget row until they commit, so one tenant's charges commit one at
-a time, however many connections or replicas send them: pgstore's
-[Throughput](api/storage.md#package-pgstore) says which calls, and what its
-benchmarks measured. `onCharged` runs while the lock is held — after the
-charge's writes, so that its own writes see the charge's row, and before
-`COMMIT`, which then costs a round trip of its own — so keep it short and on
-the same database, with no network call in it.
-
-A tenant whose calls queue on its row shows it in `limes.tenant.wait`
-([Observe the meter](#observe-the-meter)), and in pgstore's WARN line for
-each call that waited over 100 ms: a wait that grows towards the call's
-own time is a queue, not a slow database. A tenant with no ceiling is
-taken off the row by stripes (below). One with a ceiling is served by
-calls that do not take it — a lease for each worker, which locks the row
-once to open and once to settle, its charges between touching only the
-lease ([Lease a sub-agent its budget](#lease-a-sub-agent-its-budget);
-ADR-0017 measured some three times the charges a second) — or by fewer,
-larger ones, a `Reserve` settled once for many units of work. No setting
-raises the row's own rate.
-
-A tenant with no ceiling is checked against nothing, and pgstore takes its
-calls off the row unless `Config.DisableTenantStripes` is set: they read it
-without locking it and add their change to one of the tenant's stripes,
-chosen by their connection, so they queue only where two connections share
-a stripe. Reads sum the row and the stripes, and setting a ceiling folds
-the stripes back into the row first, waiting for the tenant's calls in
-flight a bounded time (`Config.TenantBudgetLockTimeout`; past it a
-`meter.TenantBudgetBusyError`, which names who held the tenant); from then on
-the tenant's calls lock the row again. A release before pgstore/v0.72.0
-reads the row without its stripes, and would check a ceiling against less
-than was spent: set `DisableTenantStripes` while one still writes the
-database
-([ADR-0022](adr/0022-unlimited-tenant-aggregate.md)).
-
-The schema is created and upgraded by `pgstore/migrate`, which only a
-migration job imports: a binary that serves links neither the migrations nor
-`tern`. Run `migrate.Run` as the role that owns the schema and serve as
-another one. The policies bind the owner too (`FORCE ROW LEVEL SECURITY`), and
-`migrate.Run` scopes
-each migration of its run to every tenant — one whose scope cannot be set
-closes the connection, so it never runs unscoped and the run fails; but the
-owner may turn them off, and a superuser or a role with `BYPASSRLS` is never
-bound, so `CheckSchema` refuses a pool of any of the three — or of a role
-owning anything in the schema, or able to act as one of these — with
-`ErrRuntimeRole`. It checks the session's role and the role the connection
-logged in as as well as the current one, since a session that switched with
-`SET ROLE` or `SET SESSION AUTHORIZATION` can switch back. `migrate.Options.RuntimeRoles` grants the
-serving roles the schema, its tables and the tables of later versions, the
-schema's functions — which no other role may call — and only reads of the
-version table. Run it before any migration of yours that
-refers to its tables. It holds the advisory lock every `tern` migration
-takes, which is reentrant per session: a consumer migrating with `tern` calls
-`migrate.Run` on the connection its own run holds. A consumer with another
-migration tool gives it the steps instead, from `pgstore/migrate/ddl`, which
-links no `tern` and no driver: `ddl.Setup` once, each step's `SQL()` in a
-transaction of its own, or its `Statements()` a statement at a time outside
-one where `InTransaction` is false, then `ddl.Grants` (`migrate.Steps`,
-`migrate.Setup` and `migrate.Grants` are the same values). Two transactional
-steps never share a transaction: each opens by setting the transaction `READ
-COMMITTED`, which PostgreSQL takes only as a transaction's first statement,
-and which migration 016 needs, since it reads each level of records by the
-next statement's snapshot. Each step scopes
-itself as `migrate.Run` would and records its version, so `CheckSchema` reads
-it and `migrate.Run` can take over from it. Each migration that runs in a
-transaction runs `READ COMMITTED`, whatever the role's, the database's or the
-session's default. Every migration that builds
-an index on an existing table builds it `CONCURRENTLY`, outside a
-transaction, and holds no writes, so a `migrate.Run` at startup holds none. `CheckSchema` tells a readiness
-check whether the schema is at the version the package queries, returning
-`ErrSchemaMismatch` when it is not — behind, `migrate.Run` has not run; ahead, a
-later pgstore migrated; `ReadSchemaVersion` reports both numbers (`Applied`,
-`Expected`), with no more than SELECT on the version table. `Config.CheckTenant` runs in `Insert`'s
-transaction, so a consumer that keeps its own tenants answers
-`ErrUnknownTenant` and `ErrTenantDeleted` from the same snapshot the record is
-written in; `Config.Scope` replaces `ScopeFromContext` for a consumer whose
-policies read settings of their own; such a Scope gets no scope check unless
-`Config.CheckScope` names one — `pgstore.CheckSchemaScope` for a Scope that
-sets the schema's own settings, `pgstore.SettingTenant` and
-`pgstore.SettingAllTenants`. A Scope that maps a read across every tenant
-to `SettingAllTenantsRead` gets the read-only refusal of
-`WithAllTenantsReadOnly`: a call that writes under it returns
-`ErrScopeMismatch` and changes nothing.
-
-**Vendoring the schema into a migration tool.** A consumer whose own tool
-(Atlas, golang-migrate, Flyway) applies its schema writes pgstore's steps out
-as files once per pgstore upgrade, and checks them in:
+**Another migration tool.** Hand it the steps from `pgstore/migrate/ddl`,
+which links no `tern` and no driver (`migrate.Steps`, `migrate.Setup` and
+`migrate.Grants` are the same values): `ddl.Setup` once; each step's `SQL()`
+in a transaction of its own, or, where `InTransaction` is false, its
+`Statements()` one at a time outside one; then `ddl.Grants`. Never put two
+transactional steps in one transaction: each opens by setting `READ
+COMMITTED`, which PostgreSQL takes only as a transaction's first statement.
+Each step scopes itself as `migrate.Run` would and records its version in
+`limes.schema_version`, so `CheckSchema` reads it and `migrate.Run` can take
+over. A tool that applies files (Atlas, golang-migrate, Flyway) gets them
+written out once per pgstore upgrade, and checked in:
 
 ```go
 steps, err := ddl.Steps()
@@ -1627,19 +1558,103 @@ for _, s := range steps {
 grants, err := ddl.Grants([]string{"app"}) // last, one transaction
 ```
 
-Every statement handed over ends with `;`, and a step's last statement
-records its version in `limes.schema_version`, so `pgstore.CheckSchema`
-reads where the database is and `migrate.Run` can take over from it. A
-vendored copy falls behind when a pgstore upgrade brings a step: compare
-the files with `ddl.Steps()` in a test of the consumer's own, so the upgrade
-fails in CI, not in production, and a readiness check that runs
+Every statement ends with `;`. A vendored copy falls behind when a pgstore
+upgrade brings a step: compare the files with `ddl.Steps()` in a test of
+your own so the upgrade fails in CI, and a readiness check running
 `CheckSchema` answers `ErrSchemaMismatch`, with `ReadSchemaVersion` naming
-the applied version beside `ddl.Version()`. Hold the result to the
-conformance suites — `storetest.Run` and `metertest.Run` or
-`metertest.RunCounter` over the vendored schema, the consumer's own roles
-and its row-level security — which check the deployment, not only pgstore.
+the applied version beside `ddl.Version()`. Run `storetest.Run` and
+`metertest.Run` (or `RunCounter`) over the vendored schema, your own roles
+and row-level security: they check the deployment, not only pgstore.
 
-Elsewhere, implement these and you are done:
+### Connections, scopes and transactions
+
+`Config.DB` is a `pgstore.DB` — `BeginTx` and `QueryRow` — which
+`*pgxpool.Pool` and `*pgx.Conn` implement. Every transaction the store
+opens is READ COMMITTED, so a call that waited on a lock reads what
+committed meanwhile; a `DB` of your own passes on the `pgx.TxOptions` it is
+given, or runs at the database's default. A pool or connection (or a `DB`
+that implements `pgstore.ConnLender`) lets the store send `BEGIN` with a
+call's first statement and a meter call's `COMMIT` with its last: a
+`Charge` takes four round trips, a `Bump` three. Any other `DB` — a wrapper
+that embeds a pool among them — pays a round trip each for `BEGIN` and
+`COMMIT`. The store logs which it took when it is built.
+
+A role that does not own the tables sees only the rows of the tenant a call
+is scoped to, and none when it is scoped to no tenant; the revocation
+checks see every tenant, since the verifier asks before it knows the
+token's.
+
+- A call whose request names its tenant — `Insert`, `ListByPrincipal`,
+  `Bump`, `RevokeMatching`, `Charge`, `Reserve`, `Settle`, `Release`,
+  `GetTenantBudget`, `SetTenantBudget`, the tenant erasers,
+  `Ledger.SumCharges`, `Census.ListRecords` and `Census.CountRecords` for
+  one tenant — under a scope that does not admit that tenant returns
+  `ErrScopeMismatch`, never `ErrNotFound` or `ErrInvalidRequest`.
+- A call that names only an id (`GetRecord`, `Revoke`, `Refund`,
+  `GetUsage`, `GetCharge`, …) cannot be checked so, and answers a row out
+  of scope as not found.
+- `Config.Scope` replaces `ScopeFromContext` for a consumer whose policies
+  read settings of their own. Such a Scope gets no scope check unless
+  `Config.CheckScope` names one: `pgstore.CheckSchemaScope` for a Scope
+  that sets the schema's own settings, `pgstore.SettingTenant` and
+  `pgstore.SettingAllTenants`. A Scope that maps a read across every
+  tenant to `SettingAllTenantsRead` gets the read-only refusal of
+  `WithAllTenantsReadOnly`.
+- `Config.CheckTenant` runs in `Insert`'s transaction, so a consumer that
+  keeps its own tenants answers `ErrUnknownTenant` and `ErrTenantDeleted`
+  from the snapshot the record is written in.
+
+`onCharged`, and a refund's `onRefunded`, run on the store's own
+transaction, which `TxFrom` reads from the context and which is theirs only
+while they run: kept past it, a call fails with `pgx.ErrTxClosed`. The
+transaction is the store's to end. `Commit` or `Rollback` on it returns
+`ErrChargeTransaction`, and a charge whose transaction the callback ended
+with SQL of its own (`COMMIT`, `ROLLBACK`, or either followed by `BEGIN`) is
+refused with `ErrChargeTransaction` and `meter.ErrOutcomeUnknown`, since
+the charge's writes went with it. A savepoint it begins is its own to end.
+
+Every time the store writes comes from `Config.Now`. With `Config.Now` nil,
+holds' and leases' expiry is measured by the database's clock, `now()` as
+the call's transaction began, so replicas whose clocks drift agree on which
+holds are live. A capability's expiry is judged by each verifier's clock
+and leeway, so the store ends a hold or lease, and refuses `Reserve` and
+`Lease` with `ErrExpired`, only past the most a verifier may still accept
+([Reserve before a cost is known](#reserve-before-a-cost-is-known)).
+
+### A tenant's throughput
+
+A tenant's ceiling is exact because the calls that move its spend or holds
+lock its budget row until they commit, so one tenant's charges commit one
+at a time, however many replicas send them ([pgstore's
+throughput](api/storage.md#package-pgstore)). `onCharged` runs while the
+lock is held, and costs `COMMIT` a round trip of its own, so keep it
+short.
+
+A tenant whose calls queue on its row shows it in `limes.tenant.wait`
+([Observe the meter](#observe-the-meter)), and in pgstore's WARN line for
+each call that waited over 100 ms: a wait growing towards the call's own
+time is a queue, not a slow database. No setting raises the row's own rate.
+
+- **With a ceiling**, serve the tenant with fewer calls on the row: a
+  lease for each worker, which locks the row once to open and once to
+  settle ([Lease a sub-agent its budget](#lease-a-sub-agent-its-budget);
+  ADR-0017 measured some three times the charges a second), or a `Reserve`
+  settled once for many units of work.
+- **Without a ceiling**, nothing is checked, and pgstore takes the calls
+  off the row unless `Config.DisableTenantStripes` is set: they read it
+  without locking and add their change to one of the tenant's stripes,
+  chosen by connection. Reads sum the row and the stripes. Setting a
+  ceiling folds the stripes back first, waiting for the tenant's calls in
+  flight up to `Config.TenantBudgetLockTimeout` (5s; past it a
+  `meter.TenantBudgetBusyError` naming who held the tenant); from then on
+  the tenant's calls lock the row again. A release before pgstore/v0.72.0
+  reads the row without its stripes and would check a ceiling against less
+  than was spent: set `DisableTenantStripes` while one still writes the
+  database ([ADR-0022](adr/0022-unlimited-tenant-aggregate.md)).
+
+### The contracts
+
+Elsewhere, implement these:
 
 | Interface | Stores | Transactions needed? |
 |---|---|---|
@@ -1658,110 +1673,154 @@ Elsewhere, implement these and you are done:
 | `meter.TenantReservationLister` | Lists the holds that make up a tenant's `ReservedAmount`, soonest to expire first (optional) | No |
 | `meter.UsageStore` = `Meter` + `MeterReader` + `TenantBudgets` + `UsageHousekeeping` (only to meter) | Request and spend counters, the charges ledger, tenant ceilings; `DeleteUsage` and `PurgeOrphans` release a reaped capability's holds | Only for atomic side effects |
 | `KeyResolver` | Public verification keys; an unknown kid is `jwks.ErrUnknownKID`, the token's fault (`ErrInvalidToken`), and any other error the resolver's own (`jwks.Static` and `jwks.Remote` ship; `jwkstest` checks yours) | No |
-| `dpop.ReplayCache` | DPoP proof ids seen, per key, each counted against its holder: `Seen(ctx, dpop.ReplayEntry)` refuses a holder past its share with an error wrapping `dpop.ErrReplayQuota`, logged at WARN, and returns another error when its store cannot answer — an outage, not a refused proof (only for key-bound tokens; `dpop.MemoryReplayCache` ships for one process — behind several replicas, `pgstore.ReplayCache` ships one over PostgreSQL and the `redisreplay` module one over Redis, or implement it over another shared store) | No |
+| `dpop.ReplayCache` | DPoP proof ids seen, each counted against its holder: `Seen(ctx, dpop.ReplayEntry)` refuses a holder past its share with an error wrapping `dpop.ErrReplayQuota`, logged at WARN, and returns another error when its store cannot answer (only for key-bound tokens; [which to pick](#several-replicas)) | No |
 | `dpop.Nonces` | Server-provided DPoP nonces (optional; `dpop.HMACNonces` ships and needs no store) | No |
 
-To bill or report from the charges ledger, read it through a
-`LedgerReader` rather than a store's tables: `SumCharges` sums the charges of
-`TenantID`, or of every tenant with `AllTenants`, taken in [`From`, `To`), by
-the store's clock, grouped by unit and, as `SumChargesRequest` asks, by bucket
-— the zero `ChargeBucketNone` for the period whole, or the UTC
-`ChargeBucketHour`, `Day`, `Week` (ISO, from Monday 00:00) or `Month` — and by
-each dimension `GroupBy` names: `ChargeDimensionTenant`, `Op`, `Actor`,
-`Capability`. `Filter` keeps the charges of the tenants, operations, actors or
-capabilities it lists, at most `MaxChargeFilterValues` each. Amounts in
-different units are never summed together. Buckets come in time order and,
-within each, the largest `Charged` first, ties by unit, tenant, operation,
-actor and capability, bytewise; so with `ChargeBucketNone` the first page of
-`Limit` rows is the top `Limit` — across tenants, grouped by tenant, the
-largest spenders. `meter.AllChargeSums` walks every page. Each `ChargeSum` carries `Charged`, `Refunded` and
-`Charges`; the net is `Charged − Refunded`. A refund counts with the charge it
-returns, so a closed period's sums still move, and a sum past `MaxNanos` is
-`ErrCounterOverflow`.
-`memstore.NewLedger` and `pgstore.NewLedger` read their stores' ledgers, the
-latter scoped to the tenant as every other read, and a sum across tenants only
-under `WithAllTenantsReadOnly` (or `WithAllTenants`), as `ListTenantBudgets`:
-under one tenant's scope it is `ErrScopeMismatch`. Who may read every tenant's
-spend is the consumer's to decide, by who gets that scope; `metertest` checks a reader
-its `Env.Ledger` names.
+Two obligations are easy to miss. `Store.IsRevoked` answers for the
+capability's whole delegation chain, and `Meter` applies every charge and
+request to each ancestor as well, reading the ancestor's ceilings from its
+record. Code that only meters can depend on `Meter` alone; code that only
+administers tenant ceilings, on `TenantBudgets` alone.
 
-The ledger only grows: a store writes a row for every charge and removes
-none, but with its tenant. A row is more than history — an `ExternalRef`
-replays its charge rather than charging again, a settled hold replays its
-receipt, and `Refund` finds it — so those promises hold while the charge is
-in the ledger, and a ledger may remove charges older than a retention of at
-least `meter.MinChargeRetention`, 401 days: a leap year of billing and 35
-days of disputes. Past it a reference charges anew, a settle of the hold finds no
-reservation, a refund is `ErrChargeNotFound`, and `SumCharges` sums what is
-left. Choose the retention from the longest a client may retry a charge or
-dispute one, and keep the ledger in a warehouse of your own if reports must
-reach further back. `memstore.NewLedger` and `pgstore.NewLedger` are also a
-`meter.LedgerHousekeeping`: a worker of yours calls `PurgeCharges` until a
-batch comes back short of its limit, as it calls `Purge`; `OlderThan` zero
-is `MinChargeRetention`, and shorter is refused. pgstore removes the charges
+`Store.Insert` returns `ErrAlreadyExists` for an id already on record. It
+refuses, writing nothing:
+
+- a record with no id or no expiry, or under a parent not on record:
+  `ErrInvalidRequest`;
+- a child expiring after its parent, or in another tenant:
+  `ErrDelegationTooWide`;
+- a child whose budget names another unit than its parent's:
+  `ErrUnitCodeMismatch`;
+- a child with more than `MaxDelegationDepth` ancestors still on record:
+  `ErrDelegationTooDeep`. `Purge` and the `IsRevoked` walk rely on a whole
+  lineage in one tenant, no deeper than the walk reaches;
+- a tenant it does not hold, or one in the trash: `ErrUnknownTenant`,
+  `ErrTenantDeleted`;
+- a call scoped to another tenant than its request names, in a store that
+  scopes rows by context: `ErrScopeMismatch`, rather than answer as if the
+  rows were not there.
+
+`Issue` and `Delegate` pass these through, wrapped, but two the store
+shares with the verify path: `ErrDelegationTooDeep` becomes
+`ErrDelegationDepthExceeded`, and `ErrTenantErased` becomes `ErrTenantGone`,
+since a mint presents no capability to call revoked. Every check on the
+request itself matches `ErrInvalidRequest`: a missing tenant id, an empty
+audience entry, a negative TTL or one ending within the second it is issued
+(a token's times are whole seconds), a `NotBefore` at or after the expiry,
+a malformed thumbprint, invalid caveats (`ErrInvalidCaveats`). Anything
+else they return is the store's or the signer's failure.
+
+**Error families.** A read by id that finds nothing matches `ErrNotFound`,
+through a sentinel of its own where the contract names one:
+`meter.ErrChargeNotFound` (`Refund`, `GetCharge`, `ChargeByRef`),
+`meter.ErrReservationNotFound`, `meter.ErrUsageNotFound` (a capability never
+bumped or charged), `meter.ErrTenantBudgetNotFound` and
+`meter.ErrLeaseNotFound`. A well-formed write that disagrees with what is on
+record matches `ErrConflict`; `ErrorResponse` answers the family 409. Read
+again, and decide:
+
+| Sentinel | From |
+|---|---|
+| `ErrAlreadyExists` | `Insert` |
+| `ErrUnitCodeMismatch` | `Insert`, `Delegate`; a `Charge`, `Reserve` or `Settle` in another unit than a counter already counts in; a `SetTenantBudget` to another unit while anything is held in the old one, or spent in it and not reset |
+| `meter.ErrExternalRefConflict` | `Charge` |
+| `meter.ErrReserveConflict` | `Reserve` |
+| `meter.ErrSettleConflict` | `Settle` |
+| `meter.ErrRefundConflict` | `Refund` |
+| `meter.ErrLeaseNested` | `Lease` |
+| `meter.ErrTenantBudgetVersionMismatch` | `SetTenantBudget` |
+
+**Shapes.** Every write and every listing takes a `…Request`, a read by id
+takes the id, every list is a `Page`, and every read names what it reads
+(`GetRecord`, `GetUsage`, `GetTenantBudget`), so one type may implement
+`Store` and `meter.UsageStore` together, or each apart as `memstore` does.
+`meter.UsageStore` names no transaction type: a store carries its own in
+the callback's context ([Commit side effects with the charge](#commit-side-effects-with-the-charge)).
+
+Every listing — `ListByPrincipal`, `ListTenantBudgets`, `ListReservations`
+(soonest to expire first, ties by id), `SumCharges`, `CountRecords` and
+`ListRecords` — is a page with an opaque cursor, so an API can hand a page
+token to its client. To read `ListByPrincipal` or `ListTenantBudgets`
+whole, range over `AllByPrincipal` or `meter.AllTenantBudgets`. They walk
+the pages from `req.Cursor` afresh on every range, stop fetching when the
+loop breaks, and refuse a page that returns a cursor already fetched
+(`ErrCursorRepeated`). Spend moves between pages, so `AllTenantBudgets` may
+yield a tenant twice or not at all.
+
+```go
+for c, err := range limes.AllByPrincipal(ctx, store, req) {
+    if err != nil { /* yielded once; the walk ends */ }
+    // …
+}
+```
+
+### Read the ledger
+
+Bill and report from the charges ledger through a `meter.LedgerReader`,
+never a store's tables. `SumCharges` sums the charges of `TenantID`, or of
+every tenant with `AllTenants`, taken in [`From`, `To`) by the store's
+clock, grouped by unit and as `SumChargesRequest` asks:
+
+- **by bucket:** the zero `ChargeBucketNone` for the period whole, or the
+  UTC `ChargeBucketHour`, `ChargeBucketDay`, `ChargeBucketWeek` (ISO, from
+  Monday 00:00) or `ChargeBucketMonth`;
+- **by each dimension `GroupBy` names:** `ChargeDimensionTenant`,
+  `ChargeDimensionOp`, `ChargeDimensionActor`, `ChargeDimensionCapability`;
+- **filtered** by `Filter` to the tenants, operations, actors or
+  capabilities it lists, at most `meter.MaxChargeFilterValues` each.
+
+Amounts in different units are never summed together. Buckets come in time
+order and, within each, the largest `Charged` first, ties by unit, tenant,
+operation, actor and capability, bytewise; so with `ChargeBucketNone` the
+first page of `Limit` rows is the top `Limit` — across tenants, grouped by
+tenant, the largest spenders. `meter.AllChargeSums` walks every page. Each
+`ChargeSum` carries `Charged`, `Refunded` and `Charges`; the net is
+`Charged − Refunded`. A refund counts with the charge it returns, so a
+closed period's sums still move; a sum past `MaxNanos` is
+`meter.ErrCounterOverflow`.
+
+`memstore.NewLedger` and `pgstore.NewLedger` read their stores' ledgers;
+pgstore's is scoped to the tenant like every other read, and sums across
+tenants only under `WithAllTenantsReadOnly` (or `WithAllTenants`), else
+`ErrScopeMismatch`. Who may read every tenant's spend is yours to decide,
+by who gets that scope. `metertest` checks the reader its `Env.Ledger`
+names.
+
+**Retention.** A store writes a ledger row for every charge, and removes
+none but with its tenant. A row is more than history — an `ExternalRef`
+replays its charge, a settled hold replays its receipt, and `Refund` finds
+it — so those promises hold while the charge is in the ledger. A ledger may
+remove charges older than at least `meter.MinChargeRetention`, 401 days: a
+leap year of billing and 35 days of disputes. Past it a reference charges
+anew, a settle finds no reservation, a refund is
+`meter.ErrChargeNotFound`, and `SumCharges` sums what is left. Choose the
+retention from the longest a client may retry or dispute a charge, and
+keep the ledger in a warehouse of your own if reports must reach further.
+
+`memstore.NewLedger` and `pgstore.NewLedger` are also a
+`meter.LedgerHousekeeping`: a worker calls `PurgeCharges` until a batch
+comes back short of its limit, as it calls `Purge`. `OlderThan` zero is
+`MinChargeRetention`, and shorter is refused. pgstore removes the charges
 its scope reaches — every tenant's under `WithAllTenants`, one tenant's
-under `WithTenant`, on the primary, not the replica its reports may read;
-a scope that admits no tenant is refused with `ErrScopeMismatch` rather
-than purging nothing on every call — oldest first, by
-their time's index and each by its key, and skips a charge a refund holds
-for the next batch. A deletion of your own, in SQL, is held to the same
-floor.
+under `WithTenant`; a scope that admits no tenant is `ErrScopeMismatch` —
+oldest first, and skips a charge a refund holds for the next batch. Run it
+on the primary. A deletion of your own, in SQL, is held to the same floor.
 
-To report on capability records, count them through a `RecordCensus`:
-`CountRecords` counts the records of `TenantID`, or of every tenant with
-`AllTenants`, whole or by tenant and principal type, a page at a time in that
-order. Each `RecordCount` has `Total` = `Active` + `Expired` + `Revoked`, each
-record in one of them by the store's clock: revoked — itself or through an
-ancestor on record — wins over expired, and expired — a zero `ExpiresAt`
-included — over active. `Delegated` counts
-the records with a parent, and `ExpiringSoon` the active ones expiring within
-`ExpiringWithin`. `memstore.NewCensus` and `pgstore.NewCensus` ship one; with
-pgstore, a census of every tenant runs under `WithAllTenantsReadOnly` or
-`WithAllTenants`, and one under a narrower scope is `ErrScopeMismatch`.
-`storetest` checks a census its `Env.Census` names, when the `Env` also sets
-`Now`.
+### Report on records
 
-To show a tenant's records, list them through
-a `RecordLister`: `ListRecords` pages the records of `TenantID` in id order,
-`ListOrderAscending` (the zero value, as `ListByPrincipal` pages) or
-`ListOrderDescending`, which is newest first, a capability's id being a
-UUIDv7. Every filter is optional: `PrincipalType`, `Subject` exactly or
-`SubjectPrefix` (bytewise; not both), and `Dispositions`, any of
-`RecordDispositionActive`, `Expired` and `Revoked`. Each `RecordListing`
-carries the `Record` — what `GetRecord` reads back — and its `Disposition`,
-by the census's rules: revoked through an ancestor on record too, unlike
-`ListByPrincipalRequest.IncludeRevoked`, and over expired. A record with
-no expiry, which `Insert` refuses but an older pgstore row may hold, is
-expired, not one that never expires; and a record whose every Biscuit copy
-is revoked is still active, as its JWT still verifies. A revoked one also
-carries `StoppedBy`, the entry that revoked it and whose it is: its own, or
-that of the nearest ancestor with one, so a record stopped through an
-ancestor still says when and why. pgstore walks up to that ancestor a
-parent at a time by key, for those records alone. With `AllTenants` in
-place of `TenantID` — exactly one of the two — `ListRecords` lists every
-tenant's records together in the same id order, every filter applying
-across them: a platform operator's index, each record naming its tenant
-in `Record.Capability.Subject.TenantID`, with the disposition its own
-tenant's listing gives it. pgstore lists every tenant under
-`WithAllTenantsReadOnly` or `WithAllTenants`, by its primary key, and a
-narrower scope is `ErrScopeMismatch`, never a listing of that tenant
-alone. So a caller
-shows each record's state with no further read, and at one instant the
-records of each disposition in a full listing number what `CountRecords`
-counts. Each page is read on its own, though: a walk of many pages is no
-snapshot, and a record may expire or be revoked between two of them. The
-cursor is opaque and holds the order, the tenant and the filters it was
-handed out for; one of the other order, of another tenant — of every
-tenant in a tenant's listing, or the other way round — or of other
-filters — a caller that changes them starts from the first page — is
-`ErrCursorMismatch`, a kind of `ErrInvalidRequest`, and any the lister did
-not hand out is `ErrInvalidRequest`.
-`memstore.NewCensus` and `pgstore.NewCensus` are each one too — pgstore lists
-a tenant under that tenant's scope, as `ListByPrincipal`, by the indexes of
-its migrations 014 and 017; it reads whether a record is revoked from the
-record, a flag its revocation and its parent's set (migration 015), so a page
-reads the records it lists and no revocation — and `storetest` checks a lister its `Env.Lister` names,
-when the `Env` also sets `Now`.
+**Count** them through a `RecordCensus`: `CountRecords` counts the records
+of `TenantID`, or of every tenant with `AllTenants`, whole or by tenant and
+principal type, a page at a time. Each `RecordCount` has `Total` =
+`Active` + `Expired` + `Revoked`, each record in one of them by the store's
+clock: revoked — itself or through an ancestor on record — wins over
+expired, and expired — a zero `ExpiresAt` included — over active.
+`Delegated` counts the records with a parent, and `ExpiringSoon` the active
+ones expiring within `ExpiringWithin`.
+
+**List** them through a `RecordLister`: `ListRecords` pages the records of
+`TenantID`, or of every tenant with `AllTenants` (exactly one of the two),
+in id order: `ListOrderAscending` (the zero value) or
+`ListOrderDescending`, newest first, since a capability's id is a UUIDv7.
 
 ```go
 page, err := census.ListRecords(ctx, limes.ListRecordsRequest{
@@ -1771,28 +1830,57 @@ page, err := census.ListRecords(ctx, limes.ListRecordsRequest{
 })
 ```
 
-To show one record, read it through a `RecordListingReader` — the same
-`Census`; a reporter that lists and opens records holds it as a
-`RecordReporter`, both in one:
-`GetRecordListing(ctx, id)` gives the `RecordListing` a listing gives it —
-what `GetRecord` reads back and its disposition by the same rules and clock —
-and `ErrNotFound` for a record not on record or out of the call's scope.
-Working the disposition out from `IsRevoked` and the expiry instead would be
-a second rule beside the store's, and the store's clock is its own.
-`memstore.NewCensus` and `pgstore.NewCensus` are each one, and `storetest`
-checks that each record reads as its listing gives it, when the `Env.Lister`
-is one.
+- **Filters**, all optional: `PrincipalType`; `Subject` exactly or
+  `SubjectPrefix` (bytewise; not both); `Dispositions`, any of
+  `RecordDispositionActive`, `Expired` and `Revoked`; and the bulk-revoke
+  selectors `OnBehalfOf`, `ClientID`, `Session`, `SubjectIssuer`, `RunID`.
+- **Each `RecordListing`** carries the `Record` — what `GetRecord` reads —
+  and its `Disposition` by the census's rules: revoked through an ancestor
+  on record too, unlike `ListByPrincipalRequest.IncludeRevoked`. A record
+  with no expiry, which `Insert` refuses but an older pgstore row may hold,
+  is expired; a record whose every Biscuit copy is revoked is still active,
+  as its JWT still verifies. A revoked one also carries `StoppedBy`, the
+  entry that revoked it — its own, or the nearest ancestor's — so a record
+  stopped through an ancestor still says when and why.
+- **Across tenants** every filter applies to all of them, each record
+  naming its tenant in `Record.Capability.Subject.TenantID`: a platform
+  operator's index.
+- **Consistency.** At one instant, the records of each disposition in a
+  full listing number what `CountRecords` counts. Each page is read on its
+  own, though: a walk of many pages is no snapshot.
+- **Cursors** are opaque and hold the order, the tenant and the filters
+  they were handed out for. One of another order, tenant (or of every
+  tenant in a tenant's listing, or the other way round) or filters is
+  `ErrCursorMismatch`, a kind of `ErrInvalidRequest`; a caller that changes
+  them starts from the first page. Any cursor the lister did not hand out
+  is `ErrInvalidRequest`.
 
-To keep reports off the primary, build pgstore's `Census` and `Ledger` over
-a pool of a read replica — a hot standby, whose every transaction is
-read-only — and the stores over the primary's. Every report reads only:
-`CountRecords`, `ListRecords` and `GetRecordListing` of one tenant or every
-tenant, and `SumCharges`. A replica answers as of its lag, so a report may
-miss the last charges and revocations; nothing a request is decided on
-reads it. `PurgeCharges` writes, so the worker that runs it holds a
-`Ledger` over the primary; on a replica it fails as a read-only
-transaction. The scope is set per transaction, as on the primary, so
-`WithTenant` and `WithAllTenantsReadOnly` work there unchanged.
+**Read one** through a `RecordListingReader`: `GetRecordListing(ctx, id)`
+gives the `RecordListing` a listing gives, and `ErrNotFound` for a record
+not on record or out of the call's scope. Working the disposition out from
+`IsRevoked` and the expiry instead would be a second rule beside the
+store's, on another clock. A reporter that lists and opens records holds
+the `Census` as a `RecordReporter`, both in one.
+
+`memstore.NewCensus` and `pgstore.NewCensus` return all three. pgstore
+counts and lists every tenant only under `WithAllTenantsReadOnly` or
+`WithAllTenants` (a narrower scope is `ErrScopeMismatch`), and one tenant
+under that tenant's scope. It reads whether a record is revoked from a flag
+on the record, which its revocation and its parent's set (migration 015),
+so a page reads no revocation; the indexes of migrations 014 and 017 serve
+the listing. `storetest` checks a census and a lister its `Env` names, when
+the `Env` also sets `Now`, and that each record reads as its listing gives
+it.
+
+**Off the primary.** Build pgstore's `Census` and `Ledger` over a pool of a
+read replica — a hot standby, whose every transaction is read-only — and
+the stores over the primary's. Every report reads only: `CountRecords`,
+`ListRecords`, `GetRecordListing` and `SumCharges`. A replica answers as of
+its lag, so a report may miss the last charges and revocations; nothing a
+request is decided on reads it. `PurgeCharges` writes, so the worker that
+runs it holds a `Ledger` over the primary. The scope is set per transaction,
+as on the primary, so `WithTenant` and `WithAllTenantsReadOnly` work there
+unchanged.
 
 ```go
 records, _ := pgstore.NewStore(pgstore.Config{DB: primary})
@@ -1801,12 +1889,14 @@ ledger, _ := pgstore.NewLedger(pgstore.Config{DB: replica}) // SumCharges
 purger, _ := pgstore.NewLedger(pgstore.Config{DB: primary}) // PurgeCharges
 ```
 
-To test a report, backdate its charges through the store's clock, never by
-writing a store's tables, whose columns are the store's own and change
-without notice. A charge carries the store's time (`ChargeRecord.At`), so
-build the stores on a clock the test sets (`Config.Now` in `pgstore`,
-`StoreConfig.Now` and `UsageStoreConfig.Now` in `memstore`), start it at the
-period's start and move it forward before each charge:
+### Test a report
+
+Backdate a report's charges through the store's clock, never by writing a
+store's tables, whose columns change without notice. A charge carries the
+store's time (`ChargeRecord.At`), so build the stores on a clock the test
+sets (`Config.Now` in `pgstore`, `StoreConfig.Now` and
+`UsageStoreConfig.Now` in `memstore`), start it at the period's start and
+move it forward before each charge:
 
 ```go
 at := start
@@ -1824,178 +1914,109 @@ for _, day := range []int{0, 1, 8} {
 }
 ```
 
-The capability must not have expired at a charge's time. Insert its record
-with an `ExpiresAt` past the period, as above. Or issue it through an
-`Issuer` whose `IssuerConfig.Now` is the same clock, set to the period's
-start, with an `IssueRequest.TTL` as long as the period. A test that charges
-through verified tokens gives `VerifierConfig.Now` that clock as well. Move
-the clock forward only: holds, revocations and expiry are all measured by it.
+The capability must not have expired at a charge's time: insert its record
+with an `ExpiresAt` past the period, as above, or issue it through an
+`Issuer` whose `IssuerConfig.Now` is the same clock, with an
+`IssueRequest.TTL` as long as the period. A test that charges through
+verified tokens gives `VerifierConfig.Now` that clock too. Move the clock
+forward only: holds, revocations and expiry are all measured by it.
 `Example_backdatedCharges` runs the whole route on `memstore`.
 
-To remove a tenant, a store may implement `TenantRecordEraser` and
-`meter.TenantUsageEraser` (optional; `storetest` and `metertest` check them when
-present, and `memstore` and `pgstore` implement both). `EraseTenantRecords`
-revokes every capability of the tenant and removes only the records `Purge`
-would remove: an id not on record is not revoked, so erasing a record whose
-token may still verify would let it through again. `Purge` takes the rest as
-it expires. `EraseTenantUsage` drops the tenant's counters, holds, charges
-and aggregate — its billing history, which does not come back — returns how
-many of each it removed (`meter.EraseTenantUsageResult`), and marks
-the tenant erased: a request verified before the erase, or a late cost of a
-record `Purge` has not taken yet, is refused `ErrTenantErased` (a kind of
-`ErrRevoked`) by `Bump`, `Charge`, `Reserve` and `SetTenantBudget` rather
-than counted again, and `Insert` refuses a new record of the tenant, which
-the erase's revocation would have missed: `Issue` and `Delegate` return that
-refusal as `ErrTenantGone` (410), no revocation. `PurgeOrphans` forgets the mark
-once none of the tenant's records is left; run between the two calls below,
-it lets a new root record in, which the records' erase then revokes.
+### Erase a tenant
 
-Called apart, `EraseTenantUsage` goes first and `EraseTenantRecords` second:
-the mark the first sets makes `Insert` refuse the tenant, so every record
-the second finds is every record there will be, and it revokes them all.
-The other way round, a record inserted between the two calls is on record
-after the records' erase, unrevoked, and its token goes on verifying. In
-`pgstore`, `Store.EraseTenant` does both in one transaction and runs a
-callback of yours in it, so your own rows of the tenant go with them or not
-at all; it is handed a `pgstore.Erased`, the transaction as `Tx` and the
-result the call will return as `Result`. `EraseTenantRequest.Note` and `Actor` go on each revocation entry it
-writes, and `EraseTenantResult` counts the capabilities `Revoked`, the records
-`Removed` and the records `Kept`, revoked, for `Purge`; a second erase revokes
-nothing the first did.
+A store may implement `TenantRecordEraser` and `meter.TenantUsageEraser`
+(optional; `memstore` and `pgstore` implement both, and `storetest` and
+`metertest` check them when present).
 
-Two obligations are easy to miss. `Store.IsRevoked` answers for the
-capability's whole delegation chain, and `Meter` applies every charge and
-request to each ancestor as well, reading the ancestor's ceilings from its
-record. Code that only meters can depend on `Meter` alone; code that only
-administers tenant ceilings on `TenantBudgets` alone.
+- **`EraseTenantRecords`** revokes every capability of the tenant and
+  removes only the records `Purge` would remove: an id not on record is not
+  revoked, so erasing a record whose token may still verify would let it
+  through again. `Purge` takes the rest as they expire.
+- **`EraseTenantUsage`** drops the tenant's counters, holds, charges and
+  aggregate — its billing history, which does not come back — returns how
+  many of each it removed (`meter.EraseTenantUsageResult`), and marks the
+  tenant erased. A request verified before the erase, or a late cost of a
+  record `Purge` has not taken yet, is then refused `ErrTenantErased` (a
+  kind of `ErrRevoked`) by `Bump`, `Charge`, `Reserve` and
+  `SetTenantBudget`, and `Insert` refuses a new record of the tenant, which
+  `Issue` and `Delegate` return as `ErrTenantGone` (410). `PurgeOrphans`
+  forgets the mark once none of the tenant's records is left.
 
-`Store.Insert` returns `ErrAlreadyExists` for an id already on record, refuses
-a record with no id, no expiry or under a parent not on record as
-`ErrInvalidRequest`,
-a child expiring after its parent or in another tenant as
-`ErrDelegationTooWide`, a child whose budget names another unit than its
-parent's as `ErrUnitCodeMismatch`, and a child with more than `MaxDelegationDepth`
-ancestors still on record as `ErrDelegationTooDeep`, writing nothing:
-`Purge` and the `IsRevoked` walk rely on a whole lineage in one tenant, no
-deeper than the walk reaches. It should tell a missing tenant
-from a failure: return
-`ErrUnknownTenant` for a tenant it does not hold and `ErrTenantDeleted` for one
-in the trash. A store that keeps each tenant's rows apart by the call's
-context returns `ErrScopeMismatch` for a call scoped to another tenant than
-the one its request names, rather than answer as if the rows were not there. `Issue` and `Delegate` pass them through, wrapped, but for
-two the store shares with the verify path: `ErrDelegationTooDeep` becomes
-`ErrDelegationDepthExceeded` and `ErrTenantErased` becomes `ErrTenantGone`,
-since a mint presents no capability to call revoked. Both sit beside
-`ErrInvalidRequest`, which every check on the request itself matches — a
-missing tenant id, an empty audience entry, a negative TTL or one ending within
-the second it is issued (a token's times are whole seconds), a `NotBefore` at
-or after the expiry, a malformed thumbprint, invalid caveats (`ErrInvalidCaveats`).
-Anything else they return is the store's or the signer's failure, not the
-caller's.
-
-A read by id that finds nothing matches `ErrNotFound`, through a sentinel of
-its own where the contract names one: `ErrChargeNotFound` (`Refund`,
-`GetCharge`, `ChargeByRef`), `ErrReservationNotFound`, `ErrUsageNotFound` (a
-capability never bumped or charged) and `ErrTenantBudgetNotFound`.
-A well-formed write that disagrees with what is on record matches
-`ErrConflict` — map the family to 409 and read again: `ErrAlreadyExists`
-(`Insert`), `ErrUnitCodeMismatch` (`Insert`, `Delegate`, a `Charge`,
-`Reserve` or `Settle` in another unit than a counter already counts in, and
-a `SetTenantBudget` to another unit while anything is held in the old one,
-or spent in it and not reset),
-`ErrExternalRefConflict` (`Charge`), `ErrSettleConflict` (`Settle`) and
-`ErrTenantBudgetVersionMismatch` (`SetTenantBudget`). `ErrorResponse`
-answers the family 409 too.
-
-Every write and every listing takes a `…Request`, a read by id takes the id,
-every list is a `Page`, and every read names what
-it reads (`GetRecord`, `GetUsage`, `GetTenantBudget`), so one type may implement `Store` and
-`meter.UsageStore` together, or each apart as `memstore` does.
-
-`meter.UsageStore` names no transaction type: a store carries its own in
-the callback's context. Have no transactions? Pass `nil` for the callback.
-Everything works identically; you forgo the atomic-side-effect
-guarantee.
-
-Every listing — `ListByPrincipal`, `ListTenantBudgets`, `ListReservations`
-(soonest to expire first, ties by id), `SumCharges`, `CountRecords` and
-`ListRecords` — is a
-page with an opaque cursor, so an API can hand a page token to its client. To
-read `ListByPrincipal` or `ListTenantBudgets` whole, range over `AllByPrincipal` or `meter.AllTenantBudgets`: they walk
-the pages from `req.Cursor` afresh on every range, stop fetching when the loop
-breaks, and refuse a page that returns a cursor already fetched
-(`ErrCursorRepeated`). Spend moves between pages, so `AllTenantBudgets` may
-yield a tenant twice or not at all.
-
-```go
-for c, err := range limes.AllByPrincipal(ctx, store, req) {
-    if err != nil { /* yielded once; the walk ends */ }
-    // …
-}
-```
+Called apart, `EraseTenantUsage` goes first and `EraseTenantRecords`
+second: the mark makes `Insert` refuse the tenant, so the second call finds
+every record there will be. The other way round, a record inserted between
+the two calls stays on record unrevoked, and its token goes on verifying.
+A `PurgeOrphans` run between the two lets a new root record in, which the
+records' erase then revokes. In `pgstore`,
+`Store.EraseTenant` does both in one transaction and runs a callback of
+yours in it, so your own rows of the tenant go with them or not at all; it
+is handed a `pgstore.Erased`, the transaction as `Tx` and the result as
+`Result`. `EraseTenantRequest.Note` and `Actor` go on each revocation entry
+it writes, and `EraseTenantResult` counts the capabilities `Revoked`, the
+records `Removed` and the records `Kept`, revoked, for `Purge`; a second
+erase revokes nothing the first did.
 
 ## Key rotation
 
-1. Publish the new public key alongside the old (`jwks.Static.SetKey`, or add it to the
-   served JWKS — `jwks.Marshal` output is sorted by kid, so it is stable).
-2. Switch the issuer to sign with the new key — no sooner than the
-   `max-age` the JWKS is served with, so every verifier has fetched it.
-3. Withdraw the old key (`jwks.Static.RemoveKey`) only after the **longest outstanding
-   TTL** has elapsed.
+1. Publish the new public key beside the old (`jwks.Static.SetKey`, or add
+   it to the served JWKS; `jwks.Marshal` sorts by kid, so the output is
+   stable).
+2. Switch the issuer to sign with the new key no sooner than the `max-age`
+   the JWKS is served with, so every verifier has fetched it.
+3. Withdraw the old key (`jwks.Static.RemoveKey`) only after the **longest
+   outstanding TTL** has elapsed.
 
-Skipping the wait in step 3 invalidates tokens agents are still holding. Since
-TTLs here are minutes, the wait is short — which is part of why short TTLs are
-the default posture (`IssuerConfig.DefaultTTL`, fifteen minutes).
+Skipping the wait in step 3 invalidates tokens agents still hold. TTLs are
+minutes (`IssuerConfig.DefaultTTL`, fifteen by default), so the wait is
+short.
 
-A compromised key is withdrawn at once, and the bound is the verifiers'
-cache, not a TTL. A verifier on `jwks.Remote` stops accepting the key once it
-fetches the document without it: within the `max-age` the document is served
-with (`jwks.HandlerConfig.MaxAge`, at most `RemoteConfig.RefreshInterval`,
-5 minutes by default), or within `RemoteConfig.MinRefreshInterval`, 10
-seconds, with `HandlerConfig.Revalidate`. While it
-cannot reach the endpoint it keeps the last set it fetched for up to
-`RemoteConfig.MaxStale`, an hour by default, then refuses every token. So on
-compromise also revoke the capabilities the key signed (`Store.Revoke`): a
-revoked capability is refused whatever key verifies it. A document with no
-`"keys"` array is a failed fetch, not a withdrawal; `{"keys":[]}` withdraws
-every key.
+**A compromised key** is withdrawn at once, and the bound is the
+verifiers' cache, not a TTL. A verifier on `jwks.Remote` stops accepting
+the key once it fetches the document without it: within the `max-age` it is
+served with (`jwks.HandlerConfig.MaxAge`, at most
+`RemoteConfig.RefreshInterval`, 5 minutes by default), or within
+`RemoteConfig.MinRefreshInterval`, 10 seconds, with
+`HandlerConfig.Revalidate`. While it cannot reach the endpoint it keeps the
+last set for up to `RemoteConfig.MaxStale` (an hour by default), then
+refuses every token. So on compromise also revoke the capabilities the key
+signed: a revoked capability is refused whatever key verifies it.
 
-Not to wait for the cache, act on each verifier: `Remote.Block(kid)` refuses
-the kid at once, as `jwks.ErrUnknownKID` (`ErrInvalidToken` to the
-verifier), whether the held set has it or the endpoint is down, until
-`Remote.Unblock`; `Remote.Refresh(ctx)` fetches the document now, past
+Not to wait for the cache, act on each verifier. `Remote.Block(kid)`
+refuses the kid at once, as `jwks.ErrUnknownKID` (`ErrInvalidToken` to the
+verifier), whatever the held set or the endpoint says, until
+`Remote.Unblock`. `Remote.Refresh(ctx)` fetches the document now, past
 `MinRefreshInterval`, and returns the fetch's error. Each is logged
 (`RemoteConfig.Logger`), as is every token refused for a blocked kid:
 
 ```go
-keys.Block(compromisedKID)          // refused from now on, outage or not
+keys.Block(compromisedKID) // refused from now on, outage or not
 if err := keys.Refresh(ctx); err != nil {
     log.Error("JWKS refresh", "error", err) // the block holds meanwhile
 }
 ```
 
-Load a signing key with `LoadKey(path)` (an Ed25519 key, PKCS#8 PEM only); an
-unreadable path, or none, is an error, never a fresh key. `GenerateKey` makes
-an ephemeral one, which vanishes with the process — a deployment that may run
-without a key file chooses between the two itself, and knows which it chose.
-Either key's kid is `jwks.KeyID`'s: its RFC 7638 thumbprint, the same wherever
-it is derived; set `SigningKey.KeyID` to name it otherwise.
+### Signing keys
+
+`LoadKey(path)` loads an Ed25519 key, PKCS#8 PEM only; an unreadable path,
+or none, is an error, never a fresh key. `GenerateKey` makes an ephemeral
+one, gone with the process. A deployment that may run without a key file
+chooses between the two itself. Either key's kid is `jwks.KeyID`'s: its RFC
+7638 thumbprint in limes's namespace; set `SigningKey.KeyID` to name it
+otherwise.
 
 `NewSigner(limes.SignerConfig{KeyID: kid, Key: limes.SealKey(key)})` signs
-through any `crypto.Signer` whose key is Ed25519 — an `ed25519.PrivateKey`, or a
-key held in a KMS or an HSM; the token format stays inside the module. A key is
-held sealed — `limes.SealedKey` (`SigningKey.Private` is one already), and
-`dpop.NonceKeys` for nonce keys — so no formatting of a value that holds it,
-under any verb or from any field, prints it. `SealKey` keeps a copy of an
-`ed25519.PrivateKey`, or of one behind a pointer, and `dpop.SealNonceKeys`
-copies its keys, so clearing or reusing the caller's key afterwards leaves
-the sealed one whole. A key that
-implements `ContextSigner` signs under the request's context, so a slow or
-cancelled call is bounded by the request that asked for the token.
+through any `crypto.Signer` whose key is Ed25519 — an
+`ed25519.PrivateKey`, or a key held in a KMS or an HSM. A key is held
+sealed (`limes.SealedKey`; `SigningKey.Private` is one already, and
+`dpop.NonceKeys` for nonce keys), so no formatting of a value holding it
+prints it. `SealKey` and `dpop.SealNonceKeys` keep copies, so clearing or
+reusing the caller's key afterwards leaves the sealed one whole. A key
+that implements `ContextSigner` signs under the request's context, so a
+slow or cancelled call is bounded by the request that asked for the token.
 
 Tokens name the algorithm `Ed25519`, as RFC 9864 does. Where the services
-reading them use a JOSE library, gateway or identity provider that knows only
-the deprecated name, set `SignerConfig.Algorithm` to
+reading them use a JOSE library, gateway or identity provider that knows
+only the deprecated name, set `SignerConfig.Algorithm` to
 `limes.SigningAlgorithmEdDSA`: the signature is the same, and every limes
 verifier reads both names. Publish the key under the same name, through
 `jwks.HandlerConfig.Algorithms` (or `jwks.MarshalAlgorithms`): a library
@@ -2011,51 +2032,52 @@ handler, _ := jwks.NewHandler(jwks.HandlerConfig{
 })
 ```
 
-Every token is an RFC 9068 access token, typed `at+jwt`, which gateways and
-identity providers that validate that profile read too. It names its OAuth
-client (`IssueRequest.ClientID`, RFC 9068's `client_id`) and its subject
-(`Subject.Subject`, `sub`); `Issue` refuses a request without either. A
-capability is told from another access token by its claims and its key,
-whose kid is in limes's namespace (`jwks.KeyIDPrefix`, which `jwks.KeyID`
-and `GenerateKey` write): a verifier refuses a token under any other kid,
-and no key that signs capabilities may also sign an authorization server's
-`at+jwt` ([ADR-0006](adr/0006-one-token-format.md)).
+### What a token claims
 
-An agent that works for a user holds a capability on the user's behalf:
+Every token is an RFC 9068 access token, typed `at+jwt`, which gateways
+and identity providers that validate that profile read too. It names its
+OAuth client (`IssueRequest.ClientID`, `client_id`) and its subject
+(`Subject.Subject`, `sub`); `Issue` refuses a request without either. A
+verifier refuses a token under a kid outside limes's namespace, and no key
+that signs capabilities may also sign an authorization server's `at+jwt`
+([ADR-0006](adr/0006-one-token-format.md)).
+
+An agent working for a user holds a capability on the user's behalf:
 `IssueRequest.OnBehalfOf` names the user, of the subject's tenant. The
-token then names the user as `sub` and the agent as RFC 8693's `act`, and a
-delegated child keeps the user, with each holder it passed through nested in
-`act`; `Delegate` derives this, and no request can change it. limes still
-authorizes, meters and revokes by the holder, `Capability.Subject`
+token then names the user as `sub` and the agent as RFC 8693's `act`; a
+delegated child keeps the user, with each holder it passed through nested
+in `act`. `Delegate` derives this, and no request can change it. limes
+still authorizes, meters and revokes by the holder, `Capability.Subject`
 ([ADR-0005](adr/0005-acting-on-behalf.md)).
 
-A gateway that cannot read capability tokens can ask about one instead:
+A gateway that cannot read capability tokens can ask about one instead.
 `Verifier.Introspect` says whether a token is active (genuine, from a
-trusted issuer, within its window and not revoked) and what it carries,
-and `exchange.IntrospectionHandler` serves that as an RFC 7662 endpoint for
+trusted issuer, within its window and not revoked) and what it carries;
+`exchange.IntrospectionHandler` serves that as an RFC 7662 endpoint for
 authenticated callers, with the caveats as an RFC 9396
-`authorization_details` entry. It checks no audience and no proof of possession,
-so its answer authorizes nothing: an active bound token is reported bound,
-with its key, not proved. A Biscuit copy that sets request or budget limits of its
-own is answered with them (`Introspection.Copies`), or, on a verifier
-without `BiscuitConfig.MeterCopies`, refused as `Verify` refuses it. A revocation store that cannot answer is the
-endpoint's error, never an inactive token.
+`authorization_details` entry. It checks no audience and no proof of
+possession, so its answer authorizes nothing: an active bound token is
+reported bound, not proved. A Biscuit copy with limits of its own is
+answered with them (`Introspection.Copies`), or, without
+`BiscuitConfig.MeterCopies`, refused as `Verify` refuses it. A revocation
+store that cannot answer is the endpoint's error, never an inactive token.
 
 ## Exchange an identity provider's token
 
 `exchange.Exchanger` trades an access token from the client's identity
-provider for a capability (RFC 8693, [ADR-0003](adr/0003-oauth-token-exchange.md)).
-It verifies the token through a `SubjectVerifier`. `exchange/jwtverify`
-supplies one over jwx for RFC 9068 access tokens; a service that already
-verifies its provider's tokens, on go-oidc and go-jose say, implements
-`SubjectVerifier` on that stack instead, and package `exchange` links no JOSE
-library of its own ([ADR-0010](adr/0010-exchange-jose-subpackage.md)).
+provider for a capability (RFC 8693,
+[ADR-0003](adr/0003-oauth-token-exchange.md)). It verifies the token
+through a `SubjectVerifier`. `exchange/jwtverify` supplies one over jwx for
+RFC 9068 access tokens; a service that already verifies its provider's
+tokens — on go-oidc and go-jose, say — implements `SubjectVerifier` on that
+stack instead, so package `exchange` links no JOSE library of its own
+([ADR-0010](adr/0010-exchange-jose-subpackage.md)).
 `exchangetest.TestSubjectVerifier` holds such a verifier to the contract.
 
-A `Policy` answers each grant with an `exchange.Decision`: the capability to
-issue, and the scopes it grants of those asked, which the token response
-states as its `scope`. Nothing is granted that the policy does not name: a
-policy granting every scope asked says so.
+A `Policy` answers each grant with an `exchange.Decision`: the capability
+to issue, and the scopes it grants of those asked, which the token
+response states as its `scope`. Nothing is granted that the policy does not
+name; a policy granting every scope asked says so:
 
 ```go
 func policy(ctx context.Context, g exchange.Grant) (exchange.Decision, error) {
@@ -2067,8 +2089,8 @@ A request that asked for scopes and is granted none is refused with
 `invalid_scope`, since a response without `scope` would state every scope
 asked (RFC 8693 §2.2.1); one that asked for none is answered without
 `scope`. A scope the request did not ask for is the policy's fault,
-answered `server_error`. A `NarrowPolicy`'s `NarrowDecision.Scopes` is held
-the same way.
+answered `server_error`. A `NarrowPolicy`'s `NarrowDecision.Scopes` is
+held the same way.
 
 By default each exchange issues a capability of its own, with ceilings of
 its own: right for a client that exchanges once and keeps the result. A
@@ -2086,42 +2108,43 @@ ex, err := exchange.NewExchanger(exchange.Config{
 ```
 
 - The store keeps which capability a subject token's issuer and `jti`, in
-  the tenant the policy names, was exchanged for — the id, never a token.
-  The token is signed again from the record (`Issuer.Reissue`), so under the
-  same key every exchange of one subject token returns the same token, and
-  nothing stored can be replayed as a bearer.
-- Exchanges racing across replicas converge on one capability. A capability
-  revoked or expired is refused, never issued anew; a token without a `jti`
-  is refused.
+  the tenant the policy names, was exchanged for: the id, never a token.
+  Later exchanges sign the token again from the record (`Issuer.Reissue`),
+  so under the same key every exchange of one subject token returns the
+  same token, and nothing stored can be replayed as a bearer.
+- Exchanges racing across replicas converge on one capability. A
+  capability revoked or expired is refused, never issued anew; a subject
+  token without a `jti` is refused.
 - A capability bound by DPoP stays bound to the first exchange's key:
   replicas that exchange one token share that key, or exchange as bearer
-  within one trust domain. An exchange asking for another audience than the
-  capability's is refused.
+  within one trust domain. A proof by another key, none for a bound
+  capability, or one for a bearer capability is refused, and so is an
+  exchange asking for another audience than the capability's.
 - A policy that names no TTL gives the capability the subject token's
-  remaining life, not the issuer's default; one that names a shorter TTL leaves the
-  rest of the token's life refused.
+  remaining life, not the issuer's default; one that names a shorter TTL
+  leaves the rest of the token's life refused.
 - The policy runs on every exchange, since it names the tenant.
 
-Behind a token endpoint, whose requests name no tenant, pgstore's store is
-wired as `pgstore.ScopedExchanges(store)`, beside
-`pgstore.ScopedIssuance(store)` for the Issuer; each scopes its calls to
-the tenant the key or the record names, and the table that holds the
-mapping, `limes.exchanges`, keeps each one until its subject token expires,
-past its capability's record.
-`storetest` checks an `ExchangeStore` through `Env.Exchanges`, and
-`exchangetest.TestOnePerToken` checks an Exchanger in this mode over a
-consumer's own store, roles and row-level security.
+Behind a token endpoint, whose requests name no tenant, wire pgstore's
+store as `pgstore.ScopedExchanges(store)`, beside
+`pgstore.ScopedIssuance(store)` for the `Issuer`. Each scopes its calls to
+the tenant the key or the record names. The table that holds the mapping,
+`limes.exchanges`, keeps each entry until its subject token expires, past
+its capability's record. `storetest` checks an `ExchangeStore` through
+`Env.Exchanges`, and `exchangetest.TestOnePerToken` checks an `Exchanger`
+in this mode over your own store, roles and row-level security.
 
-An `Exchanger` called in process answers a refusal as the endpoint does with
-`exchange.ErrorOf(err)`: the RFC 6749 §5.2 `Error` (`Status`, `Code`, a fixed
-`Description`), and false for an error none of the exchange's, which the
-endpoint answers `server_error`, 500. `exchange.ErrorCodes()` lists every
-code ([errors.md](errors.md#the-exchanges-codes)).
+An `Exchanger` called in process answers a refusal as the endpoint does
+with `exchange.ErrorOf(err)`: the RFC 6749 §5.2 `Error` (`Status`, `Code`,
+a fixed `Description`), and false for an error that is none of the
+exchange's, which the endpoint answers `server_error`, 500.
+`exchange.ErrorCodes()` lists every code
+([errors.md](errors.md#the-exchanges-codes)).
 
 ## Answer a refusal
 
-`ErrorResponse` turns any error `Verify`, `Authorize` or the `Meter` returns
-into the response RFC 6750, RFC 9449 and RFC 9457 describe, and
+`ErrorResponse` turns any error `Verify`, `Authorize` or the `Meter`
+returns into the response RFC 6750, RFC 9449 and RFC 9457 describe, and
 `WriteErrorResponse` writes it:
 
 ```go
@@ -2133,19 +2156,22 @@ if err != nil {
 
 Each refusal's status and challenge — and the `DPoP-Nonce` a refusal for
 want of a nonce carries — are in [errors.md](errors.md#formats). The body
-is `application/problem+json` with fixed text — the error's own message,
-which can name kids or stores, stays in your log — and the refusal's
-stable `Reason` (`budget_exceeded`, `revoked`, …) as its `reason` member
-and the end of its type URI. `ReasonOf(err)` gives the same `Reason` for
-your own wire format, and `Reason.Permanent()` whether the same request
-with the same capability can ever succeed, so a caller knows to stop
-rather than retry.
+is `application/problem+json` with fixed text (the error's own message,
+which can name kids or stores, stays in your log), the error's stable
+`code`, and for a refusal its `Reason` (`budget_exceeded`, `revoked`, …) as
+the `reason` member and the end of its type URI. An error it does not
+recognise — `ErrInvalidRequest` other than `ErrMalformedAuthorization`, a
+store's failure — is answered 500.
 
-The body also carries the error's `code`, a stable name for any error limes
-returns, not only a refusal. An API of your own that is not a protected
-resource answers an error limes returned with `limes.ProblemOf(err)`
-([errors.md](errors.md#formats)). Branch on the sentinel with `errors.Is`,
-and put the code on the wire: the text is never a contract.
+- `ReasonOf(err)` gives the same `Reason` for your own wire format, and
+  `Reason.Permanent()` whether the same request with the same capability
+  can ever succeed, so a caller knows to stop rather than retry.
+- An API of your own that is not a protected resource answers an error
+  limes returned with `limes.ProblemOf(err)`
+  ([errors.md](errors.md#formats)).
+
+Branch on the sentinel with `errors.Is`, and put the code on the wire: the
+text is never a contract.
 
 ## Defaults
 

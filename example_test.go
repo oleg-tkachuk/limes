@@ -39,10 +39,10 @@ const exampleClientID = "example-agent"
 
 func newExampleStack() exampleStack {
 	key, err := limes.GenerateKey()
-	kid, pub, priv := key.KeyID, key.Public(), key.Private
 	if err != nil {
 		log.Fatal(err)
 	}
+	kid, pub, priv := key.KeyID, key.Public(), key.Private
 	records, err := memstore.NewStore(memstore.StoreConfig{})
 	if err != nil {
 		log.Fatal(err)
@@ -109,11 +109,10 @@ func (s exampleStack) issue() (limes.Capability, string) {
 			Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("25.00"), UnitCode: "USD"},
 		},
 	})
-	c, token := cResult.Capability, cResult.Token
 	if err != nil {
 		log.Fatal(err)
 	}
-	return c, token
+	return cResult.Capability, cResult.Token
 }
 
 func ExampleIssuer_Issue() {
@@ -147,10 +146,10 @@ func ExampleIssuer_Issue() {
 			Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("25.00"), UnitCode: "USD"},
 		},
 	})
-	c, token := cResult.Capability, cResult.Token
 	if err != nil {
 		log.Fatal(err)
 	}
+	c, token := cResult.Capability, cResult.Token
 
 	got, err := verifier.Verify(ctx, limes.VerifyRequest{Token: token, Audience: exampleAudience})
 	fmt.Println(err == nil, got.Capability().ID == c.ID)
@@ -238,10 +237,10 @@ func Example_proofOfPossession() {
 		Caveats:         limes.Caveats{Requests: limes.RequestCeiling{Unlimited: true}, Ops: []limes.Op{limes.OpGet}},
 		ConfirmationJKT: jkt,
 	})
-	token := tokenResult.Token
 	if err != nil {
 		log.Fatal(err)
 	}
+	token := tokenResult.Token
 
 	// Without a proof the token is refused: a copy of it is useless.
 	_, err = s.verifier.Verify(ctx, limes.VerifyRequest{Token: token, Audience: exampleAudience})

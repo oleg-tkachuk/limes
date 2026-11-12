@@ -26,9 +26,9 @@
 // `conventionalcommits` preset: feat is a minor, fix and perf are a patch,
 // and docs/style/refactor/test/build/ci/chore release nothing. `security` is a
 // patch: the preset knows no such type. A nested module's own build change is
-// a patch of it: such a commit changes the go.mod its users resolve — above
-// all the release workflow's `build(nested): require limes vX.Y.Z in …`, which
-// would otherwise leave the requirement unreleased — and is listed in its
+// a patch of it: such a commit changes the go.mod its users resolve — a
+// `build(nested): require limes vX.Y.Z in …` committed by hand among them,
+// which would otherwise leave the requirement unreleased — and is listed in its
 // notes, which the preset would leave empty, build being a hidden type. That
 // one commit raises every nested module's requirement at once, so its scope
 // is LIMES_REQUIREMENT_SCOPE, a patch of each nested module: module-commits.cjs

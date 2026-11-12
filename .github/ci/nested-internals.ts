@@ -3,7 +3,7 @@
 // Usage: node nested-internals.ts
 //
 // A nested module imports some of limes's internal packages — internal/errs,
-// internal/errcode, internal/jose — and its released versions keep doing so
+// internal/errcode, internal/jose, internal/httpsurl, internal/storable — and its released versions keep doing so
 // when a consumer pairs them with a later limes: an exchange v1.0 beside a
 // limes v1.N. Go lets the import through, the internal path being under
 // the same module path, so nothing but a build says whether that pair still

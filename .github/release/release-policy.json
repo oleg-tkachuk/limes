@@ -2,7 +2,7 @@
   "description": [
     "When a module is released without being asked for by hand: once the commits since its last release that its own rules release reach a threshold, counted by the level each cuts.",
     "minorCommits: commits that cut a minor (feat). patchCommits: commits that cut a patch (fix, perf, and the like).",
-    "immediateTypes: commit types released at once, whatever the count: a security fix. A commit marked breaking is released at once too. A nested module that requires limes is released with each limes release, by the release pull request (docs/adr/0016-one-release-commit.md).",
+    "immediateTypes: commit types released at once, whatever the count: a security fix. A commit marked breaking is released at once too. A nested module that requires limes and has changed is released with limes, raised to it, by the same release pull request (docs/adr/0016-one-release-commit.md).",
     "A release by hand (workflow_dispatch) ignores the thresholds, and so does every prerelease."
   ],
   "minorCommits": 3,

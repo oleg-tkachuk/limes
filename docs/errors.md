@@ -1,19 +1,18 @@
 # Errors
 
 Every error limes returns has a stable **code**: a snake_case name a client
-branches on, never renamed, to which new ones may be added
-([ADR-0012](adr/0012-error-codes.md)). The text of an error is for the
-server's log. It names kids, issuers and stores, may be reworded in any
-release, and is never a contract: do not parse it, and do not strip its
-`limes: ` prefix to show it. In Go, branch on the sentinel with
-`errors.Is`. On the wire, send the code.
+branches on. A code is never renamed; new ones may be added
+([ADR-0012](adr/0012-error-codes.md)). An error's text is for the server's
+log: it names kids, issuers, ids, tenants, resources and stores, never
+reaches the client, may be reworded in any release, and is never contract.
+Do not parse it, and do not strip its `limes: ` prefix to show it. In Go,
+branch on the sentinel with `errors.Is`; on the wire, send the code.
 
 ## Formats
 
-limes answers in the formats the standards for these systems define. It
-builds in no RPC framework's own codes: HTTP's status and RFC 9457's body
-are the common ground, and a consumer maps them onto its transport in one
-place.
+limes answers in the formats the relevant standards define, and builds in
+no RPC framework's codes: HTTP's status and RFC 9457's body are the common
+ground, which a consumer maps onto its transport in one place.
 
 **A protected resource refusing a capability** answers with
 `Verifier.ErrorResponse` and writes it with `WriteErrorResponse`:
@@ -23,9 +22,9 @@ place.
   RFC 9449 §7.1 defines (the *Challenge `error`* column below);
 - a `DPoP-Nonce` header when the refusal asks for a nonce;
 - an RFC 9457 `application/problem+json` body, sent with
-  `Cache-Control: no-store`. The error's own text never reaches the client.
+  `Cache-Control: no-store`.
 
-The challenge is under the client's scheme, `Bearer` when it is unknown; a
+The challenge is under the client's scheme, `Bearer` when it is unknown. A
 refusal for want of credentials — no header, or another scheme's — carries
 no error code, only the realm (RFC 6750 §3.1). A verifier with DPoP
 configured adds a `DPoP algs="…"` challenge with no error code beside a
@@ -37,10 +36,10 @@ answered 500, with no challenge.
 
 **Any other API of the consumer's** — an admin endpoint that revokes, a
 billing call that settles — answers an error limes returned with
-`limes.ProblemOf(err)`, which knows the meter's and the exchange's codes as
-well: there is one registry of codes. It gives the RFC 9457 body and reports false for an
-error that is not limes's, which the consumer answers as its own failure,
-500:
+`limes.ProblemOf(err)`. One registry holds every code, so it knows the
+meter's and the exchange's too. It gives the RFC 9457 body, and reports
+false for an error that is not limes's, which the consumer answers as its
+own failure, 500:
 
 ```go
 p, ok := limes.ProblemOf(err)
@@ -51,13 +50,13 @@ if !ok {
 // Another transport: carry p.Code, and p.Status as its numeric class.
 ```
 
-`limes.ProblemFor(err)` never reports false: an error that is not limes's —
-a database's, a consumer's own — is `internal`, 500.
+`limes.ProblemFor(err)` never reports false: an error that is not limes's
+— a database's, a consumer's own — is `internal`, 500.
 
 A store answers its database's failures with limes's codes, so a caller
 retries what may be served again and nothing else. pgstore classifies
-PostgreSQL's errors by their type and SQLSTATE, the driver's error kept in
-the chain for `errors.As`:
+PostgreSQL's errors by their type and SQLSTATE, and keeps the driver's
+error in the chain for `errors.As`:
 
 | Failure | Code |
 | --- | --- |
@@ -69,26 +68,26 @@ the chain for `errors.As`:
 | Any other — a statement's error, the schema's | none: `internal`, 500 |
 
 Under a revocation lookup a store's failure is answered
-`revocation_unavailable`, the lookup's own code, the store's kept in the
-chain. A pool that times out waiting for a free connection returns the
-caller's context error, which no code can tell from the caller's own
-deadline.
+`revocation_unavailable`, the lookup's own code, with the store's error
+kept in the chain. A pool that times out waiting for a free connection
+returns the caller's context error, which no code can tell from the
+caller's own deadline.
 
 **The token endpoint** (`exchange.Handler`) answers in RFC 6749 §5.2's
 format: `error`, `error_description`, and a status. An `Exchanger` called
-in process answers alike with `exchange.ErrorOf(err)`, which reports false
-for an error that is none of the exchange's: answer it `server_error`, 500
-(see [the exchange's codes](#the-exchanges-codes)).
+in process answers alike through `exchange.ErrorOf(err)`, which reports
+false for an error that is none of the exchange's: answer that one
+`server_error`, 500 (see [the exchange's codes](#the-exchanges-codes)).
 
 A client of the endpoint reads its answer with
 `exchange.ParseErrorResponse(resp)`: nil for a success, and otherwise an
-`*exchange.ResponseError` holding the status, code and description sent,
-which wraps the sentinel of its code — `errors.Is`, `limes.CodeOf`,
+`*exchange.ResponseError` holding the status, code and description sent.
+It wraps the sentinel of its code, so `errors.Is`, `limes.CodeOf`,
 `CategoryOf` and `ProblemOf` answer it as the endpoint answered its own
 refusal. A code several sentinels share reads as the one the others are
 cases of (`invalid_dpop_proof` as `dpop.ErrInvalid`, `invalid_target` as
-`exchange.ErrInvalidTarget`); a code it does not know, or a body that is
-no error response, as `exchange.ErrServerError`.
+`exchange.ErrInvalidTarget`); an unknown code, or a body that is no error
+response, reads as `exchange.ErrServerError`.
 
 The body, for a capability that was revoked:
 
@@ -113,20 +112,17 @@ The body, for a capability that was revoked:
 | `reason` | For a refusal of a presented capability, its `limes.Reason`, which can be wider than the code: `tenant_erased` and `delegation_too_deep` are reported as `revoked`. |
 | `detail` | `limes.ProblemOf` only, for a refusal of the client's own input — `invalid_request`, `invalid_caveats`, `invalid_amount`, `delegation_too_wide` (`limes.DetailCodes()`): which part of the request was refused and which rule it broke, for example "an op is not among the parent's". Absent when the refusal says nothing safe, and on every other code. |
 
-An error's own text is never shown to the client: it names kids,
-issuers, ids, tenants, resources and the parent's caveats, for the server's
-log. A `detail` is written where the refusal is, as a constant — the
-compiler admits no value into one (`internal/detail`) — so it never holds an
-id, a key id, an issuer, a tenant, a resource, an amount or any other value,
-the client's own included.
-
+A `detail` is a constant written where the refusal is — the compiler admits
+no value into one (`internal/detail`) — so it never holds an id, a key id,
+an issuer, a tenant, a resource, an amount or any other value, the
+client's own included.
 
 ## Every component
 
 Every error a component of limes returns is one of the codes below, or
-wraps one. That holds for the root module, `dpop`, `jwks`, `meter`,
-`inspect`, `memstore`, `pgstore` and `pgstore/migrate`, `redisreplay`,
-`otelmetric`, `exchange` and `exchange/jwtverify`, and `biscuit`.
+wraps one: the root package, `dpop`, `jwks`, `meter`, `inspect`,
+`memstore`, `pgstore` and `pgstore/migrate`, `redisreplay`, `otelmetric`,
+`exchange` and `exchange/jwtverify`, and `biscuit`.
 
 - **Constructors** refuse a config they cannot work with as
   `invalid_config`: a required field missing, a negative bound, a key of
@@ -144,16 +140,16 @@ wraps one. That holds for the root module, `dpop`, `jwks`, `meter`,
 - **Each refusal** has its own code.
 
 Each module's tests hold it to this: a test finds every error the
-module's sources construct, and refuses one that names no sentinel. The
-only exceptions are the few decoding helpers whose every caller wraps them
-in a family, and each module's test lists those by name. An error from a
-dependency — a database driver, an HTTP client — reaches a caller wrapped
-in a code where limes knows what it means (`keys_unavailable` for an
-issuer's keys out of reach), and as itself otherwise. `ProblemFor` answers
-that one as `internal`.
+module's sources construct and refuses one that names no sentinel. The
+only exceptions are helpers whose every caller wraps them in a family,
+which each module's test lists by name. An error from a dependency — a
+database driver, an HTTP client — reaches a caller wrapped in a code where
+limes knows what it means (`keys_unavailable` for an issuer's keys out of
+reach), and as itself otherwise; `ProblemFor` answers that one as
+`internal`.
 
-The nested modules' own sentinels belong to these families, so each has
-their code:
+The nested modules' own sentinels belong to these families, and so have
+their codes:
 
 | Sentinel | Code |
 |---|---|
@@ -165,8 +161,7 @@ their code:
 
 ## Sentinel, code, reason and category
 
-Each error answers four questions, each by its own name, and each read
-from the error with one call:
+Each error answers four questions, each read from the error with one call:
 
 | | Read with | For |
 |---|---|---|
@@ -175,27 +170,27 @@ from the error with one call:
 | Reason, `limes.Reason` | `limes.ReasonOf`, `limes.ReasonOfCode` | A refusal of a presented capability only: why, as RFC 6750 and RFC 9449 challenge it, and whether it is permanent (`Reason.Permanent`). |
 | Category, `limes.Category` | `limes.CategoryOf`, `Problem.Category` | What the caller does about it, for a transport with fewer codes than limes. |
 
-A refusal's code is its reason, but where the reason folds several codes
-into one: `tenant_erased` and `delegation_too_deep` are refused as
+A refusal's reason is its code, except where the reason folds several
+codes into one: `tenant_erased` and `delegation_too_deep` are refused as
 `revoked`, `copy_limit_exceeded` and `lease_requests_exhausted` as
 `request_limit_exceeded`, `lease_exhausted` as `budget_exceeded`.
-`limes.ReasonOfCode(code)` reads that table,
-so a consumer holding only a code — mapping it, or filling an error detail
-— gets the reason without the error; a code cannot be derived from a
-reason, since one reason stands for several. Send the code, and the reason
-beside it where a challenge or an error detail wants one. An error that is
-no refusal — `not_found`, `conflict` — has a code and a category and no
-reason.
+`limes.ReasonOfCode(code)` reads that table, so a consumer holding only a
+code — mapping it, or filling an error detail — gets the reason without
+the error. A code cannot be derived from a reason, since one reason
+stands for several. Send the code, and the reason beside it where a
+challenge or an error detail wants one. An error that is no refusal —
+`not_found`, `conflict` — has a code and a category and no reason.
 
 `tenant_erased` and `delegation_too_deep` answer a presented capability:
-a metering call, a revocation lookup. Where a store gives the same answer to
-a mint — `Store.Insert` refusing a child past `MaxDelegationDepth`, or a
-record of an erased tenant — no capability was presented, and none of the
-caller's stopped working, so the `Issuer` answers it as the mint's refusal:
-`Delegate` returns `delegation_depth_exceeded` (403, `denied`; the parent
-stays valid, delegate from a shallower one), `Issue` and `Delegate` return
-`tenant_gone` (410, `not_found`). Neither matches `limes.ErrRevoked` nor
-has a reason, and the store's own error stays in the text only.
+a metering call, a revocation lookup. Where a store gives the same answer
+to a mint — `Store.Insert` refusing a child past `MaxDelegationDepth`, or
+a record of an erased tenant — no capability was presented and none of
+the caller's stopped working, so the `Issuer` answers it as the mint's
+refusal. `Delegate` returns `delegation_depth_exceeded` (403, `denied`:
+the parent stays valid; delegate from a shallower one); `Issue` and
+`Delegate` return `tenant_gone` (410, `not_found`). Neither matches
+`limes.ErrRevoked` nor has a reason, and the store's own error stays in
+the text only.
 
 ## Retrying
 
@@ -207,37 +202,36 @@ has a reason, and the store's own error stays in the text only.
   signed afresh, an idempotency key can be added.
 - **A 409** is a request that disagrees with what is on record: read it
   again, and decide.
-- **`outcome_unknown`** is a meter call whose commit left and whose answer
-  was lost: it may have committed. Send it again unchanged only when it is
-  keyed — `Charge` with an `ExternalRef`, `Reserve` with a `ReservationID`,
-  `Refund` with a `RefundID`, or `Settle` — and a repeat of one that
-  committed is answered as a replay. An unkeyed call sent again may count
-  twice (docs/guide.md, "Retrying a lost answer").
-- **`tenant_budget_busy`** is a `SetTenantBudget` that changed nothing: the
-  tenant's calls in flight held it past the store's bound
-  (pgstore's `Config.TenantBudgetLockTimeout`). Send it again. pgstore's
-  error is a `meter.TenantBudgetBusyError`, which says how many calls held
-  the tenant and how long the oldest it can see had run: one idle in its
-  transaction is a caller holding it open, which no retry outlasts until
-  that caller ends it, or the database's
-  `idle_in_transaction_session_timeout` does.
+- **`outcome_unknown`** is a meter call whose commit was sent and whose
+  answer was lost: it may have committed. Send it again unchanged only
+  when it is keyed — `Charge` with an `ExternalRef`, `Reserve` with a
+  `ReservationID`, `Refund` with a `RefundID`, or `Settle` — and a repeat
+  of one that committed is answered as a replay. An unkeyed call sent
+  again may count twice ([guide.md](guide.md), "Retrying a lost answer").
+- **`tenant_budget_busy`** is a `SetTenantBudget` that changed nothing:
+  the tenant's calls in flight held it past the store's bound (pgstore's
+  `Config.TenantBudgetLockTimeout`). Send it again. pgstore's error is a
+  `meter.TenantBudgetBusyError`, which says how many calls held the tenant
+  and how long the oldest it can see had run. One idle in its transaction
+  is a caller holding it open, which no retry outlasts until that caller
+  ends it, or the database's `idle_in_transaction_session_timeout` does.
 - **`store_unavailable`** and **`store_timeout`** are a call the store
   could not serve and that wrote nothing — no connection, the database
   shutting down or out of resources, a statement past the database's own
-  limit: send it again, after a pause. A write whose commit may have
+  limit: send it again after a pause. A write whose commit may have
   landed is `outcome_unknown` instead, never one of these.
 
-[errors.json](errors.json) is the same table for a consumer that is not
-written in Go: every code, its HTTP status, category, title, problem type,
-reason and whether that reason is permanent, generated from the code table
-the functions below read, which a test holds it to.
+[errors.json](errors.json) is the same table for a consumer not written
+in Go: every code, its HTTP status, category, title, problem type, reason
+and whether that reason is permanent. It is generated from the code table
+the functions below read, and a test holds it to that table.
 
-`limes.Codes()` lists every code, the meter's among them and, in a
-binary that links the exchange in, the exchange's, so a consumer's test can prove its own mapping covers them all
-(`limestest`, under [Categories](#categories)). A code's status, category and
-reason are part of the contract ([compatibility.md](compatibility.md)):
-changing one is a break, marked and listed in the release notes, and these
-tables are what CI compares.
+`limes.Codes()` lists every code — the meter's, and in a binary that
+links the exchange in, the exchange's — so a consumer's test can prove its
+mapping covers them all (`limestest`, under [Categories](#categories)). A
+code's status, category and reason are contract
+([compatibility.md](compatibility.md)): changing one is a break, marked
+and listed in the release notes. CI compares these tables.
 
 ## Categories
 
@@ -259,12 +253,12 @@ rather than every code:
 | `unavailable` | A dependency failed on this request — did not answer, or answered a page it had already given: retry later. |
 | `internal` | The server's configuration or a store failed: the server's to fix. A feature the server does not run — leasing, a proof checker — is its configuration. |
 
-Each category spans one class of status: every code of it is the client's,
-a 4xx, or every one the server's, a 5xx. Whose fault an error is follows
-from its category.
+Each category spans one class of status: all its codes are the client's
+(4xx) or all the server's (5xx), so whose fault an error is follows from
+its category.
 
-The status stays the finer answer: within `exhausted`, a permanent refusal
-(`request_limit_exceeded`) never lifts while a budget can.
+The reason stays the finer answer: within `exhausted`, a permanent refusal
+(`request_limit_exceeded`) never lifts, while a budget can.
 
 `limes.CategoryOfCode(code)` answers a code's category, and
 `limes.ProblemOfCode(code)` its whole problem, without an error to hand.
@@ -272,26 +266,27 @@ The status stays the finer answer: within `exhausted`, a permanent refusal
 A mapping of the categories has a default branch, for a category added
 after it was written; adding one is not a break
 ([compatibility.md](compatibility.md)). That branch answers from
-`Problem.Status`, the error's own HTTP status, never as a success and
+`Problem.Status`, the error's own HTTP status — never as a success, and
 never as one fixed code: a client's error stays the client's.
 
-A code answered with another status or category is a break, and it still
+A code answered with another status or category is a break that still
 compiles. `limestest` turns it into a failing test of the consumer's: it
-pins what the consumer's own transport answers each code with, over
-every code but those of a component the consumer does not run — the
-exchange's (`limestest.WithoutExchange`), the meter's
-(`limestest.WithoutMeter`). Every code is checked by default, so a code
-limes adds fails the check until it is pinned; no option leaves out a code
-alone. A consumer that maps categories whole takes a code limes adds by
-its category with `limestest.AcceptNewByCategory()`: such a code passes
-when the consumer answers it as it answers every code pinned in that
-category, while a pinned code moved to another category still fails. That
-option is no filter, as `Without…` are: it judges every code more
+pins what the consumer's transport answers each code with, over every
+code but those of a component the consumer does not run — the exchange's
+(`limestest.WithoutExchange`), the meter's (`limestest.WithoutMeter`).
+Every code is checked by default, so a code limes adds fails the check
+until it is pinned; no option leaves out a single code.
+
+A consumer that maps categories whole takes a new code by its category
+with `limestest.AcceptNewByCategory()`: such a code passes when the
+consumer answers it as it answers every code pinned in that category,
+while a pinned code moved to another category still fails. Unlike
+`Without…`, that option is no filter: it judges every code more
 leniently, and names the codes it passed only in the test's log, which
-`go test -v` alone shows. A
-failure
-names the entry to pin, in Go's syntax, with a code that names itself
-(`fmt.Stringer`) named beside its number:
+only `go test -v` shows.
+
+A failure names the entry to pin, in Go syntax, with a code that names
+itself (`fmt.Stringer`) shown beside its number:
 
 ```go
 func TestErrorContract(t *testing.T) {
@@ -311,23 +306,29 @@ func TestErrorContract(t *testing.T) {
 status and category, for a consumer that answers in HTTP's terms.
 
 A category says what retrying would do, not how bad the failure is, and
-agrees with the status: every 502, 503 and 504 is `unavailable`, a dependency
-that failed and may answer the next time — the issuer's keys
-(`keys_unavailable`), the store or upstream that answers revocation
-lookups (`revocation_unavailable`), a store whose pages handed back a cursor already
-fetched (`cursor_repeated`), which a walk begun again can get past once
-whatever moved its listing settles, and a revocation upstream that names
-no lineage (`no_revocation_lineage`), which `NewRevocationCache` refuses
-at startup until the upstream it is given does, and a verifier requiring a
-record answers when its lookup wraps a cache over such an upstream; and a store whose answer to
-a commit was lost (`outcome_unknown`), which a keyed call sent again
-settles; and a store that could not serve a call which wrote nothing
-(`store_unavailable`) or cancelled its statement past its own limit
-(`store_timeout`), which a call sent again may find served. Every `unauthenticated` code is
-a credential no longer good or never proven — expired, revoked, a bad
-proof — which another credential may pass; a transport whose codes keep
-those apart from a lack of permission maps them to its own
-unauthenticated code, not to its permission-denied one.
+agrees with the status. Every 502, 503 and 504 is `unavailable`: a
+dependency that failed and may answer next time.
+
+- `keys_unavailable`: the issuer's keys.
+- `revocation_unavailable`: the store or upstream that answers revocation
+  lookups.
+- `cursor_repeated`: a store whose pages handed back a cursor already
+  fetched; a walk begun again gets past it once whatever moved the
+  listing settles.
+- `no_revocation_lineage`: a revocation upstream that names no lineage.
+  `NewRevocationCache` refuses it at startup when the cache requires
+  lineage, and a verifier requiring a record answers it when its lookup
+  wraps a cache over such an upstream.
+- `outcome_unknown`: a store whose answer to a commit was lost; a keyed
+  call sent again settles it.
+- `store_unavailable`, `store_timeout`: a store that could not serve a
+  call which wrote nothing, or cancelled its statement past its own
+  limit; a call sent again may be served.
+
+Every `unauthenticated` code is a credential no longer good or never
+proven — expired, revoked, a bad proof — which another credential may
+pass. A transport whose codes keep those apart from a lack of permission
+maps them to its unauthenticated code, not its permission-denied one.
 
 ## limes's codes
 
@@ -390,11 +391,10 @@ unauthenticated code, not to its permission-denied one.
 
 ## The meter's codes
 
-The meter's sentinels name their codes, and limes's functions answer them
-as their own: `limes.CodeOf`, `limes.CategoryOf`, `limes.ProblemOf` and
-`limes.Codes` know every one. A consumer that meters nothing never meets
-them, and may leave them out of a check of its own mapping
-(`limestest.WithoutMeter`).
+The meter's sentinels name their codes, and `limes.CodeOf`,
+`limes.CategoryOf`, `limes.ProblemOf` and `limes.Codes` know every one. A
+consumer that meters nothing never meets them, and may leave them out of a
+check of its mapping (`limestest.WithoutMeter`).
 
 | Code | HTTP | Sentinel | `reason` | Challenge `error` | Title | Category |
 |---|---|---|---|---|---|---|
@@ -412,7 +412,7 @@ them, and may leave them out of a check of its own mapping
 | `refund_conflict` | 409 | `meter.ErrRefundConflict` |  |  | The refund id names another refund | `conflict` |
 | `outcome_unknown` | 503 | `meter.ErrOutcomeUnknown` |  |  | The store lost the answer to the call's commit | `unavailable` |
 | `tenant_budget_busy` | 503 | `meter.ErrTenantBudgetBusy` |  |  | The tenant's calls in flight held its budget too long | `unavailable` |
-| `lease_exhausted` | 403 | `meter.ErrLeaseExhausted` | `budget_exceeded` (permanent) |  | The token's request or budget limit is exhausted | `exhausted` |
+| `lease_exhausted` | 403 | `meter.ErrLeaseExhausted` | `budget_exceeded` |  | The token's request or budget limit is exhausted | `exhausted` |
 | `lease_requests_exhausted` | 403 | `meter.ErrLeaseRequestsExhausted` | `request_limit_exceeded` (permanent) |  | The token's request or budget limit is exhausted | `exhausted` |
 | `lease_not_found` | 404 | `meter.ErrLeaseNotFound` |  |  | The capability holds no lease | `not_found` |
 | `lease_nested` | 409 | `meter.ErrLeaseNested` |  |  | An ancestor of the capability holds a lease | `precondition` |
@@ -421,25 +421,26 @@ them, and may leave them out of a check of its own mapping
 
 ## The exchange's codes
 
-`exchange.ErrorOf` and `exchange.ErrorCodes` answer an exchange's refusals
-in RFC 6749 §5.2's format, as the token endpoint does. The codes are RFC
-6749's, RFC 8707's `invalid_target`, RFC 9396's
+`exchange.ErrorOf` and `exchange.ErrorCodes` answer an exchange's
+refusals in RFC 6749 §5.2's format, as the token endpoint does. The codes
+are RFC 6749's, RFC 8707's `invalid_target`, RFC 9396's
 `invalid_authorization_details` and RFC 9449's DPoP codes.
 
-They are limes's codes too: each sentinel of the exchange carries its
-own code, status, title and category, so `limes.CodeOf`,
-`limes.CategoryOf` and `limes.ProblemOf` answer an exchange's error as the
-endpoint does — with the same code and status, ahead of any limes error it
-wraps — and the exchange registers them as it initialises, so
-`limes.Codes()`, `limes.ProblemOfCode` and `limes.CategoryOfCode` answer
-them in a binary that links the exchange in. limes holds no table of them:
-the exchange adds a code without a release of limes. An error an
-`Exchanger` returns that is no refusal of the client's — the issuer, a
-store or the policy failing — wraps `exchange.ErrServerError`, so
-`limes.ProblemOf` answers it `server_error`, 500, as the endpoint does,
-whatever limes error it wraps. One
-mapping of the categories covers the exchange. A consumer that runs no exchange never meets these codes,
-and may leave them out of a check of its own mapping
+They are limes's codes too. Each sentinel of the exchange carries its own
+code, status, title and category, so `limes.CodeOf`, `limes.CategoryOf`
+and `limes.ProblemOf` answer an exchange's error as the endpoint does:
+the same code and status, ahead of any limes error it wraps. The exchange
+registers them as it initialises, so `limes.Codes()`,
+`limes.ProblemOfCode` and `limes.CategoryOfCode` answer them in a binary
+that links the exchange in. limes holds no table of them: the exchange
+adds a code without a release of limes.
+
+An error an `Exchanger` returns that is no refusal of the client's — the
+issuer, a store or the policy failing — wraps `exchange.ErrServerError`,
+so `limes.ProblemOf` answers it `server_error`, 500, as the endpoint
+does, whatever limes error it wraps. One mapping of the categories covers
+the exchange. A consumer that runs no exchange never meets these codes,
+and may leave them out of a check of its mapping
 (`limestest.WithoutExchange`).
 
 | Code | HTTP | Sentinel | Description | Category |
@@ -458,17 +459,16 @@ and may leave them out of a check of its own mapping
 The endpoint answers a refused proof with RFC 9449's codes,
 `dpop.ErrorCodeUseNonce` and `dpop.ErrorCodeInvalidProof`, and a client
 past its share of the replay cache with 429 and RFC 6749's
-`temporarily_unavailable`, since RFC 9449 names no code for it. They are
-no `limes.Code`, and need no mapping of their own: the errors behind them,
-`dpop.ErrRequired` and its kin, are limes's proof codes (`proof_required`,
-`proof_invalid`, `proof_replayed`, `nonce_required`, all
-`unauthenticated`, and `proof_quota_exceeded`, `exhausted`), which
-`limes.Codes()` lists and `limestest` checks. A
-service that serves the token endpoint itself maps every error by
-`limes.ProblemOf(err).Category`, as any other, and reads
-`exchange.ErrorOf(err)` only for the RFC 6749 body it writes; its tests
-pin `limes.Codes()`, and `exchange.ErrorCodes()` is the endpoint's wire,
-not a second list to map.
+`temporarily_unavailable`, since RFC 9449 names no code for it. These are
+no `limes.Code` and need no mapping of their own: the errors behind them
+are limes's proof codes (`proof_required`, `proof_invalid`,
+`proof_replayed`, `nonce_required`, all `unauthenticated`, and
+`proof_quota_exceeded`, `exhausted`), which `limes.Codes()` lists and
+`limestest` checks. A service that serves the token endpoint maps every
+error by `limes.ProblemOf(err).Category`, as any other, and reads
+`exchange.ErrorOf(err)` only for the RFC 6749 body it writes. Its tests
+pin `limes.Codes()`; `exchange.ErrorCodes()` is the endpoint's wire, not
+a second list to map.
 
 | Code | HTTP | Sentinel | Description |
 |---|---|---|---|
@@ -478,10 +478,10 @@ not a second list to map.
 
 ## Problem types
 
-Every problem type URI is this document's address and a fragment, the
-type's name, which is an anchor below: a code's row says where the code is
-described, and a refusal with no `reason` is typed by its family. Each
-type means the same for the whole of v1.
+Every problem type URI is this document's address plus a fragment, the
+type's name, which is an anchor below. A code's row says where the code is
+described; a refusal with no `reason` is typed by its family. Each type
+means the same for the whole of v1.
 
 | Type | HTTP | Described in |
 |---|---|---|

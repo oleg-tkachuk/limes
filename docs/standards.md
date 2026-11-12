@@ -1,8 +1,8 @@
 # Standards
 
-Which IETF standards limes implements, how, and where it chooses among what
-a standard allows. Each section names the API that carries the standard and
-the test that holds it there.
+Which IETF standards limes implements, how, and which choices it makes
+where a standard allows several. Each section names the API that carries
+the standard and the tests that hold it there.
 
 | Standard | What it governs here | API |
 |---|---|---|
@@ -30,12 +30,12 @@ rather than read from the token (§3.1), and `iss` and `aud` are always
 checked (§3.8, §3.9). The type names no format, so the claim `limes_v: 7`
 does, and the claims are read strictly under it: a token without `limes_v`
 7, a `client_id` and a `sub`, or with a member the format does not define,
-is refused. Every id in the claims (`jti`, `limes_parent_id`, a tenant, a run) is read
-only in the canonical spelling the signer writes.
+is refused. Every id in the claims (`jti`, `limes_parent_id`, a tenant, a
+run) is read only in the canonical spelling the signer writes.
 
-RFC 8725 §3.11's explicit typing kept other JWTs signed by the same key from
-passing as a capability; `at+jwt` is every authorization server's type, so
-the key does that instead. Its kid is in limes's namespace
+RFC 8725 §3.11's explicit typing would keep other JWTs signed by the same
+key from passing as a capability; `at+jwt` is every authorization server's
+type, so the key does that instead. Its kid is in limes's namespace
 (`jwks.KeyIDPrefix`, `limes:`): a signer will not sign under any other, and
 a verifier refuses a token under any other before it looks a key up. A key
 that signs capabilities never signs an authorization server's access tokens
@@ -133,23 +133,24 @@ the token as presented (the Biscuit, when one is), `iat` within the window,
 and a `jti` not seen before.
 
 - **htu (§4.3 item 9, RFC 3986 §6.2.2–6.2.3).** Compared after
-  normalisation: scheme and host in lower case, the default port dropped, an
-  empty path as `/`, unreserved characters' percent-encodings decoded and
-  every other one in upper case, dot segments removed (§5.2.4); no query or
-  fragment. A URI with userinfo is refused (RFC 9110 §4.2.4). Behind a proxy,
-  `dpop.VerifierConfig.MatchPathOnly` compares the normalised paths alone, and lets
-  the proof's path carry extra leading segments, as a proxy's mount prefix
-  adds — but for the root path `/`, which must match exactly.
-- **Nonces (§8, §9).** With `dpop.VerifierConfig.Nonces` set, every proof must carry
-  a nonce the server issued; one without is refused with
-  `dpop.ErrNonceRequired` (`use_dpop_nonce`), and
-  `Verifier.DPoPNonce` gives the nonce to send in `DPoP-Nonce`.
-  `dpop.HMACNonces` issues them statelessly — its issuance time and an HMAC of it
-  — so replicas sharing a key, with clocks within `dpop.HMACNonceClockSkew` of each
-  other, share nonces without sharing state, and keys rotate by putting the
-  new one first (`dpop.SealNonceKeys`). Such a nonce is bound to no client or key and may be reused
-  until it expires: it bounds how long before use a proof can be signed, and
-  no more.
+  normalisation: scheme and host in lower case, the default port dropped,
+  an empty path as `/`, unreserved characters' percent-encodings decoded
+  and every other one in upper case, dot segments removed (§5.2.4); no
+  query or fragment. A URI with userinfo is refused (RFC 9110 §4.2.4).
+  Behind a proxy, `dpop.VerifierConfig.MatchPathOnly` compares the
+  normalised paths alone, and lets the proof's path carry extra leading
+  segments, as a proxy's mount prefix adds — except for the root path
+  `/`, which must match exactly.
+- **Nonces (§8, §9).** With `dpop.VerifierConfig.Nonces` set, every proof
+  must carry a nonce the server issued; one without is refused with
+  `dpop.ErrNonceRequired` (`use_dpop_nonce`), and `Verifier.DPoPNonce`
+  gives the nonce to send in `DPoP-Nonce`. `dpop.HMACNonces` issues them
+  statelessly — a nonce is its issuance time and an HMAC of it — so
+  replicas sharing a key, with clocks within `dpop.HMACNonceClockSkew` of
+  each other, share nonces without sharing state. Keys rotate by putting
+  the new one first (`dpop.SealNonceKeys`). Such a nonce is bound to no
+  client or key and may be reused until it expires: it bounds how long
+  before use a proof can be signed, and no more.
 - **The scheme (§7.1, §7.2).** `ParseAuthorization` reads
   `Authorization: DPoP <token>` and `Authorization: Bearer <token>` (RFC 9110
   §11.6.2, token68). Given the scheme, `Verify` refuses a key-bound token
@@ -157,12 +158,12 @@ and a `jti` not seen before.
   presented as `DPoP`. `ParseAuthorizationValues` and `dpop.SingleProof`
   read every field a request carries and refuse more than one
   `Authorization` (§7.2) or `DPoP` (§4.3) field rather than choose one.
-- **Replay.** `dpop.MemoryReplayCache` remembers `jti`s for one process, keyed by
-  the proof key's thumbprint, each capability within its own share
-  (`dpop.MemoryReplayCacheConfig.EntriesPerHolder`, default
-  `dpop.DefaultReplayEntriesPerHolder`), so one capability — however many keys
-  its copies are bound to — cannot crowd another's proofs out. Across replicas, nonces or a shared
-  `dpop.ReplayCache` close the window.
+- **Replay.** `dpop.MemoryReplayCache` remembers `jti`s for one process,
+  keyed by the proof key's thumbprint, each capability within its own
+  share (`dpop.MemoryReplayCacheConfig.EntriesPerHolder`, default
+  `dpop.DefaultReplayEntriesPerHolder`), so one capability — however many
+  keys its copies are bound to — cannot crowd out another's proofs. Across
+  replicas, nonces or a shared `dpop.ReplayCache` close the window.
 - **Token endpoints (§5).** `dpop.Verifier.CheckTokenRequest` checks the
   proof that a token request carries the way `Check` checks any other, with
   two differences: the proof names no access token (no `ath`), and any key
@@ -197,16 +198,16 @@ answers alike, and `WriteErrorResponse` writes them:
 | a caveat refuses the operation | 403 | `error="insufficient_scope"` |
 | a request or budget limit is exhausted | 403 | none |
 | more DPoP proofs from one holder inside the replay window than the cache keeps room for (`dpop.ErrReplayQuota`) | 429 | none |
-| a well-formed request that disagrees with what is on record (`ErrConflict`: `ErrAlreadyExists`, `ErrUnitCodeMismatch`, `meter.ErrExternalRefConflict`, `meter.ErrSettleConflict`, `meter.ErrTenantBudgetVersionMismatch`) | 409 | none |
+| a well-formed request that disagrees with what is on record: the `ErrConflict` family (`ErrAlreadyExists`, `ErrUnitCodeMismatch`, `meter.ErrExternalRefConflict`, `meter.ErrSettleConflict`, `meter.ErrTenantBudgetVersionMismatch` among them) | 409 | none |
 | anything else — an outage, or a key-bound token at a verifier with no DPoP (`ErrProofUnsupported`) | 500 | none |
 
 A verifier with DPoP configured also adds a `DPoP algs="…"` challenge to a
 `Bearer` one, as §7.1 allows. The body is `application/problem+json` with a
 type URI per refusal, ending in its `Reason`, which the body also carries as
-a `reason` extension member (§3.2); a refusal with no reason has its family's
-type. Descriptions are fixed per kind: an error's own
-text, which can name kids, issuers or stores, never reaches the client, and
-the values keep to the characters RFC 6750 §3 allows. *Held by*
+a `reason` extension member (§3.2); a refusal with no reason has its
+family's type. Descriptions are fixed per kind: an error's own text, which
+can name kids, issuers or stores, never reaches the client, and challenge
+values keep to the characters RFC 6750 §3 allows. *Held by*
 `TestErrorResponse`, `TestErrorResponseLeaksNothing`,
 `TestAuthParamKeepsTheQuotedStringWhole`, `TestWriteErrorResponse`,
 `TestProblemNamesTheReason`.
@@ -215,9 +216,10 @@ the values keep to the characters RFC 6750 §3 allows. *Held by*
 
 **RFC 7517, RFC 8037, RFC 7638.** `jwks.Marshal` writes a JWK Set of OKP
 Ed25519 keys; `jwks.Parse` skips an entry it cannot use rather than refuse the
-set, and uses no key whose kid two entries name; a document that is not JSON,
-or names a member twice, is refused. `jwks.KeyID` makes a key's kid `limes:` (`jwks.KeyIDPrefix`) followed by
-its RFC 7638 thumbprint, which any JOSE tool computes alike.
+set, and uses no key whose kid two Ed25519 entries name; a document that is
+not JSON, names a member twice, or has no `keys` array is refused.
+`jwks.KeyID` makes a key's kid `limes:` (`jwks.KeyIDPrefix`) followed by its
+RFC 7638 thumbprint, which any JOSE tool computes alike.
 
 **Serving and fetching (RFC 7517 §8.5, RFC 9110 §13, RFC 9111).**
 `jwks.NewHandler` serves a set as `application/jwk-set+json`, with a strong ETag
@@ -359,16 +361,18 @@ at an RFC 8693 token endpoint (`Handler`):
 `TestJWTVerifierKeepsTheContract`, `TestIntrospectionActive`,
 `TestIntrospectionInactive`, `TestIntrospectionOutage`, `TestIntrospectionHoldsACopyToItsLimits`, `TestIntrospectionHoldsTheClientToItsAudiences`, `TestIntrospectionIsClosedByDefault`,
 `TestHandlerAnswersTheScopesGranted`, `TestHandlerAnswersNoScopeGranted`, `TestExchangeHoldsTheGrantedScopes`,
-`TestEffectiveCaveats`, `TestIntrospectHoldsACopyToItsLimits`, `TestIntrospectActive`,
-`TestIntrospectInactive`, `TestIntrospectOutageIsNotInactive`, `TestMarshalCaveatsIsTheClaim`, and the fuzz target
-`FuzzCheckForm`, in `exchange`; and the `mcp-exchange` example.
+`TestEffectiveCaveats` and the fuzz target `FuzzCheckForm`, in the
+`exchange` module; `TestIntrospectHoldsACopyToItsLimits`,
+`TestIntrospectActive`, `TestIntrospectInactive`,
+`TestIntrospectOutageIsNotInactive` and `TestMarshalCaveatsIsTheClaim`, in
+limes; and the `mcp-exchange` example.
 
 ## Not adopted
 
 limes is not an OAuth authorization server, and its tokens are read by
-limes alone. The standards below serve interoperability with that
-ecosystem; they were adopted in v0.3.0 and removed again, since nothing on
-either side reads them. Each can return when something does.
+limes alone. The first four standards below serve interoperability with
+that ecosystem; each was adopted in v0.3.0 and removed, since nothing read
+it, and can return when something does.
 
 - **RFC 9396 in a token.** Caveats travel in `limes_caveats`, not as an
   `authorization_details` entry, so a token holds them once; the token
