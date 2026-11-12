@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -84,8 +86,16 @@ func newRemote(ctx context.Context, rawURL string, client *http.Client, now func
 		client = jwk.DefaultHTTPClient()
 	}
 	client = httpsurl.SameOrigin(client)
+	// httprc and jwx quote the URL they fetch in their errors, which are
+	// logged and returned: they get it without its userinfo, which goes
+	// to the server as the Basic auth net/http would derive from it.
+	fetched := *u
+	if fetched.User != nil {
+		client.Transport = userinfoAuth{next: client.Transport, host: u.Host, user: u.User}
+		fetched.User = nil
+	}
 	r := &remote{
-		url: rawURL, endpoint: u.Redacted(), now: now,
+		url: fetched.String(), endpoint: u.Redacted(), now: now,
 		log:        log.With(slog.String("jwks_url", u.Redacted())),
 		refetching: make(chan struct{}, 1),
 	}
@@ -94,7 +104,7 @@ func newRemote(ctx context.Context, rawURL string, client *http.Client, now func
 		return nil, fmt.Errorf("jwtverify: RemoteKeys: %w", err)
 	}
 	r.ctrl = ctrl
-	r.resource, err = httprc.NewResource[jwk.Set](rawURL, httprc.TransformFunc[jwk.Set](r.transform),
+	r.resource, err = httprc.NewResource[jwk.Set](r.url, httprc.TransformFunc[jwk.Set](r.transform),
 		httprc.WithHTTPClient(client), httprc.WithMinInterval(remoteRefreshInterval), httprc.WithMaxInterval(remoteRefreshInterval))
 	if err != nil {
 		return nil, errs.Errorf("%w: jwtverify: RemoteKeys %s: %w", limes.ErrInvalidConfig, r.endpoint, err)
@@ -113,9 +123,11 @@ func (r *remote) source() *KeySource {
 // remote is RemoteKeys' key set: the document httprc keeps fetching, and
 // when it was last fetched.
 type remote struct {
+	// url is the URL fetched, without the userinfo RemoteKeys was given,
+	// which userinfoAuth sends.
 	url string
-	// endpoint is url with any password masked, the form an error and a
-	// log line name.
+	// endpoint is the URL RemoteKeys was given with any password masked,
+	// the form an error and a log line name.
 	endpoint string
 	ctrl     httprc.Controller
 	resource *httprc.ResourceBase[jwk.Set]
@@ -250,4 +262,29 @@ func (r *remote) refetch(ctx context.Context, reason string) (jwk.Set, error) {
 		return nil, errs.Errorf("%w: jwtverify: fetch the identity provider's keys at %s: %w", jwks.ErrUnavailable, r.endpoint, err)
 	}
 	return r.current()
+}
+
+// userinfoAuth sends the userinfo of a JWKS URL as Basic auth on each
+// request to its host that names no Authorization of its own, as net/http
+// does for a URL that carries it, so the URL fetched need not.
+type userinfoAuth struct {
+	// next sends the request; nil: http.DefaultTransport.
+	next http.RoundTripper
+	host string
+	user *url.Userinfo
+}
+
+func (a userinfoAuth) RoundTrip(req *http.Request) (*http.Response, error) {
+	next := a.next
+	if next == nil {
+		next = http.DefaultTransport
+	}
+	if req.Header.Get("Authorization") != "" || !strings.EqualFold(req.URL.Host, a.host) {
+		return next.RoundTrip(req)
+	}
+	// A RoundTripper must not change the request it is given.
+	req = req.Clone(req.Context())
+	password, _ := a.user.Password()
+	req.SetBasicAuth(a.user.Username(), password)
+	return next.RoundTrip(req)
 }
