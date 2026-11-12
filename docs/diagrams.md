@@ -56,7 +56,7 @@ flowchart LR
         issuer["<b>Issuer</b><br/>Issue · Delegate · Reissue · Biscuit"]
         signer["<b>Signer</b><br/>NewSigner · SealKey → SealedKey · JWT Ed25519"]
         narrows["<b>Narrows</b><br/>child ⊆ parent"]
-        verifier["<b>Verifier</b><br/>Authorize · Verify · Introspect · BiscuitCopy<br/>ErrorResponse · DPoPNonce"]
+        verifier["<b>Verifier</b><br/>Authorize · Verify · Introspect · IntrospectFor · BiscuitCopy<br/>ErrorResponse · DPoPNonce"]
         caveats["<b>Caveats</b><br/>Check · CheckSource · AllowsResource"]
         cache["RevocationCache<br/>capabilities · Biscuit copies<br/>TTL · bounded per kind · single-flight<br/>sharded, a hit read-locked<br/>NewSignal · Clear · ClearRevoked · Sweep · Stats<br/>TTL, or SyncedTTL while its signals listen"]
         static["jwks.Static<br/>SetKey · RemoveKey"]
