@@ -22,13 +22,13 @@ type meteringStore struct {
 // are created on the global MeterProvider unless WithMeterProvider names
 // another, and carry no tenant unless WithTenantAttribute asks for it.
 //
-// The result implements every interface of this package that inner does —
+// The result implements every interface of package meter that inner does —
 // the optional meter.CopyUsageReader, meter.TenantUsageEraser,
 // meter.MatchingReleaser, meter.TenantReservationLister and meter.Leaser —
 // and forwards meter.FeatureGate, so wrapping a store never hides what it
-// can do, nor turns on what its configuration turned off. A decorator forwards a fixed list of
-// optional interfaces (internal/optionalgen), and a test fails when the list
-// misses one the store has.
+// can do, nor turns on what its configuration turned off. The decorator
+// forwards a fixed list of optional interfaces (internal/optionalgen), and a
+// test fails when the list misses one the store has.
 //
 //go:generate go run ./internal/optionalgen/gen
 func Instrument(inner meter.UsageStore, opts ...Option) (meter.UsageStore, error) {

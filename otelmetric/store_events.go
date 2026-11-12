@@ -11,7 +11,7 @@ import (
 )
 
 // metricTenantWait is the histogram of a metered call's wait for its
-// tenant's aggregate (meter.StoreEvents.OnTenantWait).
+// tenant's row (meter.StoreEvents.OnTenantWait).
 const metricTenantWait = "limes.tenant.wait"
 
 // attrOperation is the store call a measurement is about, one of the
@@ -27,9 +27,10 @@ var tenantWaitBuckets = []float64{0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.0
 // NewStoreEvents returns the callbacks a usage store reports to as it works
 // (pgstore.Config.Events), recorded as instruments:
 // limes.tenant.wait, a histogram of how long each metered call waited for
-// its tenant's aggregate, in seconds, by limes.operation, and by
-// limes.tenant_id under WithTenantAttribute. The wait is that of the
-// aggregate's row alone, not of the tenant's advisory lock nor of the
+// its tenant's row, in seconds, by limes.operation, and by limes.tenant_id
+// under WithTenantAttribute. The wait is for that row alone — the
+// aggregate's, or the tenant's stripe where the store stripes an unlimited
+// tenant — not for the tenant's advisory lock nor for the counters of the
 // call's chain (docs/adr/0022-unlimited-tenant-aggregate.md, Decision 6).
 func NewStoreEvents(opts ...Option) (meter.StoreEvents, error) {
 	var cfg meteringConfig

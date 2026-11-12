@@ -1,9 +1,9 @@
 // Package optionalgen writes otelmetric's withOptional: the decorator
 // implements each optional interface of package meter the store it wraps
 // does, and none it does not, so it needs one struct type per mix of them —
-// two to the power of their number. Written by hand, a fifth interface
-// would be sixteen more cases to get right; written from Optional, it is one
-// more line.
+// two to the power of their number. Written by hand, each interface added
+// would double the cases to get right; written from Optional, it is one more
+// line.
 package optionalgen
 
 import (
