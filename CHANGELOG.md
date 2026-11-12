@@ -2,6 +2,21 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.177.1](https://github.com/oleg-tkachuk/limes/compare/v0.177.0...v0.177.1) (2026-11-12)
+
+### Bug Fixes
+
+* give every 500 from ErrorResponse the internal code and category ([84a1e2f](https://github.com/oleg-tkachuk/limes/commit/84a1e2f27a1f4d5a8d3021a3bcf58c3ff5663002))
+* **memstore:** check a budget reset before it settles the tenant's leases ([37e9141](https://github.com/oleg-tkachuk/limes/commit/37e9141f73c38d8523d3c3c86b11001c0934050b))
+* **metertest:** skip the copy checks for a store with no copy counters ([79a19f6](https://github.com/oleg-tkachuk/limes/commit/79a19f6e1e05e8a6031037179aa3ca27a0c11ceb))
+* refuse to sign a capability that expires as it is issued ([4fb6826](https://github.com/oleg-tkachuk/limes/commit/4fb68262e144989a2679b2f2c86e41523ca1f93c))
+* seal an empty ed25519 key to the zero SealedKey ([09c5af6](https://github.com/oleg-tkachuk/limes/commit/09c5af6163e49d92e41710a84ba00c72772eccaa))
+
+### Contract
+
+* tighten compatibility.md and name every internal package nested modules import
+* hold the nested modules' implemented interfaces to their method sets
+
 ## [0.177.0](https://github.com/oleg-tkachuk/limes/compare/v0.176.0...v0.177.0) (2026-11-10)
 
 ### Features

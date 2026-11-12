@@ -2,6 +2,16 @@
 
 Every release of the exchange module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.24.1](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.24.0...exchange%2Fv0.24.1) (2026-11-12)
+
+### Bug Fixes
+
+* **exchange:** answer an unknown kid as unavailable while the key set cannot be fetched ([83dd991](https://github.com/oleg-tkachuk/limes/commit/83dd9911377359d35cf5d35860c9f7937bbf7eb5))
+
+### Dependencies
+
+* require limes v0.177.1
+
 ## [0.24.0](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.23.0...exchange%2Fv0.24.0) (2026-11-10)
 
 ### ⚠ BREAKING CHANGES

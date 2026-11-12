@@ -2,6 +2,12 @@
 
 Every release of the otelmetric module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.20.2](https://github.com/oleg-tkachuk/limes/compare/otelmetric%2Fv0.20.1...otelmetric%2Fv0.20.2) (2026-11-12)
+
+### Dependencies
+
+* require limes v0.177.1
+
 ## [0.20.1](https://github.com/oleg-tkachuk/limes/compare/otelmetric%2Fv0.20.0...otelmetric%2Fv0.20.1) (2026-11-09)
 
 ### Dependencies
