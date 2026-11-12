@@ -166,7 +166,12 @@ whose counters drift fails it.
   `BREAKING CHANGE:` footer — in one of its commits. CI's **API
   compatibility** job compares the pull request's API with its base using
   apidiff and fails an unmarked break. CI's **Breaking markers** job fails
-  a change to the error codes or the defaults that no commit marks. Before
+  a change to the error codes or the defaults that no commit marks. No
+  job sees a break of behaviour: a call answered with another code than
+  before, a fix among them, or one refused that was accepted, or the other
+  way round, though its signature holds
+  ([docs/compatibility.md](../docs/compatibility.md)). Its author marks
+  it, as for any other break. Before
   1.0.0 a marked change also adds its entry to
   [docs/migration.md](../docs/migration.md) — what each name was and what
   it is — and **Breaking markers** fails one that leaves that file alone.
