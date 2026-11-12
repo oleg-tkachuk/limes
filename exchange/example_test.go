@@ -154,7 +154,7 @@ func ExampleNewHandler() {
 		"subject_token_type": {exchange.TokenTypeAccessToken},
 		"resource":           {exampleTool},
 	}
-	req := httptest.NewRequest(http.MethodPost, exampleEndpoint, strings.NewReader(form.Encode()))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, exampleEndpoint, strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", formContentType)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
