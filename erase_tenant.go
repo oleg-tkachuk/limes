@@ -15,9 +15,8 @@ type TenantRecordEraser interface {
 	// revocation entry and its Biscuit copies' — and no other: an id not on
 	// record is not revoked, so a record removed while its token may still
 	// verify would let that token through again. Purge takes the rest as
-	// it expires. It
-	// changes no other tenant's records, and a second call revokes and
-	// removes nothing the first left.
+	// it expires. It changes no other tenant's records, and a second call
+	// revokes and removes nothing the first left.
 	EraseTenantRecords(ctx context.Context, req EraseTenantRequest) (EraseTenantResult, error)
 }
 
@@ -31,7 +30,8 @@ type EraseTenantRequest struct {
 	Actor string
 }
 
-// Validate refuses a request naming no tenant.
+// Validate refuses, as ErrInvalidRequest, a request naming no tenant, or a
+// Note or Actor that is not valid UTF-8 or holds a NUL.
 func (r EraseTenantRequest) Validate() error {
 	if r.TenantID == uuid.Nil() {
 		return refuseRequest("erase tenant records: tenant id required")

@@ -42,7 +42,8 @@ type CheckRequest struct {
 }
 
 // Mutating reports whether the operation may change state, resolving its
-// declared Effect. A consumer that gates anything else on the operation's
+// declared Effect; a declaration Op.ResolveEffect refuses is
+// ErrEffectConflict. A consumer that gates anything else on the operation's
 // effect — a lookup it runs only for reads — asks here, so that it and Check
 // cannot disagree.
 func (req CheckRequest) Mutating() (bool, error) {
@@ -56,9 +57,9 @@ func (req CheckRequest) Mutating() (bool, error) {
 // Check evaluates every per-operation caveat against req and returns the first
 // violation, as one of the sentinels above, or nil. A declared Effect that
 // Op.ResolveEffect refuses returns ErrEffectConflict, which is a programming
-// error rather than a caveat violation. It is the one definition
-// of what the caveats mean at use time; a consumer that hand-rolls the same
-// checks drifts from it.
+// error rather than a caveat violation. It is the one definition of what the
+// caveats mean at use time; a consumer that hand-rolls the same checks
+// drifts from it.
 //
 // The source-IP caveat is per connection rather than per operation, so it is
 // checked separately by CheckSource. Budget and request-count caveats are
@@ -103,8 +104,9 @@ func (c Caveats) checkHandling(req CheckRequest, mutating bool) error {
 }
 
 // CheckSource evaluates the source-IP caveat against the client address the
-// consumer observed. An unknown address (the zero netip.Addr) fails a
-// constrained capability closed: "we could not tell" is not "it matched".
+// consumer observed, and returns ErrSourceIPNotAllowed or nil. An unknown
+// address (the zero netip.Addr) fails a constrained capability closed: "we
+// could not tell" is not "it matched".
 func (c Caveats) CheckSource(addr netip.Addr) error {
 	if len(c.SourceIPCIDR) == 0 {
 		return nil

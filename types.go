@@ -11,7 +11,6 @@ import (
 // form "<namespace>:<name>" — "tool:search", "mcp:github/create_issue" —
 // which Op.Validate accepts. A consumer-defined operation is treated as
 // state-changing unless the server declares otherwise (Effect).
-// Fine-grained method gating can still layer admin-authored policy on top.
 type Op string
 
 // The built-in operations: the ones every resource server shares. Get and
@@ -136,11 +135,11 @@ type CopyCeiling struct {
 }
 
 // AdmitsRequests reports whether n requests made with the copy in all stay
-// under its own request limit; with none of its own, any number does.
+// within its own request limit; with none of its own, any number does.
 func (c CopyCeiling) AdmitsRequests(n int64) bool { return c.Requests == nil || c.Requests.Admits(n) }
 
-// AdmitsBudget reports whether amount spent with the copy in all stays under
-// its own budget; with none of its own, any amount does.
+// AdmitsBudget reports whether amount spent with the copy in all stays
+// within its own budget; with none of its own, any amount does.
 func (c CopyCeiling) AdmitsBudget(amount Nanos) bool {
 	return c.Budget == nil || c.Budget.Admits(amount)
 }
@@ -191,8 +190,9 @@ type Caveats struct {
 	// Budget is the cost budget the capability authorises, exact to the
 	// nano, in Budget.UnitCode — the unit every amount metered against the
 	// capability counts in. The zero value allows no spend and needs no
-	// unit: the capability counts requests (Meter.Bump) but no amount, and
-	// a Charge, Reserve or Settle on it with no unit is ErrInvalidRequest.
+	// unit: the capability counts requests (meter.RequestCounter.Bump) but
+	// no amount, and a Charge, Reserve or Settle on it with no unit is
+	// ErrInvalidRequest.
 	// BudgetCeiling{Unlimited: true, UnitCode: u} lifts the bound. Once it
 	// is exhausted, a charge returns ErrBudgetExceeded. A delegated child
 	// whose budget names no unit takes its parent's.

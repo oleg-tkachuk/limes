@@ -54,8 +54,9 @@ type RevokeMatchingRequest struct {
 	Limit int
 }
 
-// Validate refuses a request with neither a tenant nor AllTenants, or both,
-// no selector, a selector AllTenants does not take, or a negative limit.
+// Validate refuses, as ErrInvalidRequest, a request with neither a tenant
+// nor AllTenants, or both, no selector, a selector AllTenants does not take,
+// a negative limit, or text that is not valid UTF-8 or holds a NUL.
 func (r RevokeMatchingRequest) Validate() error {
 	switch {
 	case r.TenantID == uuid.Nil() && !r.AllTenants:
@@ -98,18 +99,18 @@ type RevokeMatchingResult struct {
 // BulkRevoker revokes every capability of a tenant that matches a subject,
 // an on-behalf-of, a client, a session, an agent run or a subject issuer —
 // or of every tenant that matches a client, a session or a subject issuer —
-// in batches, as Revoke revokes one:
-// an entry for each that has none, and every descendant stopped through its
-// lineage. A store that records sessions and subject issuers
-// (InsertRequest.Session, InsertRequest.SubjectIssuer) implements it; memstore and pgstore do.
+// in batches, as Revoke revokes one: an entry for each that has none, and
+// every descendant stopped through its lineage. A store that records
+// sessions and subject issuers (InsertRequest.Session,
+// InsertRequest.SubjectIssuer) implements it; memstore and pgstore do.
 type BulkRevoker interface {
 	// RevokeMatching writes a revocation entry, not cascaded, for at most
 	// req.BatchLimit() capabilities of req.TenantID — or, with AllTenants,
 	// of every tenant — that match every selector req names and have no
 	// entry of their own, in order of tenant and id, and reports how many,
 	// in which tenants, and whether more may match. It refuses what
-	// RevokeMatchingRequest.Validate refuses, a call scoped to another
-	// tenant, and an AllTenants call under a scope that does not admit
-	// writing every tenant, as ErrScopeMismatch.
+	// RevokeMatchingRequest.Validate refuses; a call scoped to another
+	// tenant, or an AllTenants call under a scope that does not admit
+	// writing every tenant, is ErrScopeMismatch.
 	RevokeMatching(ctx context.Context, req RevokeMatchingRequest) (RevokeMatchingResult, error)
 }

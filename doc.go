@@ -20,7 +20,8 @@
 //     API in the path, or offline as a Biscuit block with no call at all.
 //
 // Wire format is JWT compact serialization with Ed25519 signatures (`alg:
-// Ed25519`, RFC 9864), or a Biscuit v3 sealing such a token;
+// Ed25519`, RFC 9864, or `EdDSA` where SignerConfig.Algorithm asks for it),
+// or a Biscuit v3 sealing such a token;
 // docs/standards.md lists every standard followed. Verification is local:
 // the signature is checked against a resolved public key, and the store
 // reads, whether the capability is revoked and, for a Biscuit, whether its
@@ -39,13 +40,13 @@
 // it, for tooling. limestest holds a consumer's mapping of the error codes
 // to the ones it was written against. memstore, storetest and metertest
 // serve stores; dpop/dpoptest and jwks/jwkstest check a replay cache, a
-// nonce source and a key resolver. Modules of their own carry what the root module does not
-// resolve: github.com/oleg-tkachuk/limes/pgstore, every store contract over
-// PostgreSQL; github.com/oleg-tkachuk/limes/redisreplay, a replay cache over
-// Redis; github.com/oleg-tkachuk/limes/otelmetric, OpenTelemetry
-// instruments; github.com/oleg-tkachuk/limes/exchange, OAuth 2.0 token
-// exchange (RFC 8693); and github.com/oleg-tkachuk/limes/biscuit, the
-// Biscuit form.
+// nonce source and a key resolver. Modules of their own carry what the root
+// module does not resolve: github.com/oleg-tkachuk/limes/pgstore, every
+// store contract over PostgreSQL; github.com/oleg-tkachuk/limes/redisreplay,
+// a replay cache over Redis; github.com/oleg-tkachuk/limes/otelmetric,
+// OpenTelemetry instruments; github.com/oleg-tkachuk/limes/exchange, OAuth
+// 2.0 token exchange (RFC 8693); and github.com/oleg-tkachuk/limes/biscuit,
+// the Biscuit form.
 //
 // # What you implement
 //
@@ -54,8 +55,8 @@
 //
 //   - [Store] — capability records and revocations; an [Issuer] needs only its
 //     [IssuanceStore] half, a [Revoker] only its [RevocationStore] one.
-//     IsRevoked answers for the capability's whole delegation chain, at most [MaxDelegationDepth]
-//     ancestors deep. No transactions required; an
+//     IsRevoked answers for the capability's whole delegation chain, at
+//     most [MaxDelegationDepth] ancestors deep. No transactions required; an
 //     in-memory map is a valid implementation. A store that scopes calls to
 //     a tenant refuses one whose request names another with
 //     [ErrScopeMismatch]. A store paired with a meter.TenantUsageEraser
@@ -80,10 +81,9 @@
 // [BulkRevoker] to revoke by user, client, identity-provider session or
 // agent run (meter.MatchingReleaser frees the holds it stopped),
 // [ExchangeStore] to exchange each subject token for one capability,
-// [TenantRecordEraser] to
-// remove a tenant, [dpop.ReplayCache] to share DPoP replay
-// state across replicas ([dpop.MemoryReplayCache] ships for one process), and
-// [dpop.Nonces] to require server nonces ([dpop.HMACNonces] ships, and works
+// [TenantRecordEraser] to remove a tenant, [dpop.ReplayCache] to share DPoP
+// replay state across replicas ([dpop.MemoryReplayCache] ships for one
+// process), and [dpop.Nonces] to require server nonces ([dpop.HMACNonces] ships, and works
 // across replicas holding the same keys).
 //
 // A Capability crosses the API by value, in and out: no caller can alter one
@@ -104,12 +104,11 @@
 // transport status, or let Verifier.ErrorResponse map it to HTTP. Every
 // error the package returns has a stable [Code] ([CodeOf]), and [ProblemOf]
 // builds its RFC 9457 body for an API that is not a protected resource;
-// never match an error's text. A
-// charge rejected by any ceiling — a Biscuit copy's, the capability's, an
-// ancestor's, the tenant's — leaves every counter and the ledger unmutated, so retrying after
-// a rejection is safe. Delegation needs [OpShare] on the parent and can only
-// narrow: any widening returns
-// [ErrDelegationTooWide], and a differing unit code returns
+// never match an error's text. A charge rejected by any ceiling — a Biscuit
+// copy's, the capability's, an ancestor's, the tenant's — leaves every
+// counter and the ledger unmutated, so retrying after a rejection is safe.
+// Delegation needs [OpShare] on the parent and can only narrow: any
+// widening returns [ErrDelegationTooWide], and a differing unit code returns
 // [ErrUnitCodeMismatch] rather than converting.
 //
 // # Enforcing caveats

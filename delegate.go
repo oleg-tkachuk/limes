@@ -7,13 +7,16 @@ import (
 	"time"
 )
 
-// Narrows reports whether `child` is a narrowing of `parent`: every operation
-// child allows is allowed by parent; every resource child can touch is
-// reachable by parent; the budget / request count are no larger, and the
-// validity window starts no earlier and ends no later;
-// the audience is a subset; tainted-read is no broader. Issuer.Delegate runs
-// this check before signing the child token, so a misuse fails at issue time,
-// not later.
+// Narrows returns nil when child is a narrowing of parent: the same tenant;
+// an audience that is a subset; a validity window that starts no earlier and
+// ends no later; a key binding when parent has one; every operation allowed
+// by parent; every resource and source IP reachable by parent; request,
+// copy and budget ceilings no larger; tainted reads no broader; and an
+// idempotency key required when parent requires one. A widening is
+// ErrDelegationTooWide; a budget in another unit than parent's, unless it
+// spends nothing and names none, is ErrUnitCodeMismatch. Issuer.Delegate runs
+// this check before signing the child token, so a misuse fails at issue
+// time, not later.
 //
 // The function is exposed at package level so external tooling can dry-run a
 // delegation without going through the issuer.

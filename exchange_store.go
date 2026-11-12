@@ -28,8 +28,8 @@ type ClaimExchangeRequest struct {
 	CapabilityID uuid.UUID
 }
 
-// Validate refuses what ExchangeKey.Validate refuses, and a request with no
-// TokenExpiresAt.
+// Validate refuses what ExchangeKey.Validate refuses, and, as
+// ErrInvalidRequest, a request with no TokenExpiresAt.
 func (r ClaimExchangeRequest) Validate() error {
 	if err := r.Key.Validate(); err != nil {
 		return err
@@ -40,7 +40,9 @@ func (r ClaimExchangeRequest) Validate() error {
 	return nil
 }
 
-// Validate refuses a key without a tenant, an issuer or a token id.
+// Validate refuses, as ErrInvalidRequest, a key without a tenant, an issuer
+// or a token id, or whose issuer or token id is not valid UTF-8 or holds a
+// NUL.
 func (k ExchangeKey) Validate() error {
 	switch {
 	case k.TenantID == uuid.Nil():

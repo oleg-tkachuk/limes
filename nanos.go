@@ -9,8 +9,9 @@ import (
 	"strings"
 )
 
-// Nanos is an amount of a currency or metering unit (see BudgetCeiling.UnitCode) in
-// billionths of the unit: 1.5 USD is 1_500_000_000. Every amount the module
+// Nanos is an amount of a currency or metering unit (see
+// BudgetCeiling.UnitCode) in billionths of the unit: 1.5 USD is
+// 1_500_000_000. Every amount the module
 // counts — a charge, a ceiling, a hold, a refund — is Nanos, so spend sums,
 // compares and refunds exactly, however many charges it takes. Float64
 // appears only at the edges, for display (Float64) and for a caller whose
@@ -36,8 +37,10 @@ const MaxNanos Nanos = 999_999_999_999_999_999
 var nanosPerUnitRat = new(big.Rat).SetInt64(NanosPerUnit)
 
 // ParseAmount reads a decimal amount of units — "0.35", "25", "1e-7" — into
-// Nanos exactly. It refuses a negative amount, one finer than a nano and one
-// beyond MaxNanos, rather than rounding any of them.
+// Nanos exactly. It refuses, as ErrInvalidAmount, a negative amount, one
+// finer than a nano and one beyond MaxNanos, rather than rounding any of
+// them, and text that is not digits with an optional fraction and an
+// optional exponent of at most three digits.
 func ParseAmount(s string) (Nanos, error) {
 	n, exact, err := parseDecimal(s)
 	if err != nil {
@@ -187,8 +190,8 @@ func (n *Nanos) UnmarshalText(b []byte) error {
 }
 
 // Validate reports whether n is usable as a charge or refund amount: not
-// negative and at most MaxNanos. Implementations call it before touching
-// state.
+// negative and at most MaxNanos, else ErrInvalidAmount. Implementations call
+// it before touching state.
 func (n Nanos) Validate() error {
 	if n < 0 || n > MaxNanos {
 		return refuse(ErrInvalidAmount, "the amount is negative or past the largest one", "%s is outside 0..%s", n, MaxNanos)

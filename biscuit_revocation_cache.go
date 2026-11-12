@@ -21,11 +21,13 @@ func (c *RevocationCache) answersBiscuits() bool { return c.biscuits != nil }
 // when any of its ids is: the ids a token shares with the copies it was
 // attenuated from stay cached, so a fresh attenuation — which anyone holding
 // a copy can make offline — costs one lookup for its new block, and a token
-// of blocks the cache has never seen one lookup in all, not one per block. A "live" answer is then
-// cached for each of them; a "revoked" one for that set and for the token's
-// own ids, as upstream does not say which id it is, and it holds for every
-// copy attenuated from the token. An upstream error is returned and never
-// cached.
+// of blocks the cache has never seen one lookup in all, not one per block.
+// A "live" answer is then cached for each of them; a "revoked" one for that
+// set and for the token's own ids, as upstream does not say which id it is,
+// and it holds for every copy attenuated from the token. An upstream error
+// is returned and never cached, unless RevocationCacheConfig.MaxStale
+// serves a stale answer in its place. A cache built without
+// RevocationCacheConfig.Biscuits answers every call with ErrInvalidConfig.
 func (c *RevocationCache) IsBiscuitRevoked(ctx context.Context, revocationIDs [][]byte) (bool, error) {
 	if !c.answersBiscuits() {
 		return false, errNoBiscuitLookup

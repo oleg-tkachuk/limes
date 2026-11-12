@@ -351,10 +351,10 @@ func CodeOf(err error) (Code, bool) {
 	return r.code, ok
 }
 
-// Codes returns every code this package answers, the meter's among them
-// and, once module exchange is linked in, the exchange's, each once, so a consumer can prove its own mapping
-// covers them all. The order is fixed within a release, and no contract:
-// it may change in any release.
+// Codes returns every code this package answers, each once: its own, the
+// meter's and, once module exchange is linked in, the exchange's, so a
+// consumer can prove its own mapping covers them all. The order is no
+// contract: it may change in any release.
 func Codes() []Code {
 	return codesIn(allCodeRules())
 }
@@ -380,9 +380,8 @@ const internalTitle = "Internal error"
 // ProblemOf is the RFC 9457 problem details of err, an error limes returned,
 // for a consumer's own API, whatever its transport: its type URI, a fixed
 // title, its HTTP status, its code, its category and, for a refusal, its
-// Reason. A
-// refusal's is the body Verifier.ErrorResponse writes. False for an error
-// that is not limes's: answer that as the server's failure.
+// Reason. A refusal's is the body Verifier.ErrorResponse writes. False for
+// an error that is not limes's: answer that as the server's failure.
 //
 // Its Detail is set for a refusal of the client's own input — a code of
 // DetailCodes — when the refusal says which part of the request it refused
@@ -426,9 +425,9 @@ func problemOfRule(r codeRule) Problem {
 }
 
 // ProblemOfCode is the problem ProblemOf answers an error with code with,
-// and false for a code that is none of this package's, the meter's among
-// them: a consumer holding only a code, or pinning the contract its mapping
-// was written against (limestest), reads it without an error to hand.
+// and false for a code not among Codes: a consumer holding only a code, or
+// pinning the contract its mapping was written against (limestest), reads
+// it without an error to hand.
 func ProblemOfCode(code Code) (Problem, bool) {
 	r, ok := codeRuleOf(code)
 	if !ok {

@@ -97,9 +97,9 @@ type VerifierConfig struct {
 	// KeyIssuers binds each kid to the one issuer allowed to sign with it:
 	// a token whose kid is absent from the map, or whose `iss` differs from
 	// the kid's binding, is rejected. Empty binds no kid: enough with one
-	// trusted issuer. With several it is required, unless SharedKeys says otherwise:
-	// any trusted key signing for any trusted issuer is wrong for issuers
-	// that do not share a trust boundary, so it is never the default.
+	// trusted issuer. With several it is required, unless SharedKeys says
+	// otherwise: any trusted key signing for any trusted issuer is wrong for
+	// issuers that do not share a trust boundary, so it is never the default.
 	// One key signs for two issuers — a family of capabilities marked by
 	// an iss of its own — under two kids, each bound here to its issuer:
 	// two Issuers with the same key, each with its kid and IssuerName.
@@ -112,8 +112,8 @@ type VerifierConfig struct {
 	// exclude each other.
 	SharedKeys bool
 
-	// Now is the time function the verifier uses for nbf/exp. Tests
-	// override it; production passes time.Now.
+	// Now is the time function the verifier uses for nbf/exp. Nil:
+	// time.Now.
 	Now func() time.Time
 
 	// Leeway widens the nbf / exp window to absorb clock skew between
@@ -128,9 +128,9 @@ type VerifierConfig struct {
 	// DefaultMaxTokenBytes when zero; negative is refused.
 	MaxTokenBytes int
 
-	// Biscuit accepts the Biscuit form (Issuer.Biscuit, Attenuate) beside
-	// the JWT, as it says. Nil: a Biscuit is refused like any malformed
-	// token.
+	// Biscuit accepts the Biscuit form (Issuer.Biscuit, biscuit.Attenuate)
+	// beside the JWT, as it says. Nil: a Biscuit is refused like any
+	// malformed token.
 	Biscuit *BiscuitConfig
 
 	// DPoP checks the proof of possession a key-bound capability (one with
@@ -180,8 +180,8 @@ type BiscuitConfig struct {
 
 	// MeterCopies admits Biscuits whose attenuation blocks set a copy's own
 	// request or budget limits (Attenuation.Requests, Attenuation.Budget).
-	// Set it only when the Meter that enforces caveats counts
-	// the copies a MeterSubject carries; off, such a token is refused with
+	// Set it only when the meter.Meter that enforces caveats counts the
+	// copies a MeterSubject carries; off, such a token is refused with
 	// ErrCopyCountersNotMetered rather than accepted with its limits unkept
 	// — once it has passed every other check, so a token refused for what
 	// it is gets that refusal instead.
@@ -193,10 +193,12 @@ const DefaultRealm = "limes"
 
 // VerifyRequest is a token as it arrived, and what it arrived for.
 type VerifyRequest struct {
-	// Token is the capability token, a JWT or a Biscuit.
+	// Token is the capability token, a JWT or a Biscuit. Empty is
+	// ErrNoCredentials.
 	Token string
 	// Audience is the service the call is hitting: the token's audience
-	// must include it.
+	// must include it. Required: empty is ErrInvalidRequest, the server's
+	// error rather than the token's.
 	Audience string
 	// DPoP is the request's proof of possession, needed when the
 	// capability is key-bound and ignored when it is not.
@@ -634,12 +636,12 @@ type Introspection struct {
 // answer says the token is bound, not that its presenter holds the key. A
 // token lifted out of the Biscuit it was sealed in is refused, as Verify
 // refuses it. So is a Biscuit copy that sets request or budget limits of its
-// own, on a verifier without BiscuitConfig.MeterCopies: ErrCopyCountersNotMetered,
-// as Verify answers it; with MeterCopies, the answer carries those limits in
-// Introspection.Copies. A refusal of the token is ErrUnauthenticated's
-// family, which the endpoint answers as inactive; any other error is the
-// server's, such as a revocation lookup that failed, and never reads as
-// inactive.
+// own, on a verifier without BiscuitConfig.MeterCopies:
+// ErrCopyCountersNotMetered, as Verify answers it; with MeterCopies, the
+// answer carries those limits in Introspection.Copies. A refusal of the
+// token is ErrUnauthenticated's family, which the endpoint answers as
+// inactive; any other error is the server's, such as a revocation lookup
+// that failed, and never reads as inactive.
 //
 // Introspect is no authorization: it yields no VerifiedCapability, so its
 // answer can be neither delegated from nor checked against a request.
@@ -684,11 +686,11 @@ func (v *Verifier) DPoPNonce(ctx context.Context) (string, error) {
 // Authorize is Verify followed by every caveat that can be checked without
 // state: the operation, the resource, the idempotency key, the tainted read
 // (Caveats.Check), and the client's address (Caveats.CheckSource). The
-// request and budget limits are stateful: the Meter enforces them, through
-// Bump and Charge, inside the consumer's own transaction. The caveats are
-// checked before the proof's id is recorded, so a presenter they refuse —
-// one outside the allowed networks, say — spends none of the replay cache's
-// room, which every holder of the capability shares.
+// request and budget limits are stateful: a meter.Meter enforces them,
+// through Bump and Charge, inside the consumer's own transaction. The
+// caveats are checked before the proof's id is recorded, so a presenter
+// they refuse — one outside the allowed networks, say — spends none of the
+// replay cache's room, which every holder of the capability shares.
 func (v *Verifier) Authorize(ctx context.Context, req AuthorizeRequest) (VerifiedCapability, error) {
 	return v.verifyObserved(ctx, VerifierOperationAuthorize, req.Verify, func(c Capability) error {
 		if err := c.Caveats.CheckSource(req.ClientAddr); err != nil {
@@ -913,5 +915,5 @@ func (v VerifiedCapability) Capability() Capability { return v.c.clone() }
 // Copies are the request and budget limits the attenuation blocks of a
 // verified Biscuit set, innermost block first; none for a JWT, or a Biscuit
 // whose blocks set none. Each is counted on its own, beside the capability's
-// counters, by every Meter call its MeterSubject is handed.
+// counters, by every meter.Meter call its MeterSubject is handed.
 func (v VerifiedCapability) Copies() []CopyCeiling { return cloneCopyCeilings(v.copies) }

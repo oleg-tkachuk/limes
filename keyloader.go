@@ -68,10 +68,12 @@ func (k SigningKey) Public() ed25519.PublicKey {
 
 // LoadKey reads the PKCS#8 PEM signing key at path, under the kid
 // jwks.KeyID derives from it; a deployment that names its kids sets
-// SigningKey.KeyID on the result. For a key that lives
-// only as long as the process, GenerateKey; a deployment that may have no
-// key file chooses between the two itself, so a missing mount is never
-// silently a fresh key.
+// SigningKey.KeyID on the result. It refuses, as ErrInvalidConfig, an empty
+// path, a file that is not PEM, a PEM type other than "PRIVATE KEY" and a
+// key that is not Ed25519; a file it cannot read, or PKCS#8 it cannot parse,
+// returns that error wrapped. For a key that lives only as long as the
+// process, GenerateKey; a deployment that may have no key file chooses
+// between the two itself, so a missing mount is never silently a fresh key.
 func LoadKey(path string) (SigningKey, error) {
 	priv, err := loadPrivateKey(path)
 	if err != nil {

@@ -26,9 +26,8 @@ import (
 //     is revoked here, unlike ListByPrincipalRequest.IncludeRevoked, which
 //     reads a record's own entry. Revoked wins over expired.
 //   - Expired: not revoked, and its ExpiresAt is not after now, or zero
-//     (RecordDispositionExpired). A
-//     child expires no later than its parent (Store.Insert), so no ancestor
-//     need be read for it.
+//     (RecordDispositionExpired). A child expires no later than its parent
+//     (Store.Insert), so no ancestor need be read for it.
 //   - Active: neither.
 //
 // A Biscuit copy's revocation is not a record's and counts nowhere.
@@ -67,8 +66,9 @@ type CountRecordsRequest struct {
 	Cursor string
 }
 
-// Validate refuses a request that names no tenant and not every tenant, or
-// both, a negative window, or a negative page size.
+// Validate refuses, as ErrInvalidRequest, a request that names no tenant
+// and not every tenant, or both, a negative window, a negative page size,
+// or a selector that is not valid UTF-8 or holds a NUL.
 func (r CountRecordsRequest) Validate() error {
 	switch {
 	case r.TenantID == uuid.Nil() && !r.AllTenants:

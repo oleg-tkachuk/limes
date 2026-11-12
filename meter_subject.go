@@ -8,14 +8,15 @@ import (
 	"github.com/oleg-tkachuk/limes/internal/link"
 )
 
-// MeterSubject is what a Meter counts a request against: a verified
+// MeterSubject is what a meter.Meter counts a request against: a verified
 // capability's id and tenant, its request and budget ceilings, its unit and
 // the limits of the Biscuit copy presented. Only
 // VerifiedCapability.MeterSubject and StoredMeterSubject make one, so a
 // ceiling is the one a verified token carries or a RecordReader reads back —
-// never a value a caller sets on the subject itself. A store reads it through its methods. The zero
-// MeterSubject names no capability and no tenant; a Meter refuses it with
-// ErrInvalidRequest rather than count it anywhere.
+// never a value a caller sets on the subject itself. A store reads it
+// through its methods. The zero MeterSubject names no capability and no
+// tenant; a meter.Meter refuses it with ErrInvalidRequest rather than count
+// it anywhere.
 type MeterSubject struct {
 	capabilityID uuid.UUID
 	tenantID     uuid.UUID
@@ -25,7 +26,8 @@ type MeterSubject struct {
 	copies       []CopyCeiling
 }
 
-// MeterSubject is what the Meter counts this capability's requests against.
+// MeterSubject is what a meter.Meter counts this capability's requests
+// against.
 func (v VerifiedCapability) MeterSubject() MeterSubject {
 	return MeterSubject{
 		capabilityID: v.c.ID,
@@ -37,7 +39,7 @@ func (v VerifiedCapability) MeterSubject() MeterSubject {
 	}
 }
 
-// StoredMeterSubject is what the Meter counts a capability against for a
+// StoredMeterSubject is what a meter.Meter counts a capability against for a
 // cost reported with no token in hand, read from the capability's record —
 // records is the Store, or anything reading its records. It reads the record
 // itself rather than take a Record, whose fields any caller can set, so the
@@ -84,9 +86,9 @@ func (s MeterSubject) CopyQuota() CopyQuota { return s.copyQuota }
 // Copies are the limits of the Biscuit copy presented, a copy of them.
 func (s MeterSubject) Copies() []CopyCeiling { return cloneCopyCeilings(s.copies) }
 
-// Validate refuses a subject that names no capability or no tenant — the
-// zero MeterSubject, a request that set none — or an unknown unit. A
-// metering request's Validate calls it.
+// Validate refuses, as ErrInvalidRequest, a subject that names no
+// capability or no tenant — the zero MeterSubject, a request that set none
+// — or an unknown unit. A metering request's Validate calls it.
 func (s MeterSubject) Validate() error {
 	if s.capabilityID == uuid.Nil() || s.tenantID == uuid.Nil() {
 		return refuseRequest("the meter subject names no capability or no tenant")
@@ -95,7 +97,8 @@ func (s MeterSubject) Validate() error {
 }
 
 // ValidateAmounts is Validate for a request that moves an amount, which
-// needs a unit to count it in: no unit is ever assumed.
+// needs a unit to count it in: no unit is ever assumed, and a subject that
+// names none is ErrInvalidRequest.
 func (s MeterSubject) ValidateAmounts() error {
 	if err := s.Validate(); err != nil {
 		return err
