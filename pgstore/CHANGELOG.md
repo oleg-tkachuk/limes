@@ -2,6 +2,19 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.77.1](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.77.0...pgstore%2Fv0.77.1) (2026-11-12)
+
+### Bug Fixes
+
+* **pgstore:** answer a settle under another tenant's settled id as a reserve conflict ([9e182e5](https://github.com/oleg-tkachuk/limes/commit/9e182e5c1cce7dcb90d168890efc53ca441ec3cf))
+* **pgstore:** refuse a call on a callback's transaction while another runs ([21754d1](https://github.com/oleg-tkachuk/limes/commit/21754d164a915359068f0d9325070170f5d4e859))
+* **pgstore:** share the tenant lock in settle lease ([34a7a15](https://github.com/oleg-tkachuk/limes/commit/34a7a15599a001d3f3b7ea88d365583456f9a877))
+* **pgstore:** share the tenant lock in settle, release and refund ([6b3fea2](https://github.com/oleg-tkachuk/limes/commit/6b3fea2d7bc8ffae5d5bf6d3fdff13e64b4a39b3))
+
+### Dependencies
+
+* require limes v0.179.0
+
 ## [0.77.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.76.2...pgstore%2Fv0.77.0) (2026-11-12)
 
 ### ⚠ BREAKING CHANGES

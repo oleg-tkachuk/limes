@@ -2,6 +2,17 @@
 
 Every release of the exchange module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.24.2](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.24.1...exchange%2Fv0.24.2) (2026-11-12)
+
+### Bug Fixes
+
+* **exchange:** answer a narrowing of a parent too deep as invalid_grant ([4472d5e](https://github.com/oleg-tkachuk/limes/commit/4472d5e9d41b46be23117ecd3050bf2a3e8b0bc0))
+* **exchange:** keep the jwks url password out of fetch errors ([6daf38b](https://github.com/oleg-tkachuk/limes/commit/6daf38b71a5ad021761c4ef56183bf458ecbf962))
+
+### Dependencies
+
+* require limes v0.179.0
+
 ## [0.24.1](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.24.0...exchange%2Fv0.24.1) (2026-11-12)
 
 ### Bug Fixes
