@@ -225,11 +225,21 @@ func (e *Exchanger) child(ctx context.Context, req NarrowRequest, verified limes
 }
 
 // delegateError is a Delegate failure as the exchange answers it: a parent
-// that may delegate nothing more (gone, too deep, or granted without
-// OpShare) is the subject token's fault; anything else is the server's.
+// that may delegate nothing more (gone, too deep, granted without OpShare,
+// or of a tenant deleted or erased) is the subject token's fault; anything
+// else is the server's.
 func delegateError(err error) error {
-	if errors.Is(err, limes.ErrUnauthenticated) || errors.Is(err, limes.ErrCaveatViolation) {
+	if slices.ContainsFunc(subjectsFault, func(target error) bool { return errors.Is(err, target) }) {
 		return errs.Errorf("%w: %w", ErrInvalidGrant, err)
 	}
 	return fmt.Errorf("exchange: delegate: %w", err)
+}
+
+// subjectsFault are the Delegate failures delegateError answers as the
+// subject token's: ErrDelegationDepthExceeded is a live parent at
+// limes.MaxDelegationDepth, and the tenant sentinels a parent whose tenant
+// is mid-deletion or erased, which match neither family.
+var subjectsFault = []error{
+	limes.ErrUnauthenticated, limes.ErrCaveatViolation,
+	limes.ErrDelegationDepthExceeded, limes.ErrTenantDeleted, limes.ErrTenantGone,
 }
