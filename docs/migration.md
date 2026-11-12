@@ -70,6 +70,18 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## v0.180.0
+
+- `limes.CodeOf`, `limes.ProblemOf`, `limes.CategoryOf` and the verifier's
+  `ErrorResponse` answer an error naming its own code
+  (`LimesErrorCode`) by that code only when limes holds it, or a
+  component such as the exchange registered it. An error of a consumer's
+  or a dependency's that names a code registered nowhere steers no answer:
+  alone it is no error of limes's (`CodeOf` reports false, as for any
+  other error of the consumer's), and beside a limes error it is that
+  error's code, status and category that answer, where the foreign
+  error's own status, title and category were taken.
+
 ## exchange/v0.24.2
 
 A patch release that changed an answer without the breaking marker that

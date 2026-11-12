@@ -314,30 +314,45 @@ func codeRuleOf(code Code) (codeRule, bool) {
 	return codeRule{}, false
 }
 
-// codeRuleFor is the rule of the code err names itself — from this
-// package's table when it holds the code, as it does a meter sentinel's,
-// else from the answer err carries, as an exchange sentinel does — or else
-// the first code rule err matches.
+// codeRuleFor is the rule of the first code err names itself that a table
+// holds — this package's, as for a meter sentinel, or a component's that
+// registered it, as for an exchange sentinel — or else the first code rule
+// err matches. A code no table holds is no answer: an error of a
+// consumer's or a dependency's that names one, registered nowhere, steers
+// nothing.
 func codeRuleFor(err error) (codeRule, bool) {
 	if err == nil {
 		return codeRule{}, false
 	}
-	var coded errcode.Coded
-	if errors.As(err, &coded) {
-		code := Code(coded.LimesErrorCode())
-		if i := ownRuleOf(code); i >= 0 {
-			return ownCodeRules[i], true
-		}
-		if answered, ok := coded.(errcode.Answered); ok {
-			return answeredRule(answered), true
-		}
-		if r, ok := codeRuleOf(code); ok {
-			return r, true
-		}
+	if r, ok := namedCodeRule(err); ok {
+		return r, true
 	}
 	for _, r := range codeRules {
 		if errors.Is(err, r.sentinel) {
 			return r, true
+		}
+	}
+	return codeRule{}, false
+}
+
+// namedCodeRule is the rule of the first error in err's tree, depth first
+// as errors.As walks it, that names a code (errcode.Coded) a table holds.
+func namedCodeRule(err error) (codeRule, bool) {
+	if coded, ok := err.(errcode.Coded); ok { //nolint:errorlint // this node of the tree, which the walk below unwraps
+		if r, ok := codeRuleOf(Code(coded.LimesErrorCode())); ok {
+			return r, true
+		}
+	}
+	switch u := err.(type) { //nolint:errorlint // the walk errors.As makes, which stops at the first match
+	case interface{ Unwrap() error }:
+		if inner := u.Unwrap(); inner != nil {
+			return namedCodeRule(inner)
+		}
+	case interface{ Unwrap() []error }:
+		for _, inner := range u.Unwrap() {
+			if r, ok := namedCodeRule(inner); ok {
+				return r, true
+			}
 		}
 	}
 	return codeRule{}, false
