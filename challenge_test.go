@@ -106,6 +106,9 @@ func TestErrorResponseLeaksNothing(t *testing.T) {
 	if strings.Contains(r.Problem.Title+r.Problem.Detail, "vault") {
 		t.Errorf("an internal error leaked: %+v", r.Problem)
 	}
+	if r.Problem.Code != CodeInternal || r.Problem.Category != CategoryInternal {
+		t.Errorf("problem = %+v, want code %q and category %q", r.Problem, CodeInternal, CategoryInternal)
+	}
 }
 
 // RFC 6750 §3 limits the characters of an error description; a quote or a
@@ -291,6 +294,9 @@ func TestErrorResponseAnswersANonceOutageAsTheServers(t *testing.T) {
 	}
 	if len(resp.Challenges) != 0 || resp.DPoPNonce != "" || resp.Problem.Type != problemTypeBase+internalError.slug {
 		t.Errorf("response = %+v, want the server's failure with no challenge", resp)
+	}
+	if resp.Problem.Code != CodeInternal || resp.Problem.Category != CategoryInternal {
+		t.Errorf("problem = %+v, want code %q and category %q", resp.Problem, CodeInternal, CategoryInternal)
 	}
 	if !strings.Contains(logged.String(), "level=ERROR") || !strings.Contains(logged.String(), outage.Error()) {
 		t.Errorf("log = %q, want an error naming %q", logged.String(), outage)
