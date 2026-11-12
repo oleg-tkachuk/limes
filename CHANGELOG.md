@@ -2,6 +2,16 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.180.0](https://github.com/oleg-tkachuk/limes/compare/v0.179.0...v0.180.0) (2026-11-12)
+
+### ⚠ BREAKING CHANGES
+
+* **limes:** an error naming a code registered nowhere is answered by the limes error beside it, or is no error of limes's.
+
+### Bug Fixes
+
+* **limes:** answer an error's own code only when a table holds it ([9e917fb](https://github.com/oleg-tkachuk/limes/commit/9e917fb9d99f464b553f710ae97fd3c3c245a0b9))
+
 ## [0.179.0](https://github.com/oleg-tkachuk/limes/compare/v0.178.0...v0.179.0) (2026-11-12)
 
 ### Features
