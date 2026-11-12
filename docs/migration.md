@@ -70,6 +70,47 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## exchange/v0.24.2
+
+A patch release that changed an answer without the breaking marker that
+would have cut a minor; listed here so that it is not missed.
+
+- `Exchanger.Narrow` of a parent at `limes.MaxDelegationDepth`, or of a
+  tenant deleted or erased, refuses with `ErrInvalidGrant`
+  (`invalid_grant`, 400), where it answered `server_error` (500) and
+  logged at ERROR: the subject token is what can delegate no further. A
+  client that retried on `server_error` gets a refusal it should not
+  retry.
+
+## pgstore/v0.77.1
+
+A patch release with changes that should have been marked breaking and cut
+a minor; listed here so that they are not missed.
+
+- `UsageStore.Settle` of a hold whose id another tenant's settled hold
+  carries refuses with `meter.ErrReserveConflict` (`reserve_conflict`,
+  409, `conflict`), where it failed as `internal` (500). Row-level
+  security hides the other tenant's charge from the `Reserve`, which
+  holds under the id; the hold lapses at its expiry. Make reservation ids
+  unique across tenants (`meter.ReserveRequest.ReservationID`).
+- The transaction from `TxFrom` takes one call at a time without waiting:
+  a call made while another runs on it is refused with
+  `pgstore.ErrChargeTransaction`, where one from another goroutine waited
+  for it. That includes a call from a `sql.Scanner`, a `driver.Valuer` or
+  a `pgx.CopyFromSource` the running call runs, which waited on itself
+  for ever. Run a callback's statements one after another, from one
+  goroutine.
+- `LargeObjects` of that transaction is the zero `pgx.LargeObjects`, which
+  no call can use: a callback reaches large objects through SQL
+  (`lo_from_bytea`, `lo_get`, `lo_put`) on the transaction instead.
+- A `CopyFrom` on that transaction whose source failed returns the
+  source's error, where it returned the server's error for the cancelled
+  copy, which pgstore answered as a store timeout.
+- `Settle`, `Release`, `Refund` and `SettleLease` share the tenant's lock,
+  as `Charge` does, so a `SetTenantBudget` sent while one runs waits for
+  it and may answer `meter.ErrTenantBudgetBusy` (`TenantBudgetBusyError`),
+  where it went ahead; the caller sends it again, as for a charge.
+
 ## pgstore/v0.77.0
 
 - `Store.Purge`, `UsageStore.ReleaseExpired` and `UsageStore.PurgeOrphans`
