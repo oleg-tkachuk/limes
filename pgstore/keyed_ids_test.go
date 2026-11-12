@@ -55,3 +55,33 @@ func TestAnotherTenantsIDConflicts(t *testing.T) {
 		t.Errorf("a conflicting Refund refunded %v, %v; want nothing", c.RefundedAmount, err)
 	}
 }
+
+// A Settle of a hold under the id of another tenant's settled hold, which
+// row-level security hid from the Reserve, conflicts, as the Reserve of it
+// would in a store that sees every tenant's: ErrReserveConflict, not an
+// unclassified failure of the charge's insert.
+func TestSettleUnderAnotherTenantsSettledIDConflicts(t *testing.T) {
+	f := newTenantFixture(t)
+	mine, theirs := WithTenant(t.Context(), f.mine), WithTenant(t.Context(), f.theirs)
+	theirCap := f.parent
+	theirCap.ID, theirCap.ParentID, theirCap.Subject.TenantID = uuid.New(), uuid.Nil(), f.theirs
+	if err := f.records.Insert(theirs, limes.InsertRequest{Capability: theirCap}); err != nil {
+		t.Fatal(err)
+	}
+	mySubject, theirSubject := meterSubject(f.child.ID, f.mine), meterSubject(theirCap.ID, f.theirs)
+	const amount = 2
+	id := uuid.New()
+	if _, err := f.usage.Reserve(theirs, meter.ReserveRequest{Subject: theirSubject, Amount: amount, ReservationID: id}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.usage.Settle(theirs, meter.SettleRequest{Subject: theirSubject, ReservationID: id, Amount: amount}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.usage.Reserve(mine, meter.ReserveRequest{Subject: mySubject, Amount: amount, ReservationID: id}); err != nil {
+		t.Fatalf("Reserve under the id of another tenant's settled hold: %v", err)
+	}
+	_, err := f.usage.Settle(mine, meter.SettleRequest{Subject: mySubject, ReservationID: id, Amount: amount}, nil)
+	if !errors.Is(err, meter.ErrReserveConflict) || errors.Is(err, limes.ErrInternal) {
+		t.Errorf("Settle under another tenant's settled reservation id: %v, want ErrReserveConflict", err)
+	}
+}
