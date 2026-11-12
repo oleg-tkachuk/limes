@@ -1,8 +1,8 @@
 package migrate_test
 
-// The examples need a PostgreSQL server, so they are compiled but not run:
-// none has an Output comment. The package's own tests run every call they
-// show against a database in a container.
+// ExampleRun needs a PostgreSQL server, so it is compiled but not run: it
+// has no Output comment. The package's own tests run it against a database
+// in a container. ExampleSteps reads the embedded steps alone, and runs.
 
 import (
 	"context"
