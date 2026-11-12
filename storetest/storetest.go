@@ -10,30 +10,35 @@
 // written and is no caller's to change, a duplicate or unknown id is refused
 // with the module's sentinel, Insert refuses a lineage it could not keep whole
 // — a child past MaxDelegationDepth among it — and a tenant it cannot mint
-// for, revocation reaches every descendant down to MaxDelegationDepth and outlasts time passing, purging drops a record with
-// its revocation entries once it has been expired long enough — in batches,
-// never before its children and never inside a verifier's leeway — listing
-// pages in a fixed order and keeps tenants apart, and a Biscuit copy revokes
-// on its own. When the store implements limes.TenantRecordEraser, erasing a
-// tenant keeps what a verifier still needs; when Env.ScopesTenants is set, a
-// call under another tenant's scope is refused with limes.ErrScopeMismatch,
-// and when Env.ReadOnlyCtx is set, every write under a read-only scope is.
-// When Env.Census is set, a census counts each record under one disposition —
+// for, revocation reaches every descendant down to MaxDelegationDepth and
+// outlasts time passing, purging drops a record with its revocation entries
+// once it has been expired long enough — in batches, never before its
+// children and never inside a verifier's leeway — listing pages in a fixed
+// order and keeps tenants apart, and a Biscuit copy revokes on its own. When
+// the store implements limes.TenantRecordEraser, erasing a tenant keeps what
+// a verifier still needs; when Env.ScopesTenants is set, a call under another
+// tenant's scope is refused with limes.ErrScopeMismatch, and when
+// Env.ReadOnlyCtx is set, every write under a read-only scope is. When
+// Env.Census is set, a census counts each record under one disposition —
 // revoked, through an ancestor too, over expired over active — by tenant and
 // by principal type, a page at a time, and counts no Biscuit copy. When
 // Env.Lister is set, a listing of a tenant's records pages in both orders
 // with no record skipped or repeated, filters by principal type, subject,
 // subject prefix and disposition, gives each record the disposition the
-// census counts it under, and shows no other tenant's; when the lister is a
-// limes.RecordListingReader too, it reads each record as the listing gives it.
-// When Env.BulkRevoker is set, each selector revokes exactly its
-// capabilities, a batch at a time, in one tenant or, by client or session,
-// in every tenant under Env.AllTenantsCtx alone, and a record's session and
-// subject issuer read back, a child's its parent's; with Env.Census and Env.Lister too, a count
-// and a listing by the same selectors name what it revokes. When Env.Exchanges is set, the first claim of a
-// subject token wins, racing ones included, and Purge drops it with its
-// capability. A check that does not finish within Env.CheckTimeout stops the
-// test binary with every goroutine's stack, naming the check.
+// census counts it under, and shows no other tenant's, while one of every
+// tenant's gives them all in one id order; when the lister is a
+// limes.RecordListingReader too, it reads each record as the listing gives
+// it. When Env.BulkRevoker is set, each selector
+// revokes exactly its capabilities, a batch at a time, in one tenant or, by
+// client, session or subject issuer, in every tenant under
+// Env.AllTenantsCtx alone, and a record's session and subject issuer read
+// back, a child's its parent's; with Env.Census and Env.Lister too, a count
+// and a listing by the same selectors name what it revokes. When
+// Env.Exchanges is set, the first claim of a subject token wins, racing ones
+// included, and Purge keeps the claim past its capability while the token
+// can still be presented. A check that does not finish within
+// Env.CheckTimeout stops the test binary with every goroutine's stack,
+// naming the check.
 package storetest
 
 import (
@@ -117,10 +122,11 @@ type Env struct {
 	// over the same records as Store. Optional: without it, the checks of
 	// limes.ExchangeStore are skipped.
 	Exchanges limes.ExchangeStore
-	// BulkRevoker revokes by subject, client or session over the same
-	// records as Store, which then records each capability's session.
-	// Optional: without it, the checks of limes.BulkRevoker and of sessions
-	// on record are skipped.
+	// BulkRevoker revokes by subject, client, session, on-behalf-of, agent
+	// run or subject issuer over the same records as Store, which then
+	// records each capability's session and subject issuer. Optional:
+	// without it, the checks of limes.BulkRevoker and of sessions and
+	// subject issuers on record are skipped.
 	BulkRevoker limes.BulkRevoker
 	// AllTenantsCtx is a context scoped to writing every tenant's rows, as
 	// housekeeping is (pgstore.WithAllTenants), for a revocation across
@@ -179,11 +185,11 @@ func newFixture(t *testing.T, setup func(t *testing.T) Env) fixture {
 	return fixture{Env: env, now: now}
 }
 
-// newCapability is a capability with every field set, so a store that drops
 // fixtureCopyQuota is the quota of copies the fixture's capabilities carry,
 // so that a store that drops it fails the round trip.
 const fixtureCopyQuota = 5
 
+// newCapability is a capability with every field set, so a store that drops
 // one fails the round trip.
 func (f fixture) newCapability(subject string, parent uuid.UUID, expires time.Time) limes.Capability {
 	return limes.Capability{
@@ -569,7 +575,8 @@ func checkPurge(t *testing.T, f fixture) {
 }
 
 // Purge works in batches of Limit, so a housekeeping worker loops while a
-// batch comes back full; a negative bound is the request's error.
+// batch comes back full; a negative limit, or a retention negative or below
+// MinPurgeRetention, is the request's error.
 func checkPurgeBatches(t *testing.T, f fixture) {
 	const total, batch = 3, 2
 	for range total {
@@ -990,11 +997,11 @@ func checkPurgeKeepsLineage(t *testing.T, f fixture) {
 }
 
 // checkInsertKeepsLineage holds Insert to a lineage Purge and IsRevoked can
-// rely on: no record without an id, none under a parent not on record, and
-// no record that never expires, which no verifier accepts and Purge never
-// removes, no child expiring after its parent, no child counting in another
-// unit than its parent, and no text a store cannot keep as it is. None of
-// them is recorded.
+// rely on: no record without an id, none under a parent not on record, no
+// record that never expires, which no verifier accepts and Purge never
+// removes, no child expiring after its parent, none in another tenant or
+// counting in another unit than its parent, and no text a store cannot keep
+// as it is. None of them is recorded.
 func checkInsertKeepsLineage(t *testing.T, f fixture) {
 	parent := f.live(t, "agent:parent", uuid.Nil())
 	noID := f.newCapability("agent:no-id", uuid.Nil(), f.now.Add(ttl))
@@ -1048,9 +1055,9 @@ func checkInsertKeepsLineage(t *testing.T, f fixture) {
 	}
 }
 
-// checkPurgeRetention holds Purge to MinPurgeRetention whatever it is asked:
-// a capability expired for less is still inside a verifier's leeway, and its
-// revocation must stay where IsRevoked finds it.
+// checkPurgeRetention holds Purge asked for no retention to
+// MinPurgeRetention: a capability expired for less is still inside a
+// verifier's leeway, and its revocation must stay where IsRevoked finds it.
 func checkPurgeRetention(t *testing.T, f fixture) {
 	recent := f.insert(t, f.newCapability("agent:recent", uuid.Nil(), f.now.Add(-limes.MinPurgeRetention/2)))
 	old := f.insert(t, f.newCapability("agent:old", uuid.Nil(), f.now.Add(-2*limes.MinPurgeRetention)))

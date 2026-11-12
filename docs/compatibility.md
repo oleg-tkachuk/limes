@@ -143,7 +143,9 @@ one breaks every implementation written against it. They are:
   `meter.LedgerHousekeeping`, and the optional `meter.Leaser`,
   `meter.CopyUsageReader`, `meter.TenantUsageEraser`,
   `meter.TenantBudgetLister`, `meter.TenantReservationLister`,
-  `meter.MatchingReleaser` and `meter.FeatureGate`.
+  `meter.MatchingReleaser` and `meter.FeatureGate`;
+- the nested modules': `exchange.SubjectVerifier`, and pgstore's `DB`,
+  `ConnLender`, `Clearer` and `RevokedClearer`.
 
 A capability added later arrives as an optional interface of its own,
 which a caller discovers by a type assertion on the store, as it does

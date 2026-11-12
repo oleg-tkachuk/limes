@@ -33,12 +33,13 @@ const sqlMatchingHoldsTail = `)
 ORDER BY id
 FOR UPDATE`
 
-// ReleaseMatching implements meter.MatchingReleaser in one transaction
-// scoped to the request's tenant (Config.CheckScope) — or, with AllTenants,
-// to writing every tenant (WithAllTenants), any narrower scope refused as
-// limes.ErrScopeMismatch: the holds selected are released as ReleaseExpired
-// releases its own, their counters locked in the one order every call
-// takes, tenant by tenant. Those locks are on rows, so a batch across
+// ReleaseMatching implements meter.MatchingReleaser, scoped to the
+// request's tenant (Config.CheckScope) — or, with AllTenants, to writing
+// every tenant (WithAllTenants), any narrower scope refused as
+// limes.ErrScopeMismatch: the holds selected are released in one
+// transaction, as ReleaseExpired releases its own, their counters locked in
+// the one order every call takes, tenant by tenant; then the leases of the
+// matching capabilities are settled, each in a transaction of its own. Those locks are on rows, so a batch across
 // tenants needs no bound on its tenants, as RevokeMatching's does.
 func (s *UsageStore) ReleaseMatching(ctx context.Context, req meter.ReleaseMatchingRequest) (meter.ReleaseMatchingResult, error) {
 	if err := req.Validate(); err != nil {

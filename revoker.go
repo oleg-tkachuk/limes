@@ -75,8 +75,9 @@ var errNoRevokerBulk = invalidConfig("limes: RevokerConfig.Bulk required to revo
 // BiscuitRevocationStore.
 var errNoRevokerBiscuits = invalidConfig("limes: RevokerConfig.Biscuits required to revoke a Biscuit copy")
 
-// NewRevoker validates wiring and returns a ready Revoker. It refuses no
-// Store, and a Store, Bulk or Biscuits holding a nil value.
+// NewRevoker validates wiring and returns a ready Revoker. It refuses, as
+// ErrInvalidConfig, no Store, and a Store, Bulk or Biscuits holding a nil
+// value.
 func NewRevoker(cfg RevokerConfig) (*Revoker, error) {
 	// An interface holding a nil pointer is not nil: unchecked, it would
 	// pass here and panic at the first revocation.
@@ -163,8 +164,8 @@ func (r *Revoker) RevokeMatching(ctx context.Context, req RevokeMatchingRequest)
 }
 
 // RevokeBiscuit revokes one Biscuit copy through the BiscuitRevocationStore,
-// then clears the cache, whether or not it returned an error. Without one it is ErrInvalidConfig. The copy is
-// logged by its capability's id alone.
+// then clears the cache, whether or not it returned an error. Without one it
+// is ErrInvalidConfig. The copy is logged by its capability's id alone.
 func (r *Revoker) RevokeBiscuit(ctx context.Context, req RevokeBiscuitRequest) (RevokeBiscuitResult, error) {
 	start := time.Now()
 	id := req.Copy.CapabilityID()

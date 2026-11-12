@@ -15,8 +15,8 @@ import (
 // message. The values are never renamed; new ones may be added.
 type Reason string
 
-// The refusals a verifier, Caveats.Check or a Meter returns for a presented
-// capability.
+// The refusals a verifier, Caveats.Check or a meter.Meter returns for a
+// presented capability.
 const (
 	ReasonNoCredentials          Reason = "no_credentials"
 	ReasonMalformedAuthorization Reason = "malformed_authorization"

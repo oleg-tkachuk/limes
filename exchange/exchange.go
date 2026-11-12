@@ -169,32 +169,37 @@ type Decision struct {
 	Issue limes.IssueRequest
 	// Scopes are the scopes granted, each one the grant asked for: the
 	// token response states them as its scope (RFC 6749 §5.1, RFC 8693
-	// §2.2.1). Empty grants none: a policy granting every scope asked
-	// sets Scopes to Grant.Scopes. A grant that asked for scopes and is granted none
-	// is refused with ErrInvalidScope, since a response without scope
-	// would state every scope asked. A scope not asked for is the
-	// policy's fault, answered as the server's failure. A scope named
-	// twice is stated once.
+	// §2.2.1). Empty grants none: a policy granting every scope asked sets
+	// Scopes to Grant.Scopes. A grant that asked for scopes and is granted
+	// none is refused with ErrInvalidScope, since a response without scope
+	// would state every scope asked. A scope not asked for is the policy's
+	// fault, answered as the server's failure. A scope named twice is
+	// stated once.
 	Scopes []string
 }
 
 // Policy turns a grant into the capability to issue and the scopes granted,
 // or refuses it with ErrInvalidGrant, ErrInvalidTarget, ErrInvalidScope or
 // ErrInvalidAuthorizationDetails. It refuses authorization_details of a
-// type it does not understand (RFC 9396 §5). Its Decision.Issue's
+// type it does not understand (RFC 9396 §5). In its Decision.Issue,
 // Audience must be drawn from the grant's resources and audiences, or be
-// empty to take them all; its ConfirmationJKT must be empty, the Exchanger
-// setting it from the proof; its TTL, the Issuer's default when zero
-// (limes.Issuer.DefaultTTL), is capped at the subject token's remaining
-// lifetime. Nothing is granted that the policy did not choose:
-// there is no default policy. A subject token may be exchanged again and
-// again until it expires, each exchange issuing a capability of its own,
-// with ceilings of its own, unless Config.Exchanges issues one capability
-// per subject token: a policy that grants a budget per user, not per
-// exchange, keys it on Grant.Subject (its Issuer and Subject). Set both ceilings explicitly:
-// Caveats.Requests to a Max or Unlimited, since Issue refuses a capability
-// no request can use and the exchange answers that as the server's
-// failure; Caveats.Budget to what it may spend, the zero budget being none.
+// empty to take them all; ConfirmationJKT must be empty, the Exchanger
+// setting it from the proof; SubjectIssuer, when set, must be the subject
+// token's issuer, and OnBehalfOf, when set, must name its subject; an
+// empty SubjectIssuer, Session or ClientID takes the subject token's. TTL,
+// the Issuer's default when zero (limes.Issuer.DefaultTTL; the subject
+// token's remaining lifetime under Config.Exchanges), is capped at the
+// subject token's remaining lifetime. A Decision.Issue breaking these is
+// the policy's fault, answered as the server's failure. Nothing is granted
+// that the policy did not choose: there is no default policy. A subject
+// token may be exchanged again and again until it expires, each exchange
+// issuing a capability of its own, with ceilings of its own, unless
+// Config.Exchanges issues one capability per subject token: a policy that
+// grants a budget per user, not per exchange, keys it on Grant.Subject
+// (its Issuer and Subject). Set both ceilings explicitly: Caveats.Requests
+// to a Max or Unlimited, since Issue refuses a capability no request can
+// use and the exchange answers that as the server's failure;
+// Caveats.Budget to what it may spend, the zero budget being none.
 type Policy func(ctx context.Context, g Grant) (Decision, error)
 
 // Result is an exchange's capability.
@@ -258,13 +263,14 @@ type Config struct {
 	// this mode a subject token without a jti is refused; an exchange of a
 	// capability revoked or expired is refused, never issued anew; one with
 	// a proof by another key than the capability is bound to, or none for a
-	// bound one, or one for a bearer one, is refused; one asking for other
-	// targets than the capability's audience is refused; and a policy that
-	// names no TTL gets the subject token's remaining lifetime, not the
-	// Issuer's default. The policy still runs on every exchange: it names the
-	// tenant. Nil: every exchange issues a capability of its own. The
-	// Issuer's store must read records back (limes.RecordReader), as every
-	// limes.Store does.
+	// bound one, or one for a bearer one, is refused; all with
+	// ErrInvalidGrant. One whose audience, as the policy draws it from the
+	// targets, is not the capability's is refused with ErrTargetExchanged.
+	// A policy that names no TTL gets the subject token's remaining
+	// lifetime, not the Issuer's default. The policy still runs on every
+	// exchange: it names the tenant. Nil: every exchange issues a capability
+	// of its own. The Issuer's store must read records back
+	// (limes.RecordReader), as every limes.Store does.
 	Exchanges limes.ExchangeStore
 	// Now is the clock. Nil: time.Now.
 	Now func() time.Time

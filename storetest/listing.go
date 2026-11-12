@@ -29,7 +29,8 @@ var censusDispositions = map[string]limes.RecordDisposition{
 	"user:child":            limes.RecordDispositionRevoked,
 }
 
-// listAll is every record of the listing req asks for, a page at a time.
+// listRecordsAll is every record of the listing req asks for, a page at a
+// time.
 func (f fixture) listRecordsAll(t *testing.T, req limes.ListRecordsRequest) []limes.RecordListing {
 	t.Helper()
 	return f.listRecordsAllIn(t, f.Ctx, req)
@@ -250,10 +251,11 @@ func checkListRecordsMalformed(t *testing.T, f fixture) {
 	expect.That(t, errors.Is(err, limes.ErrScopeMismatch), "ListRecords of Tenant under another tenant's context: err = %v, want ErrScopeMismatch", err)
 }
 
-// A cursor holds the filters it was handed out for: handed back with
-// another principal type, subject, subject prefix or set of dispositions, it
-// is refused rather than paged on from its id under them, which would give a
-// page of neither listing. The same dispositions in another order, or one
+// A cursor holds the filters it was handed out for: handed back with another
+// tenant, principal type, subject, subject prefix, set of dispositions,
+// client, session, on-behalf-of, agent run or subject issuer, it is refused
+// rather than paged on from its id under them, which would give a page of
+// neither listing. The same dispositions in another order, or one
 // repeated, are the same filters.
 func checkListRecordsCursorFilters(t *testing.T, f fixture) {
 	f.skipUnlessLister(t)

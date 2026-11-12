@@ -43,7 +43,7 @@ type CounterEnv struct {
 	// is refused with limes.ErrScopeMismatch and counts nothing. Optional:
 	// without it, that check is skipped.
 	ScopesTenants bool
-	// ReadOnlyCtx is a context scoped to reading and writing nothing, under
+	// ReadOnlyCtx is a context scoped to reading, writing nothing, under
 	// which a Bump is refused with limes.ErrScopeMismatch. Optional: without
 	// it, that check is skipped.
 	ReadOnlyCtx context.Context
@@ -64,8 +64,8 @@ func (e Env) counterEnv() CounterEnv {
 // a capability's own ceiling, an ancestor's from its record bounding its
 // whole subtree, a chain at the deepest delegation, a Biscuit copy's
 // ceiling, a refusal that counts nothing, concurrent bumps at a ceiling,
-// siblings' at their root's among them, the
-// zero ceiling and subject, a capability not on record, and, where the
+// siblings' at their root's among them, the zero ceiling and subject, a
+// capability not on record, and, where the
 // CounterEnv enables them, an ancestor removed, another tenant's scope and a
 // read-only one.
 //

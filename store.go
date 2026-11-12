@@ -25,22 +25,21 @@ type IssuanceStore interface {
 	// An id already on record returns ErrAlreadyExists and changes nothing.
 	// It refuses what InsertRequest.Validate refuses, a parent not on
 	// record as ErrInvalidRequest, a child expiring after its parent or in
-	// another tenant as
-	// ErrDelegationTooWide, a child whose budget names another unit than its
-	// parent's as ErrUnitCodeMismatch — metering a child spends from every
-	// ancestor, so a lineage counts in one unit — and a child that would have
-	// more than MaxDelegationDepth ancestors still on record — counted as
-	// IsRevoked counts them — as ErrDelegationTooDeep: Purge and the
-	// IsRevoked walk rely on a lineage that is whole, no deeper than the
-	// walk reaches, expires from the leaves up and stays in one tenant, so a
-	// store that scopes rows by tenant sees all of it. A refused record is
-	// not written. A
-	// store that knows tenants returns ErrUnknownTenant or ErrTenantDeleted
-	// for a tenant it cannot mint for. A store beside a meter.TenantUsageEraser
+	// another tenant as ErrDelegationTooWide, a child whose budget names
+	// another unit than its parent's as ErrUnitCodeMismatch — metering a
+	// child spends from every ancestor, so a lineage counts in one unit —
+	// and a child that would have more than MaxDelegationDepth ancestors
+	// still on record — counted as IsRevoked counts them — as
+	// ErrDelegationTooDeep: Purge and the IsRevoked walk rely on a lineage
+	// that is whole, no deeper than the walk reaches, expires from the
+	// leaves up and stays in one tenant, so a store that scopes rows by
+	// tenant sees all of it. A refused record is not written. A store that
+	// knows tenants returns ErrUnknownTenant or ErrTenantDeleted for a
+	// tenant it cannot mint for. A store beside a meter.TenantUsageEraser
 	// refuses a tenant whose usage it erased as ErrTenantErased, until
-	// PurgeOrphans forgets the mark. The Issuer answers those two refusals
-	// as ErrDelegationDepthExceeded and ErrTenantGone: no presented
-	// capability was revoked.
+	// PurgeOrphans forgets the mark. The Issuer answers ErrDelegationTooDeep
+	// and ErrTenantErased as ErrDelegationDepthExceeded and ErrTenantGone:
+	// no presented capability was revoked.
 	Insert(ctx context.Context, req InsertRequest) error
 
 	// IsRevoked reports whether the capability, or any ancestor of it
@@ -86,9 +85,10 @@ type InsertRequest struct {
 }
 
 // Validate refuses, as ErrInvalidRequest, a capability with no id — nothing
-// could read it back, and the zero id is what a root's ParentID holds — and
-// one with no expiry: no verifier accepts it, Purge never removes it, and a
-// child under it would outlive nothing. Every text it carries, the
+// could read it back, and the zero id is what a root's ParentID holds — one
+// with no expiry: no verifier accepts it, Purge never removes it, and a
+// child under it would outlive nothing — and a child naming a Session or a
+// SubjectIssuer, which takes its parent's. Every text it carries, the
 // capability's included, is valid UTF-8 without NUL (docs/compatibility.md):
 // what a store cannot keep as it is is refused, not kept altered.
 func (r InsertRequest) Validate() error {
@@ -159,10 +159,11 @@ type Store interface {
 	// Purge never removes a capability while a child of it stays on record:
 	// a child expires no later than its parent (Insert refuses one that
 	// would not), and among records expiring together Purge takes the
-	// deepest first. The IsRevoked walk and the Meter's lineage, which stop
-	// at the first ancestor no longer on record, therefore miss no
-	// revocation and no ceiling. Once records go, meter.UsageHousekeeping.PurgeOrphans
-	// releases what the meter still holds for them.
+	// deepest first. The IsRevoked walk and the meter.Meter's lineage, which
+	// stop at the first ancestor no longer on record, therefore miss no
+	// revocation and no ceiling. Once records go,
+	// meter.UsageHousekeeping.PurgeOrphans releases what the meter still
+	// holds for them.
 	Purge(ctx context.Context, req PurgeRequest) (PurgeResult, error)
 
 	// ListByPrincipal lists the capabilities issued to one principal, in
@@ -172,11 +173,10 @@ type Store interface {
 	ListByPrincipal(ctx context.Context, req ListByPrincipalRequest) (Page[Capability], error)
 }
 
-// ErrNotFound is the family of every not-found error: Store.GetRecord returns
-// it, and the meter's not-found sentinels (meter.ErrUsageNotFound and the others)
-// match it under errors.Is. It lives in the core package rather than in a
-// store implementation so that any consumer — in-memory, relational, or
-// otherwise — can satisfy the Store contract using only what this package
+// ErrNotFound is the family of every not-found error: Store.GetRecord
+// returns it, and the meter's not-found sentinels (meter.ErrUsageNotFound and
+// the others) match it under errors.Is. It lives in the core package so that
+// any store can satisfy the Store contract using only what this package
 // publishes.
 //
 // The verifier never returns it: an id not on record is refused as
@@ -274,16 +274,17 @@ type RevokeResult struct {
 	// PriorDisposition is the capability's disposition just before the
 	// call, by the rules and the clock RecordCensus and RecordListingReader
 	// use: revoked — by its own entry or through an ancestor — then
-	// expired, then active. Only a revoke of an active capability stopped something new.
-	// AlreadyRevoked implies RecordDispositionRevoked. Unspecified when the
+	// expired, then active. Only a revoke of an active capability stopped
+	// something new. AlreadyRevoked implies RecordDispositionRevoked. Unspecified when the
 	// store could not tell — a chain past MaxDelegationDepth — though it
 	// wrote the entry all the same.
 	PriorDisposition RecordDisposition
 }
 
-// Validate refuses a request naming no capability, as ErrInvalidRequest:
+// Validate refuses, as ErrInvalidRequest, a request naming no capability —
 // nothing could be revoked under the zero id, and answering ErrNotFound
-// would hide the caller's bug.
+// would hide the caller's bug — and a Note or Actor that is not valid UTF-8
+// or holds a NUL.
 func (r RevokeRequest) Validate() error {
 	if r.CapabilityID == uuid.Nil() {
 		return refuseRequest("revoke: capability id required")
@@ -314,14 +315,14 @@ type PurgeRequest struct {
 	// Zero: MinPurgeRetention; anything shorter, negative included, is
 	// refused.
 	ExpiredFor time.Duration
-	// Limit bounds the records removed. Zero: DefaultHousekeepingLimit; negative
-	// is refused.
+	// Limit bounds the records removed. Zero: DefaultHousekeepingLimit;
+	// negative is refused.
 	Limit int
 	_     noCompare
 }
 
-// Validate refuses a retention shorter than MinPurgeRetention, other than
-// zero, and a negative limit.
+// Validate refuses, as ErrInvalidRequest, a retention shorter than
+// MinPurgeRetention, other than zero, and a negative limit.
 func (r PurgeRequest) Validate() error {
 	switch {
 	case r.ExpiredFor != 0 && r.ExpiredFor < MinPurgeRetention:
@@ -362,13 +363,14 @@ type ListByPrincipalRequest struct {
 	IncludeRevoked bool
 	// Cursor is the one the previous page returned; empty for the first.
 	Cursor string
-	// Limit is the page size; see PageLimit.
+	// Limit is the page size; see PageLimit. Negative is refused.
 	Limit int
 	_     noCompare
 }
 
-// Validate reports whether the request names a principal. Every error
-// matches ErrInvalidRequest.
+// Validate reports whether the request names a principal, refusing as well
+// a negative limit and a subject that is not valid UTF-8 or holds a NUL.
+// Every error matches ErrInvalidRequest.
 func (r ListByPrincipalRequest) Validate() error {
 	switch {
 	case r.TenantID == uuid.Nil():

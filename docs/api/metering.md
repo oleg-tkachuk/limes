@@ -20,7 +20,7 @@ limes verifies a capability and hands the meter what to count it against, [limes
 
 #### What you implement
 
-[UsageStore](#meter.UsageStore) — request and spend counters and the charges ledger; the union of [Meter](#meter.Meter), [MeterReader](#meter.MeterReader), [TenantBudgets](#meter.TenantBudgets) and [UsageHousekeeping](#meter.UsageHousekeeping). Every charge and request also counts against each ancestor, and every Biscuit copy with limits of its own against the copy quota of the capability and of each ancestor; see "Transactions" below. More are needed only with the feature they serve: [CopyUsageReader](#meter.CopyUsageReader) to show a Biscuit copy's own counters, [LedgerReader](#meter.LedgerReader) to sum a tenant's charges, [LedgerHousekeeping](#meter.LedgerHousekeeping) to remove charges past [MinChargeRetention](#meter.MinChargeRetention), [MatchingReleaser](#meter.MatchingReleaser) to free at once the holds of capabilities a bulk revocation stopped, [Leaser](#meter.Leaser) to lease a capability its budget, and [TenantUsageEraser](#meter.TenantUsageEraser) to remove a tenant. memstore ships them in memory, pgstore over PostgreSQL, and metertest checks any implementation. [Features](#meter.Features) names the optional ones a store implements and has on — a [FeatureGate](#meter.FeatureGate) says which its configuration turned off — and [Require](#meter.Require) refuses at startup a store, or a decorator over one, that lacks one the consumer uses; [As](#meter.As) does so and hands back the interface, as meter.As\[meter.Leaser](store), [AsAll](#meter.AsAll) does it for several at once, naming every one missing, and [AsOptional](#meter.AsOptional) for one the consumer runs without when its configuration turned it off.
+[UsageStore](#meter.UsageStore) — request and spend counters and the charges ledger; the union of [Meter](#meter.Meter), [MeterReader](#meter.MeterReader), [TenantBudgets](#meter.TenantBudgets) and [UsageHousekeeping](#meter.UsageHousekeeping). Every charge and request also counts against each ancestor, and every Biscuit copy with limits of its own against the copy quota of the capability and of each ancestor; see [Meter](#meter.Meter). More are needed only with the feature they serve: [CopyUsageReader](#meter.CopyUsageReader) to show a Biscuit copy's own counters, [LedgerReader](#meter.LedgerReader) to sum the charges, [LedgerHousekeeping](#meter.LedgerHousekeeping) to remove charges past [MinChargeRetention](#meter.MinChargeRetention), [MatchingReleaser](#meter.MatchingReleaser) to free at once the holds of capabilities a bulk revocation stopped, [TenantReservationLister](#meter.TenantReservationLister) to list a tenant's holds, [Leaser](#meter.Leaser) to lease a capability its budget, and [TenantUsageEraser](#meter.TenantUsageEraser) to remove a tenant. memstore ships them in memory, pgstore over PostgreSQL, and metertest checks any implementation. [Features](#meter.Features) names the optional ones a store implements and has on — a [FeatureGate](#meter.FeatureGate) says which its configuration turned off — and [Require](#meter.Require) refuses at startup a store, or a decorator over one, that lacks one the consumer uses; [As](#meter.As) does so and hands back the interface, as meter.As\[meter.Leaser](store), [AsAll](#meter.AsAll) does it for several at once, naming every one missing, and [AsOptional](#meter.AsOptional) for one the consumer runs without when its configuration turned it off.
 
 #### Transactions
 
@@ -168,32 +168,33 @@ var (
 	ErrRefundExceedsCharge error = &familyError{"limes: refund exceeds charge", nil, CodeRefundExceedsCharge}
 
 	// ErrReservationNotFound — Settle named a reservation that does not
-	// exist, was released, or has expired. One already settled is not an
-	// error: Settle returns its charge again (ChargeReceipt.Replayed).
+	// exist, was released, or has expired, or GetReservation one settled or
+	// released. One already settled is no error to Settle: it returns its
+	// charge again (ChargeReceipt.Replayed).
 	ErrReservationNotFound error = &familyError{"limes: reservation not found", limes.ErrNotFound, CodeReservationNotFound}
 
 	// ErrCopyLimitExceeded — counting one more Biscuit copy of the
 	// capability would pass the copy quota of the capability or of an
 	// ancestor (limes.Caveats.Copies), or the store's bound of copies per
-	// capability (Meter, "Copies of a Biscuit"). The request is refused and nothing is
-	// counted. Matches ErrRequestLimitExceeded: the capability has used what
+	// capability (Meter, "Copies of a Biscuit"). The request is refused and
+	// nothing is counted. Matches limes.ErrRequestLimitExceeded: the capability has used what
 	// it may.
 	ErrCopyLimitExceeded error = &familyError{"limes: copy limit exceeded", limes.ErrRequestLimitExceeded, CodeCopyLimitExceeded}
 
-	// ErrUsageNotFound — no usage row exists for this capability.
-	// Get-only; bump/charge always inserts on first hit.
+	// ErrUsageNotFound — GetUsage named a capability with no usage row:
+	// Bump, Charge, Reserve and Lease create it on first use.
 	ErrUsageNotFound error = &familyError{"limes: usage row not found", limes.ErrNotFound, CodeUsageNotFound}
 
-	// ErrTenantBudgetNotFound — Get-only; the tenant has no ceiling set
-	// and has never been charged. A tenant charged before any ceiling was
-	// set has a row, Unlimited, with ResourceVersion 0.
+	// ErrTenantBudgetNotFound — GetTenantBudget named a tenant with no
+	// ceiling set and nothing ever charged or held: Charge, Reserve and a
+	// Lease of an amount create the row, Unlimited, with ResourceVersion 0.
 	ErrTenantBudgetNotFound error = &familyError{"limes: tenant budget row not found", limes.ErrNotFound, CodeTenantBudgetNotFound}
 
 	// ErrTenantBudgetVersionMismatch — SetTenantBudget's OCC guard refused the
 	// write: the stored resource_version is not the one the caller read, so
 	// someone else changed the cap in between. The caller re-reads and decides,
 	// rather than silently overwriting a change it never saw. Matches
-	// ErrConflict.
+	// limes.ErrConflict.
 	ErrTenantBudgetVersionMismatch error = &familyError{"limes: tenant budget resource_version mismatch", limes.ErrConflict, CodeTenantBudgetVersionMismatch}
 )
 ```
@@ -209,7 +210,7 @@ The meter's own sentinels. The refusals ErrorResponse answers — limes.ErrReque
 var ErrExternalRefConflict error = &familyError{"limes: external ref already names a different charge", limes.ErrConflict, CodeExternalRefConflict}
 ```
 
-ErrExternalRefConflict — Charge named an ExternalRef its capability already charged under, for a different amount, unit or tenant, or under other Biscuit copies. One reference names one cost; replaying the first receipt would report the second as booked. The error names the reference, never the charge it names. Matches ErrConflict: the request is well formed, and would have charged had the reference been free.
+ErrExternalRefConflict — Charge named an ExternalRef its capability already charged under, for a different amount, unit or tenant, or under other Biscuit copies. One reference names one cost; replaying the first receipt would report the second as booked. The error names the reference, never the charge it names. Matches limes.ErrConflict: the request is well formed, and would have charged had the reference been free.
 
 <sub>[meter/errors.go](../../meter/errors.go)</sub>
 <a id="meter.ErrFeatureDisabled"></a>
@@ -231,7 +232,7 @@ ErrFeatureDisabled — a store implements a feature its configuration turned off
 var ErrLeaseExhausted error = &familyError{"limes: lease exhausted", limes.ErrBudgetExceeded, CodeLeaseExhausted}
 ```
 
-ErrLeaseExhausted — a Charge under a lease would take it past what it holds. The caller leases more (Leaser.Lease) and charges again. Matches ErrBudgetExceeded: the budget the capability may spend now is used.
+ErrLeaseExhausted — a Charge under a lease would take it past what it holds. The caller leases more (Leaser.Lease) and charges again. Matches limes.ErrBudgetExceeded: the budget the capability may spend now is used.
 
 <sub>[meter/errors.go](../../meter/errors.go)</sub>
 <a id="meter.ErrLeaseNested"></a>
@@ -242,7 +243,7 @@ ErrLeaseExhausted — a Charge under a lease would take it past what it holds. T
 var ErrLeaseNested error = &familyError{"limes: an ancestor holds a lease", limes.ErrConflict, CodeLeaseNested}
 ```
 
-ErrLeaseNested — Lease named a capability whose ancestor holds an open lease: a lease is drawn from the whole chain, and the ancestor's already holds part of it. Matches ErrConflict.
+ErrLeaseNested — Lease named a capability whose ancestor holds an open lease: a lease is drawn from the whole chain, and the ancestor's already holds part of it. Matches limes.ErrConflict.
 
 <sub>[meter/errors.go](../../meter/errors.go)</sub>
 <a id="meter.ErrLeaseNotFound"></a>
@@ -264,7 +265,7 @@ ErrLeaseNotFound — GetLease or SettleLease named a capability that holds no le
 var ErrLeaseRequestsExhausted error = &familyError{"limes: lease requests exhausted", limes.ErrRequestLimitExceeded, CodeLeaseRequestsExhausted}
 ```
 
-ErrLeaseRequestsExhausted — a Bump under a lease would take it past the requests it holds. The caller leases more (Leaser.Lease) and bumps again. Matches ErrRequestLimitExceeded: the requests the capability may make now are used.
+ErrLeaseRequestsExhausted — a Bump under a lease would take it past the requests it holds. The caller leases more (Leaser.Lease) and bumps again. Matches limes.ErrRequestLimitExceeded: the requests the capability may make now are used.
 
 <sub>[meter/errors.go](../../meter/errors.go)</sub>
 <a id="meter.ErrLeasingDisabled"></a>
@@ -297,7 +298,7 @@ ErrOutcomeUnknown — a store sent the call's commit and lost the answer: the co
 var ErrRefundConflict error = &familyError{"limes: refund id already names a different refund", limes.ErrConflict, CodeRefundConflict}
 ```
 
-ErrRefundConflict — Refund named a RefundID already on record for a refund of another charge, or of another amount. One id names one refund; replaying the first receipt would report the second as returned. Matches ErrConflict, as ErrExternalRefConflict does.
+ErrRefundConflict — Refund named a RefundID already on record for a refund of another charge, or of another amount. One id names one refund; replaying the first receipt would report the second as returned. Matches limes.ErrConflict, as ErrExternalRefConflict does.
 
 <sub>[meter/errors.go](../../meter/errors.go)</sub>
 <a id="meter.ErrReserveConflict"></a>
@@ -308,7 +309,7 @@ ErrRefundConflict — Refund named a RefundID already on record for a refund of 
 var ErrReserveConflict error = &familyError{"limes: reservation id already names a different hold", limes.ErrConflict, CodeReserveConflict}
 ```
 
-ErrReserveConflict — Reserve named a ReservationID already on record for another hold: one of another capability, tenant, Biscuit copies, amount, unit, op or actor, or one already settled. One id names one hold; replaying the first would report the second as held. Matches ErrConflict, as ErrExternalRefConflict does.
+ErrReserveConflict — Reserve named a ReservationID already on record for another hold: one of another capability, tenant, Biscuit copies, amount, unit, op or actor, or one already settled. One id names one hold; replaying the first would report the second as held. Matches limes.ErrConflict, as ErrExternalRefConflict does.
 
 <sub>[meter/errors.go](../../meter/errors.go)</sub>
 <a id="meter.ErrSettleConflict"></a>
@@ -319,7 +320,7 @@ ErrReserveConflict — Reserve named a ReservationID already on record for anoth
 var ErrSettleConflict error = &familyError{"limes: reservation already settled for a different amount", limes.ErrConflict, CodeSettleConflict}
 ```
 
-ErrSettleConflict — Settle named a reservation already settled, for a different amount. One reservation names one cost; replaying the first receipt would report the second as booked. Matches ErrConflict, as ErrExternalRefConflict does.
+ErrSettleConflict — Settle named a reservation already settled, for a different amount. One reservation names one cost; replaying the first receipt would report the second as booked. Matches limes.ErrConflict, as ErrExternalRefConflict does.
 
 <sub>[meter/errors.go](../../meter/errors.go)</sub>
 <a id="meter.ErrTenantBudgetBusy"></a>
@@ -363,7 +364,7 @@ AllTenantBudgets walks ListTenantBudgets page by page, from req.Cursor, and yiel
 func As[T any](s UsageStore) (T, error)
 ```
 
-As is s as the optional interface T — meter.As\[meter.Leaser](store) — or, as Require refuses, limes.ErrInvalidConfig naming T when s is not one and ErrFeatureDisabled when its configuration turned T's feature off: Require and the type assertion after it, in one call.
+As is s as the optional interface T — meter.As\[meter.Leaser](store) — or, as Require refuses, limes.ErrInvalidConfig naming T when s is not one and ErrFeatureDisabled when its configuration turned T's feature off: Require and the type assertion after it, in one call. A T that is no interface is limes.ErrInvalidRequest.
 
 ErrFeatureDisabled matches limes.ErrInvalidConfig too, so a caller that stops its start on a build without the interface but runs on without a feature turned off checks ErrFeatureDisabled first; AsOptional does that for it.
 
@@ -411,7 +412,7 @@ HousekeepingLimit is the batch a housekeeping request's Limit asks for: DefaultH
 func Require(s UsageStore, want ...Feature) error
 ```
 
-Require refuses a store without every feature in want, naming each: one it does not implement is limes.ErrInvalidConfig, one its configuration turned off ErrFeatureDisabled (which is limes.ErrInvalidConfig too), so a caller tells a build that dropped a feature from a deployment that turned it off. A consumer calls it once at startup with the features it uses.
+Require refuses a store without every feature in want, naming each: one it does not implement is limes.ErrInvalidConfig, one its configuration turned off ErrFeatureDisabled (which is limes.ErrInvalidConfig too), so a caller tells a build that dropped a feature from a deployment that turned it off. A feature this package does not define is limes.ErrInvalidRequest. A consumer calls it once at startup with the features it uses.
 
 <sub>[meter/features.go](../../meter/features.go)</sub>
 <a id="meter.ValidateExternalRef"></a>
@@ -436,11 +437,15 @@ type BudgetMeter interface {
 	// row, and runs onCharged — ALL atomically. Checks, in order:
 	//
 	//   1. Each Biscuit copy's own budget (req.Subject.Copies), innermost
-	//      first → ErrBudgetExceeded.
+	//      first → limes.ErrBudgetExceeded.
 	//   2. The capability's own ceiling (req.Subject.Budget()) →
-	//      ErrBudgetExceeded.
-	//   3. Each ancestor's ceiling → ErrBudgetExceeded.
-	//   4. The tenant aggregate ceiling → ErrTenantBudgetExceeded.
+	//      limes.ErrBudgetExceeded.
+	//   3. Each ancestor's ceiling → limes.ErrBudgetExceeded.
+	//   4. The tenant aggregate ceiling → limes.ErrTenantBudgetExceeded.
+	//
+	// Before them, and under either OverrunPolicy, an amount that would take
+	// a counter past MaxNanos is ErrCounterOverflow, and a counter that
+	// counts in another unit limes.ErrUnitCodeMismatch.
 	//
 	// Any rejection, or an error from onCharged, leaves every counter and
 	// the ledger untouched. onCharged runs inside the charge, atomically
@@ -492,7 +497,7 @@ type BudgetMeter interface {
 	// ErrRefundExceedsCharge and changes nothing. An unknown charge ID —
 	// never charged, or removed from the ledger past its retention
 	// (MinChargeRetention) — returns ErrChargeNotFound, and a request naming neither an Amount nor
-	// Remaining, or both, ErrInvalidRequest. The receipt carries the amount
+	// Remaining, or both, limes.ErrInvalidRequest. The receipt carries the amount
 	// actually refunded.
 	//
 	// A charge counted in a tenant accounting period that has since been
@@ -550,7 +555,7 @@ type BudgetMeter interface {
 	// verifier's may end the hold up to the leeway past the record's expiry
 	// that a verifier may still accept the token for. A capability past
 	// that — one a late cost names through StoredMeterSubject — is refused
-	// ErrExpired; a store that shares the verifier's clock may refuse it
+	// limes.ErrExpired; a store that shares the verifier's clock may refuse it
 	// from the record's expiry on.
 	// Rejections return the Charge sentinels and hold nothing.
 	//
@@ -732,7 +737,7 @@ ChargeByRefRequest names one charge by the reference it was taken under.
 func (r ChargeByRefRequest) Validate() error
 ```
 
-Validate refuses, as ErrInvalidRequest, a request that names no charge: no capability, no reference — a charge taken without one has no reference to find it by — or a reference ValidateExternalRef refuses.
+Validate refuses, as limes.ErrInvalidRequest, a request that names no charge: no capability, no reference — a charge taken without one has no reference to find it by — or a reference ValidateExternalRef refuses.
 
 <sub>[meter/usage.go](../../meter/usage.go)</sub>
 <a id="meter.ChargeDimension"></a>
@@ -830,7 +835,7 @@ Admits reports whether f keeps a charge of tenant, op, actor and capability, for
 func (f ChargeFilter) Validate() error
 ```
 
-Validate refuses a list longer than MaxChargeFilterValues, and a value that names nothing: the nil uuid, an empty operation or actor.
+Validate refuses a list longer than MaxChargeFilterValues, a value that names nothing — the nil uuid, an empty operation or actor — and an operation or actor that is not valid UTF-8 or holds a NUL.
 
 <sub>[meter/ledger.go](../../meter/ledger.go)</sub>
 <a id="meter.ChargeReceipt"></a>
@@ -903,7 +908,7 @@ type ChargeRequest struct {
 	// unit and the presented copy's limits: VerifiedCapability.MeterSubject.
 	// No conversion happens: a counter the charge moves — the
 	// capability's, an ancestor's, the tenant's — that already counts in
-	// another unit refuses it with ErrUnitCodeMismatch, and so does a
+	// another unit refuses it with limes.ErrUnitCodeMismatch, and so does a
 	// reservation.
 	Subject limes.MeterSubject
 	// Amount is the cost, in the subject's unit. Within 0..MaxNanos
@@ -934,7 +939,7 @@ ChargeRequest is the input to Meter.Charge.
 func (r ChargeRequest) Validate() error
 ```
 
-Validate refuses an amount out of range, an unknown overrun policy, an external ref past MaxExternalRefBytes, and a subject that names no capability, no tenant or no unit, or an unknown unit.
+Validate refuses an amount out of range, an unknown overrun policy, an external ref ValidateExternalRef refuses, an Op or Actor that is not valid UTF-8 or holds a NUL, and a subject that names no capability, no tenant or no unit, or an unknown unit.
 
 <sub>[meter/usage.go](../../meter/usage.go)</sub>
 <a id="meter.ChargeSum"></a>
@@ -1043,7 +1048,7 @@ CopyUsageRequest names the copies CopyUsage reads, all of one capability: a copy
 func (r CopyUsageRequest) Validate() error
 ```
 
-Validate refuses a request naming no capability, no copy, more than MaxCopyUsageIDs, or an empty revocation id, as ErrInvalidRequest.
+Validate refuses a request naming no capability, no copy, more than MaxCopyUsageIDs, or an empty revocation id, as limes.ErrInvalidRequest.
 
 <sub>[meter/usage.go](../../meter/usage.go)</sub>
 <a id="meter.CopyUsageResult"></a>
@@ -1082,7 +1087,7 @@ DeleteUsageRequest names the capability whose usage row DeleteUsage drops.
 func (r DeleteUsageRequest) Validate() error
 ```
 
-Validate refuses a request naming no capability, as ErrInvalidRequest.
+Validate refuses a request naming no capability, as limes.ErrInvalidRequest.
 
 <sub>[meter/usage.go](../../meter/usage.go)</sub>
 <a id="meter.EraseTenantUsageRequest"></a>
@@ -1287,12 +1292,12 @@ type LeaseRequest struct {
 	Amount limes.Nanos
 	// Requests to lease; a top-up's new lease holds what the open one had
 	// left and these. A lease of none covers no Bump. Negative is
-	// ErrInvalidRequest, and so is a request of no amount and no requests.
+	// limes.ErrInvalidRequest, and so is a request of no amount and no requests.
 	Requests int64
 	// TTL is how long the lease lasts unless settled, at most until its
 	// capability expires, as a hold's (Meter.Reserve); a top-up's new lease
 	// lasts this long from the top-up. 0 = DefaultLeaseTTL; negative is
-	// ErrInvalidRequest.
+	// limes.ErrInvalidRequest.
 	TTL time.Duration
 }
 ```
@@ -1346,7 +1351,7 @@ A lease holds its amount against every ancestor and the tenant, and its requests
   - A Bump is counted under the lease the same way, while the lease holds requests; one it has none left for is refused with ErrLeaseRequestsExhausted. A lease of no requests covers no Bump.
   - A Charge with OverrunPolicyRecord, a Charge of a Biscuit copy with limits of its own — whose quota counts on every ancestor — a Bump of one, and Reserve, Settle and Release, go through the whole chain.
   - A capability whose ancestor holds an open lease cannot lease (ErrLeaseNested): a lease is drawn from the whole chain. A later minor may let a request opt in to a lease drawn from the ancestor's instead; without that, this refusal holds for all of v1.
-  - A Biscuit copy cannot lease (ErrInvalidRequest): none of its calls go under a lease, which would hold its chain's budget past the copy's own ceilings.
+  - A Biscuit copy cannot lease (limes.ErrInvalidRequest): none of its calls go under a lease, which would hold its chain's budget past the copy's own ceilings.
 
 A lease is settled — its spend charged to every ancestor and the tenant, its requests counted on every ancestor, the rest released — by SettleLease, by a Lease that tops it up, by ReleaseExpired once it expired, by ReleaseMatching once its capability is revoked, by DeleteUsage and PurgeOrphans before its counters go, by DeleteUsage before an ancestor's go — the hold it keeps on them goes with them — and by a SetTenantBudget that resets the spend, before it does. A Refund of a charge taken under a lease returns it to the lease while it is open, and to the chain once it is settled.
 
@@ -1533,7 +1538,7 @@ Meter enforces the request and budget ceilings (Caveats.Requests, Caveats.Budget
 
 ##### Delegation trees
 
-A capability's counters cover its whole subtree: Bump and Charge apply to the capability AND to every ancestor in its delegation chain, and each ancestor's own ceiling — read from its stored record, not from the caller — must admit the increment. So an orchestrator holding 25.00 that delegates 2.00 to each of a hundred workers can still spend 25.00 in total, not 200.00. Narrowing at delegation bounds each child; this bounds the sum. An ancestor whose record is gone (Store.Purge, after expiry) no longer bounds anything — its children expired with it, since a child cannot outlive its parent. The capability itself must be on record: Bump, Charge, Reserve and Settle refuse one that is not — never recorded, or purged — with ErrNotFound, since none of its ancestors' ceilings could be read. A cost reported late is charged only while the record lasts, so keep records (PurgeRequest.ExpiredFor) as long as costs may still arrive.
+A capability's counters cover its whole subtree: Bump and Charge apply to the capability AND to every ancestor in its delegation chain, and each ancestor's own ceiling — read from its stored record, not from the caller — must admit the increment. So an orchestrator holding 25.00 that delegates 2.00 to each of a hundred workers can still spend 25.00 in total, not 200.00. Narrowing at delegation bounds each child; this bounds the sum. An ancestor whose record is gone (Store.Purge, after expiry) no longer bounds anything — its children expired with it, since a child cannot outlive its parent. The capability itself must be on record: Bump, Charge, Reserve and Settle refuse one that is not — never recorded, or purged — with limes.ErrNotFound, since none of its ancestors' ceilings could be read. A cost reported late is charged only while the record lasts, so keep records (PurgeRequest.ExpiredFor) as long as costs may still arrive.
 
 ##### Copies of a Biscuit
 
@@ -1681,7 +1686,7 @@ Retention is how long ago a charge must have been taken to go: OlderThan, or Min
 func (r PurgeChargesRequest) Validate() error
 ```
 
-Validate refuses a retention shorter than MinChargeRetention, other than zero, and a negative Limit, as ErrInvalidRequest.
+Validate refuses a retention shorter than MinChargeRetention, other than zero, and a negative Limit, as limes.ErrInvalidRequest.
 
 <sub>[meter/ledger.go](../../meter/ledger.go)</sub>
 <a id="meter.PurgeChargesResult"></a>
@@ -1722,7 +1727,7 @@ PurgeOrphansRequest is one batch of UsageHousekeeping.PurgeOrphans.
 func (r PurgeOrphansRequest) Validate() error
 ```
 
-Validate refuses a negative Limit, as ErrInvalidRequest.
+Validate refuses a negative Limit, as limes.ErrInvalidRequest.
 
 <sub>[meter/usage.go](../../meter/usage.go)</sub>
 <a id="meter.PurgeOrphansResult"></a>
@@ -1799,7 +1804,7 @@ RefundRequest is the input to Meter.Refund. It names either an Amount or Remaini
 func (r RefundRequest) Validate() error
 ```
 
-Validate refuses a request that names no amount, or both an amount and Remaining.
+Validate refuses a request that names no amount, both an amount and Remaining, or an amount out of range.
 
 <sub>[meter/usage.go](../../meter/usage.go)</sub>
 <a id="meter.Refunded"></a>
@@ -1842,7 +1847,7 @@ ReleaseExpiredRequest is one batch of UsageHousekeeping.ReleaseExpired.
 func (r ReleaseExpiredRequest) Validate() error
 ```
 
-Validate refuses a negative Limit, as ErrInvalidRequest.
+Validate refuses a negative Limit, as limes.ErrInvalidRequest.
 
 <sub>[meter/usage.go](../../meter/usage.go)</sub>
 <a id="meter.ReleaseExpiredResult"></a>
@@ -1903,7 +1908,7 @@ ReleaseMatchingRequest names the holds ReleaseMatching releases: those of the re
 func (r ReleaseMatchingRequest) Validate() error
 ```
 
-Validate refuses, as ErrInvalidRequest, a request with neither a tenant nor AllTenants, or both, no selector, a selector AllTenants does not take, or a negative limit.
+Validate refuses, as limes.ErrInvalidRequest, a request with neither a tenant nor AllTenants, or both, no selector, a selector AllTenants does not take, a selector that is not valid UTF-8 or holds a NUL, or a negative limit.
 
 <sub>[meter/release_matching.go](../../meter/release_matching.go)</sub>
 <a id="meter.ReleaseMatchingResult"></a>
@@ -1967,7 +1972,7 @@ type RequestCounter interface {
 	// Bump increments the request counter of the capability and of
 	// each ancestor, and returns the capability's new count. When any
 	// ceiling in the chain would be crossed it returns
-	// ErrRequestLimitExceeded and nothing is mutated. Under a lease that
+	// limes.ErrRequestLimitExceeded and nothing is mutated. Under a lease that
 	// keeps moving while the call locks it, a store may refuse it as
 	// limes.ErrConflict, mutating nothing, for the caller to send again
 	// (Leaser).
@@ -2024,7 +2029,7 @@ type ReserveRequest struct {
 	Amount limes.Nanos
 	// TTL is how long the hold lasts if never settled or released, at most
 	// until its capability expires (Meter.Reserve). 0 =
-	// DefaultReservationTTL; negative is ErrInvalidRequest.
+	// DefaultReservationTTL; negative is limes.ErrInvalidRequest.
 	TTL time.Duration
 	// Op and Actor are carried onto the charge Settle records.
 	Op    limes.Op
@@ -2049,7 +2054,7 @@ ReserveRequest is the input to Meter.Reserve.
 func (r ReserveRequest) Validate() error
 ```
 
-Validate refuses an amount out of range, a subject that names no capability, no tenant or no unit, or an unknown unit, and a negative TTL.
+Validate refuses an amount out of range, a subject that names no capability, no tenant or no unit, or an unknown unit, a negative TTL, and an Op or Actor that is not valid UTF-8 or holds a NUL.
 
 <sub>[meter/usage.go](../../meter/usage.go)</sub>
 <a id="meter.SetTenantBudgetRequest"></a>
@@ -2090,7 +2095,7 @@ SetTenantBudgetRequest is the input for UsageStore.SetTenantBudget.
 func (r SetTenantBudgetRequest) Validate() error
 ```
 
-Validate refuses a request with no tenant, a ceiling that does not validate — among them one that lets something be spent and names no unit — or a negative ExpectedVersion, as ErrInvalidRequest. A store calls it before reading the tenant's row, so a malformed request is refused as one, never as a version conflict.
+Validate refuses a request with no tenant, a ceiling that does not validate — among them one that lets something be spent and names no unit — or a negative ExpectedVersion, as limes.ErrInvalidRequest. A store calls it before reading the tenant's row, so a malformed request is refused as one, never as a version conflict.
 
 <sub>[meter/usage.go](../../meter/usage.go)</sub>
 <a id="meter.SettleLeaseRequest"></a>
@@ -2397,7 +2402,7 @@ String names the filter for logs and errors.
 func (f TenantBudgetFilter) Validate() error
 ```
 
-Validate refuses a filter this package does not define, as ErrInvalidRequest.
+Validate refuses a filter this package does not define, as limes.ErrInvalidRequest.
 
 <sub>[meter/usage.go](../../meter/usage.go)</sub>
 <a id="meter.TenantBudgetHolder"></a>
@@ -2444,8 +2449,9 @@ type TenantBudgets interface {
 	// configured AND has never been charged).
 	//
 	// The aggregate counts from the tenant's first charge or reservation,
-	// whether or not a ceiling has been set: Charge and Reserve create the
-	// row, with no ceiling and ResourceVersion 0, when it is missing. A
+	// whether or not a ceiling has been set: Charge, Reserve and a
+	// Leaser.Lease of an amount create the row, with no ceiling and
+	// ResourceVersion 0, when it is missing. A
 	// ceiling set afterwards is measured against that spend and those holds.
 	GetTenantBudget(ctx context.Context, tenantID uuid.UUID) (TenantBudget, error)
 
@@ -2454,8 +2460,8 @@ type TenantBudgets interface {
 	// this on each billing close. ResetSpend=false adjusts the cap
 	// mid-cycle without affecting accumulated spend. It refuses what
 	// SetTenantBudgetRequest.Validate refuses — a ceiling outside
-	// 0..MaxNanos is ErrInvalidAmount — and changes nothing. A ceiling in a
-	// unit other than the row's returns ErrUnitCodeMismatch while anything
+	// 0..MaxNanos is limes.ErrInvalidAmount — and changes nothing. A ceiling in a
+	// unit other than the row's returns limes.ErrUnitCodeMismatch while anything
 	// is held in the old unit, or spent in it and not reset. A reset settles
 	// the tenant's leases first; a store that cannot keep new ones out
 	// meanwhile may refuse it as limes.ErrConflict, changing nothing, and
@@ -2473,8 +2479,8 @@ type TenantBudgets interface {
 	//   - TenantBudgetFilterUnlimited: rows whose ceiling is Unlimited.
 	// Limit is the page size, as PageLimit reads it.
 	// It refuses what ListTenantBudgetsRequest.Validate refuses, and a store
-	// that scopes tenants refuses with ErrScopeMismatch a call whose scope
-	// admits fewer than every tenant, as CountRecords does: under it the
+	// that scopes tenants refuses with limes.ErrScopeMismatch a call whose scope
+	// admits fewer than every tenant, as limes.RecordCensus.CountRecords does: under it the
 	// page would read as every tenant's while it showed fewer.
 	//
 	// Rows come most at risk first. Ceilings of 0, which allow nothing,
@@ -2527,8 +2533,9 @@ type TenantUsageEraser interface {
 	//
 	// It also marks the tenant erased, so that a call made after it — a
 	// request verified before the erase, a late cost — counts nothing of
-	// the tenant again: Bump, Charge, Reserve and SetTenantBudget for it
-	// return ErrTenantErased, and so does the limes.Store's Insert. PurgeOrphans forgets the mark once none of the
+	// the tenant again: Bump, Charge, Reserve, Leaser.Lease and
+	// SetTenantBudget for it return limes.ErrTenantErased, and so does the
+	// limes.Store's Insert. PurgeOrphans forgets the mark once none of the
 	// tenant's records is left, and with it any call that could be metered.
 	//
 	// It returns what it removed (EraseTenantUsageResult).
@@ -2578,7 +2585,7 @@ type Usage struct {
 	// against the ceiling as made.
 	ReservedRequests int64
 	// UnitCode is the unit the counters count in: the subject's, recorded
-	// by the first Bump, Charge or Reserve of a subject that names one, so
+	// by the first Bump, Charge, Reserve or Lease of a subject that names one, so
 	// a capability that has only been bumped reads its unit too. Empty
 	// while none has.
 	UnitCode string

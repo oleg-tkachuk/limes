@@ -19,7 +19,8 @@ const (
 )
 
 // AuthorizationDetailsTypeCaveats is the RFC 9396 type of the
-// authorization_details entry an introspection answer carries: an active
+// authorization_details entry an introspection answer carries, as does a
+// token response to a request with authorization_details: an active
 // capability's caveats, its members those of the token's limes_caveats claim.
 const AuthorizationDetailsTypeCaveats = "https://github.com/oleg-tkachuk/limes/exchange#caveats"
 
@@ -35,9 +36,9 @@ type IntrospectionConfig struct {
 	// RFC 7662 §2.1 requires, so the endpoint is no oracle for whoever holds
 	// a token. An error that is or wraps ErrUnauthorizedClient refuses one
 	// authenticated but not allowed to introspect: 400 unauthorized_client.
-	// One that is or wraps ErrServerError is answered 500 server_error, as
-	// the token endpoint answers it. Any other error refuses it as ErrInvalidClient, answered as the token
-	// endpoint answers it (HandlerConfig.Authenticate). Required.
+	// One that is or wraps ErrServerError is answered 500 server_error, and
+	// any other error refuses it as ErrInvalidClient, both as the token
+	// endpoint answers them (HandlerConfig.Authenticate). Required.
 	Authenticate func(r *http.Request) (Client, error)
 	// Audiences are the audiences of the tokens a client may learn about
 	// (RFC 7662 §4): a token whose aud names none of them is answered
@@ -49,10 +50,12 @@ type IntrospectionConfig struct {
 	// gateways trusted with every audience, can reach. It excludes
 	// Audiences.
 	AnyAudience bool
-	// MaxBodyBytes bounds the request body. Zero: DefaultMaxBodyBytes.
+	// MaxBodyBytes bounds the request body. Zero: DefaultMaxBodyBytes;
+	// negative is refused.
 	MaxBodyBytes int64
 	// Logger logs every answer: active at INFO, inactive at WARN with the
-	// reason, the server's failures at ERROR. Nil: slog.Default().
+	// reason, the server's failures at ERROR, as is a Biscuit copy answered
+	// inactive because Verifier does not meter copies. Nil: slog.Default().
 	Logger *slog.Logger
 }
 
@@ -63,9 +66,10 @@ type IntrospectionHandler struct {
 	cfg IntrospectionConfig
 }
 
-// NewIntrospectionHandler builds an IntrospectionHandler, refusing a config
-// without a verifier or a client authenticator, or that names neither the
-// audiences each client may learn about nor AnyAudience, or both.
+// NewIntrospectionHandler builds an IntrospectionHandler, refusing with
+// limes.ErrInvalidConfig a config without a verifier or a client
+// authenticator, one that names neither the audiences each client may learn
+// about nor AnyAudience, or both, or a negative MaxBodyBytes.
 func NewIntrospectionHandler(cfg IntrospectionConfig) (*IntrospectionHandler, error) {
 	switch {
 	case cfg.Verifier == nil:

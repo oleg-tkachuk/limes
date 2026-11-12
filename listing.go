@@ -10,9 +10,9 @@ import (
 // RecordLister lists one tenant's capability records a page at a time, or
 // every tenant's, each with its disposition, for an operator's view of them:
 // every record, or those of a principal type, a subject or a subject prefix,
-// and of the dispositions it asks for, oldest or newest first. It is a type of its
-// own beside Store, as RecordCensus is: a reporter holds it, an issuer does
-// not. memstore's and pgstore's Census are each one; storetest checks it when
+// and of the dispositions it asks for, oldest or newest first. It is a type
+// of its own beside Store, as RecordCensus is: a reporter holds it, an issuer
+// does not. memstore's and pgstore's Census are each one; storetest checks it when
 // its Env sets one.
 //
 // A record's disposition is the one RecordCensus counts it under, by the
@@ -48,9 +48,9 @@ type RecordLister interface {
 // consumer showing one record asks it rather than working the disposition
 // out from IsRevoked and the expiry, which would be a second rule beside
 // the store's. The disposition is the record's, whatever its Biscuit
-// copies' (RecordDisposition). A type of its own beside RecordLister, as the lister is
-// beside Store: memstore's and pgstore's Census are each one, and storetest
-// checks it when its Env.Lister is one.
+// copies' (RecordDisposition). A type of its own beside RecordLister, as the
+// lister is beside Store: memstore's and pgstore's Census are each one, and
+// storetest checks it when its Env.Lister is one.
 type RecordListingReader interface {
 	// GetRecordListing reads the record of id with its disposition; one
 	// not on record, or not visible to the caller, is ErrNotFound, as
@@ -171,8 +171,9 @@ type ListRecordsRequest struct {
 
 // Validate refuses a request that names neither a tenant nor AllTenants,
 // or both, an unknown principal type, both a subject and a subject prefix,
-// an unknown disposition or order, or a negative page size. Every error
-// matches ErrInvalidRequest.
+// an unknown disposition or order, a negative page size, or a text filter
+// that is not valid UTF-8 or holds a NUL. Every error matches
+// ErrInvalidRequest.
 func (r ListRecordsRequest) Validate() error {
 	switch {
 	case r.TenantID == uuid.Nil() && !r.AllTenants:

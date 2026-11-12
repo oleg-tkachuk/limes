@@ -133,8 +133,10 @@ type Verifier struct {
 	cfg Config
 }
 
-// New builds a Verifier, refusing a config with no issuer or
-// no keys, or one accepting a symmetric algorithm.
+// New builds a Verifier, refusing with limes.ErrInvalidConfig a config with
+// no issuer or no keys, an algorithm outside DefaultAlgorithms() (a
+// symmetric one among them), or a negative ClockSkew or one beside
+// NoClockSkew.
 func New(cfg Config) (*Verifier, error) {
 	if cfg.Issuer == "" {
 		return nil, fmt.Errorf("%w: jwtverify: Config.Issuer required", limes.ErrInvalidConfig)
@@ -185,9 +187,10 @@ func setClockSkew(cfg *Config) error {
 
 // VerifySubject verifies token as an RFC 9068 access token of the
 // configured issuer: its type and algorithm, its signature under the
-// issuer's keys, its lifetime, and every claim the profile requires. A
-// token it refuses is exchange.ErrInvalidGrant; keys it cannot get are another
-// error, the server's.
+// issuer's keys (the key its kid names, which it must name), its lifetime,
+// and every claim the profile requires. A token it refuses is
+// exchange.ErrInvalidGrant; keys it cannot get are another error, the
+// server's.
 func (v *Verifier) VerifySubject(ctx context.Context, token string) (exchange.Subject, error) {
 	msg, err := jws.ParseString(token)
 	if err != nil || len(msg.Signatures()) != 1 {

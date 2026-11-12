@@ -1,9 +1,9 @@
 // Package metertest checks a meter.UsageStore against the module's contract
 // — its Meter, tenant budgets and housekeeping — the way testing/fstest
-// checks an fs.FS. A UsageStore is the consumer's to write,
-// and most of its contract lives in request fields — a store that ignores
-// ExternalRef or Overrun still compiles, and then charges a repeated cost
-// twice. Run it from the store's own tests:
+// checks an fs.FS. A UsageStore is the consumer's to write, and most of its
+// contract lives in request fields: a store that ignores ExternalRef or
+// Overrun still compiles, and then charges a repeated cost twice. Run it
+// from the store's own tests:
 //
 //	func TestMeterContract(t *testing.T) {
 //		metertest.Run(t, func(t *testing.T) metertest.Env { … })
@@ -13,22 +13,24 @@
 // runs RunCounter instead: the checks of Bump alone, which Run runs too.
 //
 // The checks cover what a charge does at its ceilings and when it arrives
-// again: rejection that moves nothing — by a Biscuit copy's, the capability's,
-// an ancestor's or the tenant's ceiling, by a failed onCharged or onRefunded, under
-// concurrent charges, siblings' and grandchildren's among them — idempotency on ExternalRef and on a settled
+// again: rejection that moves nothing — by a Biscuit copy's, the
+// capability's, an ancestor's or the tenant's ceiling, by a failed
+// onCharged or onRefunded, under concurrent charges, siblings' and
+// grandchildren's among them — idempotency on ExternalRef and on a settled
 // reservation, also once the capability is gone (Env.DeleteCapability), on
-// a ReservationID and on a RefundID, which goes with its charge, ChargeByRef,
-// OverrunPolicyRecord past every ceiling, refunds, holds, their listing and their expiry, request
-// counts, copy counters and CopyUsage, units, counters that never pass
-// MaxNanos, a capability not on record and PurgeOrphans (Env.DeleteCapability),
-// DeleteUsage, the
-// tenant aggregate, its version guard and its listing, and the validation of
-// the request; and, where the Env enables them, EraseTenantUsage,
+// a ReservationID and on a RefundID, which goes with its charge;
+// ChargeByRef, OverrunPolicyRecord past every ceiling, refunds, holds, their
+// listing and their expiry, request counts, copy counters and CopyUsage,
+// units, counters that never pass MaxNanos, a capability not on record and
+// PurgeOrphans (Env.DeleteCapability), DeleteUsage, the tenant aggregate,
+// its version guard and its listing, and the validation of the request.
+// Where the store or the Env enables them, they cover leases (meter.Leaser),
+// EraseTenantUsage, ReleaseMatching, ListTenantReservations,
 // limes.ErrScopeMismatch under another tenant's scope and for every write
-// under a read-only one, and a LedgerReader's
-// sums, their order, paging, UTC buckets, period edges, late refunds and
-// overflow, and, when the Ledger is a meter.LedgerHousekeeping, PurgeCharges
-// to its retention. They need a real ledger, not a fake.
+// under a read-only one, a LedgerReader's sums, their order, paging, UTC
+// buckets, period edges, late refunds and overflow, and, when the Ledger is
+// a meter.LedgerHousekeeping, PurgeCharges to its retention. They need a
+// real ledger, not a fake.
 //
 // Concurrent calls that each promise to move one thing once — refunds of one
 // charge, settles and releases of one hold, top-ups of one lease, charges
@@ -91,9 +93,9 @@ type Env struct {
 	CheckTimeout time.Duration
 	// Advance moves the store's clock forward by d. Optional: without it,
 	// the checks that need time to pass are skipped or cut short — a hold's
-	// expiry and ReleaseExpired, its batches, a hold dating the tenant
-	// budget, the accounting period's start, and the ledger's day and week
-	// buckets.
+	// and a lease's expiry and ReleaseExpired, its batches, a hold dating the
+	// tenant budget, the accounting period's start, the ledger's buckets,
+	// period edges and late refunds, and PurgeCharges.
 	Advance func(d time.Duration)
 	// DeleteCapability removes a capability's record, as Store.Purge does
 	// once it has expired. Optional: without it, the checks of what follows
@@ -124,8 +126,9 @@ type Env struct {
 	Ledger meter.LedgerReader
 	// Now reads the store's clock, which stands still while a check runs
 	// but for Advance. Optional: without it, the checks of the ledger's
-	// time buckets, of a hold ending with its capability and of a hold
-	// dating the tenant budget are skipped.
+	// buckets, period edges and late refunds, of PurgeCharges, of a hold
+	// ending with its capability and of a hold dating the tenant budget are
+	// skipped.
 	Now func() time.Time
 	// ExpiryNow and AdvanceExpiry read and move the clock the store
 	// measures holds' and leases' expiry by, where that is not the clock Now
@@ -1513,8 +1516,6 @@ func sameCeiling[T comparable](a, b *T) bool {
 	return (a == nil) == (b == nil) && (a == nil || *a == *b)
 }
 
-// Reserve, GetReservation and ListReservations read one hold the same way,
-// and a settled or released hold is gone from both.
 // checkHoldDatesTenantBudget holds a store to dating the tenant's aggregate
 // whenever it writes it: a tenant that has only ever reserved reads back
 // when that happened, and a release dates it again.
@@ -1561,6 +1562,8 @@ func checkHoldWithinCapability(t *testing.T, f fixture) {
 	expect.That(t, errors.Is(err, limes.ErrExpired), "Reserve for a capability past its expiry: err = %v, want ErrExpired", err)
 }
 
+// Reserve, GetReservation and ListReservations read one hold the same way,
+// and a settled or released hold is gone from both.
 func checkReservations(t *testing.T, f fixture) {
 	copies := []limes.CopyCeiling{{
 		RevocationID: []byte("copy-1"), Requests: &limes.RequestCeiling{Max: reservedCopyLimit}, Budget: &limes.BudgetCeiling{Max: reservedCopyLimit * one, UnitCode: unit},
@@ -2846,8 +2849,9 @@ func checkDefaultReservationTTL(t *testing.T, f fixture) {
 }
 
 // checkReservationsPage holds a store to paging a capability's reservations
-// in their order — the last two expiring past year 2262, where a cursor
-// counting Unix nanoseconds overflows — and to refusing a negative page size.
+// in their order — the last asking for longestTTL, past year 2262, where a
+// cursor counting Unix nanoseconds overflows — and to refusing a negative
+// page size.
 func checkReservationsPage(t *testing.T, f fixture) {
 	// Soonest first; the last one ends with its capability, after the others.
 	ttls := []time.Duration{time.Minute, 2 * time.Minute, longestTTL}
@@ -2971,8 +2975,6 @@ func checkNotOnRecord(t *testing.T, f fixture) {
 	expect.That(t, err != nil || u.SpentAmount == 0 && u.RequestCount == 0, "the root counted %+v for a child not on record", u)
 }
 
-// riskyPct is a row's utilization, or -1 for a tenant with no ceiling, which
-// no threshold should have listed.
 // risk is where a tenant ranks in ListTenantBudgets: its ceiling's rank —
 // 0 first, bounded next, unlimited last — then, for a bounded ceiling, its
 // unclamped utilization.
@@ -3013,6 +3015,8 @@ const (
 	basisPointsPerPercent = meter.BasisPointsPerWhole / fullPct
 )
 
+// riskyPct is a row's utilization, or noUtilization for a tenant with no
+// ceiling, which no threshold should have listed.
 func riskyPct(s meter.TenantBudget) float64 {
 	pct, limited := s.Utilization()
 	if !limited {
@@ -3072,7 +3076,8 @@ func checkPeriodStart(t *testing.T, f fixture) {
 // above the hold must fit the ceilings. A settle at or below it adds nothing
 // to what is already counted, so a ceiling crossed meanwhile — by an
 // OverrunPolicyRecord charge elsewhere in the chain, or a tenant ceiling
-// lowered — does not refuse it, and the whole hold is released everywhere it counted.
+// lowered — does not refuse it, and the whole hold is released everywhere
+// it counted.
 func checkSettleWithinHold(t *testing.T, f fixture) {
 	const held, actual = 10 * one, 4 * one
 	r, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: held})
@@ -3809,7 +3814,6 @@ func checkSumChargeWeeks(t *testing.T, f fixture) {
 	expect.That(t, err == nil && sameSums(page.Items, want), "SumCharges by week = %+v, %v; want %+v", page.Items, err, want)
 }
 
-// sameSums compares sums, their bucket starts as instants.
 // The period is [From, To): a charge taken at From is in it, and one taken
 // at To is not.
 func checkSumChargesPeriodEdges(t *testing.T, f fixture) {
@@ -3897,6 +3901,7 @@ func checkTenantBudgetNotFound(t *testing.T, f fixture) {
 	expect.That(t, errors.Is(err, meter.ErrTenantBudgetNotFound) && errors.Is(err, limes.ErrNotFound), "GetTenantBudget of a tenant with no row = %+v, %v; want ErrTenantBudgetNotFound", b, err)
 }
 
+// sameSums compares sums, their bucket starts as instants.
 func sameSums(got, want []meter.ChargeSum) bool {
 	return slices.EqualFunc(got, want, func(a, b meter.ChargeSum) bool {
 		a.BucketStart, b.BucketStart = a.BucketStart.UTC(), b.BucketStart.UTC()
@@ -4023,8 +4028,8 @@ func checkPurgeBatches(t *testing.T, f fixture, housekeeping meter.LedgerHouseke
 }
 
 // checkPurgedPromises holds a purged charge's promises to going with it:
-// its reference charges anew, it refunds nothing, and another tenant's
-// charge stays.
+// ChargeByRef no longer finds it, its reference charges anew, it refunds
+// nothing, and another tenant's charge stays.
 func checkPurgedPromises(t *testing.T, f fixture, p purgedCharges) {
 	_, err := f.Usage.ChargeByRef(f.Ctx, meter.ChargeByRefRequest{CapabilityID: f.child, ExternalRef: "purge-1"})
 	expect.That(t, errors.Is(err, meter.ErrChargeNotFound), "ChargeByRef of a purged charge: err = %v, want ErrChargeNotFound", err)

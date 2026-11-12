@@ -256,9 +256,9 @@ func (f fixture) leaseOpen(t *testing.T, l meter.Leaser, id uuid.UUID) bool {
 	return err == nil
 }
 
-// A batch settles at most Limit leases too, and says so: the loop ends with
-// every lease of a revoked match settled and nothing left held, holds or
-// none beside them.
+// A batch settles at most Limit leases too, and says when more may match:
+// the loop ends with every lease under a revoked match settled, the match
+// holding nothing, and a live capability's lease still open.
 func checkReleaseMatchingSettlesLeasesInBatches(t *testing.T, f fixture) {
 	r, l := f.releaser(t), f.leaser(t)
 	const leases, batch = 3, 2

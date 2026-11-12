@@ -111,8 +111,11 @@ type Remote struct {
 	blocked map[string]struct{}
 }
 
-// NewRemote validates the config. It does not fetch: the first
-// PublicKey call does, so constructing a verifier never blocks on the network.
+// NewRemote builds a Remote, refusing with limes.ErrInvalidConfig a config
+// without a URL or whose URL is not https with a host, a negative interval
+// or MaxDocumentBytes, or intervals that do not nest. It does not fetch: the
+// first PublicKey call does, so constructing a verifier never blocks on the
+// network.
 func NewRemote(cfg RemoteConfig) (*Remote, error) {
 	if cfg.URL == "" {
 		return nil, errs.Config("jwks: RemoteConfig.URL required")

@@ -9,8 +9,8 @@
 // The checks cover what the verifier relies on: a proof id is new once and a
 // replay ever after, while it can still be accepted; ids of different keys
 // never collide; a holder's share counts its proofs whatever key signed them,
-// and one past it is refused with dpop.ErrReplayQuota rather than as a replay;
-// concurrent proofs carrying one id let exactly one through; a nonce issued
+// and one past it is refused with dpop.ErrReplayQuota rather than as a replay,
+// until its ids expire; concurrent proofs carrying one id let exactly one through; a nonce issued
 // is valid, and one never issued or expired is not.
 package dpoptest
 
@@ -27,7 +27,8 @@ import (
 	"github.com/oleg-tkachuk/limes/internal/watchdog"
 )
 
-// DefaultCheckTimeout bounds a check whose ReplayEnv or NoncesEnv sets no CheckTimeout.
+// DefaultCheckTimeout bounds a check whose ReplayEnv or NoncesEnv sets no
+// CheckTimeout.
 const DefaultCheckTimeout = watchdog.DefaultLimit
 
 // ReplayEnv is one replay cache under test, fresh and empty for each check.
@@ -39,12 +40,12 @@ type ReplayEnv struct {
 	// Now reads the cache's clock. Optional: without it, time.Now.
 	Now func() time.Time
 	// Advance moves the cache's clock forward by d. Optional, with Now:
-	// without both, the check that an id is remembered until it expires is
-	// skipped.
+	// without both, the checks that an id is remembered until it expires
+	// and that a holder's share frees once its ids expire are skipped.
 	Advance func(d time.Duration)
 	// EntriesPerHolder is how many live ids the cache holds for one holder
-	// before it refuses the next with dpop.ErrReplayQuota. Optional: without it, the
-	// checks of that share are skipped.
+	// before it refuses the next with dpop.ErrReplayQuota. Optional: without
+	// it, the checks of that share are skipped.
 	EntriesPerHolder int
 	// CheckTimeout bounds one check, setup aside: past it the suite panics
 	// with every goroutine's stack, naming the check, rather than leave a

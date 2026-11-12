@@ -32,9 +32,9 @@ const (
 	PrincipalTypeService     PrincipalType = "service" // a service account
 )
 
-// AgentPrincipal carries the fields specific to AI-agent principals.
-// Threaded into audit + lineage so per-tool-call replay reconstructs
-// the call graph without joining across half a dozen tables.
+// AgentPrincipal carries the fields specific to AI-agent principals, for
+// audit and lineage: per-tool-call replay reconstructs the call graph from
+// them.
 type AgentPrincipal struct {
 	// AgentType is a human-meaningful label ("research-orchestrator",
 	// "code-reviewer-bot"). Used for grouping, dashboards, anomaly

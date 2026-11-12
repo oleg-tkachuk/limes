@@ -20,8 +20,8 @@ type AuthScheme string
 const (
 	// AuthSchemeUnspecified is a token that did not come from an
 	// Authorization header — a gRPC metadata entry, a message field.
-	// VerifyRequest checks no scheme for it; a key-bound token still needs
-	// its DPoP proof.
+	// Verify checks no scheme for it (VerifyRequest.Scheme); a key-bound
+	// token still needs its DPoP proof.
 	AuthSchemeUnspecified AuthScheme = ""
 	// AuthSchemeBearer presents a bearer token (RFC 6750).
 	AuthSchemeBearer AuthScheme = "Bearer"
@@ -137,8 +137,8 @@ func isToken68(s string) bool {
 	return true
 }
 
-// Validate refuses a scheme other than the ones ParseAuthorization returns,
-// or AuthSchemeUnspecified, as ErrInvalidRequest.
+// Validate accepts AuthSchemeUnspecified, AuthSchemeBearer and
+// AuthSchemeDPoP, and refuses any other scheme as ErrInvalidRequest.
 func (s AuthScheme) Validate() error {
 	switch s {
 	case AuthSchemeUnspecified, AuthSchemeBearer, AuthSchemeDPoP:

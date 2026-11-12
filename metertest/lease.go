@@ -66,7 +66,8 @@ func (f fixture) chargeOf(subject limes.MeterSubject, amount limes.Nanos) (meter
 // A lease holds its amount on the child, the root and the tenant at once; a
 // charge under it spends the child's counters and the lease, and leaves the
 // root's and the tenant's as the lease left them; settled, the root and the
-// tenant are charged what it spent and hold nothing.
+// tenant are charged what it spent and hold nothing, and the lease is gone:
+// GetLease and SettleLease are ErrLeaseNotFound.
 func checkLeaseStopsChargesAtTheLeaseholder(t *testing.T, f fixture) {
 	l := f.leaser(t)
 	child := f.childSubject()
@@ -99,7 +100,8 @@ func checkLeaseStopsChargesAtTheLeaseholder(t *testing.T, f fixture) {
 }
 
 // A lease is held to every ceiling a reservation of its amount is: past
-// the child's it is refused, and moves nothing.
+// the child's it is refused, and moves nothing. A lease of no amount, or
+// with a negative TTL, is ErrInvalidRequest.
 func checkLeaseIsHeldToEveryCeiling(t *testing.T, f fixture) {
 	l := f.leaser(t)
 	_, err := l.Lease(f.Ctx, meter.LeaseRequest{Subject: f.childSubject(), Amount: childBudget + one})
@@ -561,8 +563,8 @@ func checkALeaseAboveAnotherSettlesOnlyItsOwn(t *testing.T, f fixture) {
 }
 
 // SettleLease settles only the lease of its subject's capability in the
-// subject's tenant: the leaseholder named under another tenant finds none,
-// and the lease stays open.
+// subject's tenant: the leaseholder named under another tenant is refused,
+// ErrLeaseNotFound or ErrScopeMismatch, and the lease stays open.
 func checkLeaseIsSettledOnlyInItsTenant(t *testing.T, f fixture) {
 	l := f.leaser(t)
 	f.lease(t, l, f.childSubject(), leased)
@@ -598,8 +600,8 @@ func checkEraseTenantUsageEndsOnlyItsLeases(t *testing.T, f fixture) {
 }
 
 // A charge under a lease runs onCharged as one without does: a callback
-// that succeeds sees the charge through, one that fails is returned as it
-// is, and the charge moves neither the counters nor the lease.
+// that succeeds sees the charge through; one that fails is returned as it
+// is, and its charge moves neither the counters nor the lease.
 func checkALeasedChargeRunsOnCharged(t *testing.T, f fixture) {
 	l := f.leaser(t)
 	child := f.childSubject()

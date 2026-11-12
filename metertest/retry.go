@@ -34,7 +34,8 @@ func (f fixture) keyedReserve(id uuid.UUID) meter.ReserveRequest {
 }
 
 // A Reserve under an id holds once: sent again for the same request it
-// returns the hold on record, Replayed, and holds nothing more.
+// returns the hold on record, Replayed, and holds nothing more. A Reserve
+// under no id holds under an id of the store's.
 func checkReserveReplaysItsID(t *testing.T, f fixture) {
 	id := uuid.New()
 	first, err := f.Usage.Reserve(f.Ctx, f.keyedReserve(id))
@@ -170,8 +171,8 @@ func checkRefundReplaysItsID(t *testing.T, f fixture) {
 	expect.That(t, f.spent(t, f.child) == keyedCharge-2*keyedPart, "child spent %v after two unkeyed refunds, want %v", f.spent(t, f.child), keyedCharge-2*keyedPart)
 }
 
-// An id names one refund: sent again for another charge or another amount,
-// a Refund is ErrRefundConflict, a conflict, and changes nothing.
+// An id names one refund: sent again for another charge, another amount or
+// the rest, a Refund is ErrRefundConflict, a conflict, and changes nothing.
 func checkRefundIDConflicts(t *testing.T, f fixture) {
 	c, other := f.keyedCharged(t), f.keyedCharged(t)
 	id := uuid.New()

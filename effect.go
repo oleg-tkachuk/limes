@@ -68,7 +68,9 @@ func (op Op) defaultEffect() Effect {
 // ResolveEffect returns the effect Check applies to op, given the effect the
 // consumer declared for it. A built-in operation keeps its own effect, and a
 // declaration may only repeat it; a consumer-defined operation takes the
-// declaration, or EffectWrite when there is none.
+// declaration, or EffectWrite when there is none. An effect this package
+// does not define, or one contradicting a built-in operation's, is
+// ErrEffectConflict.
 func (op Op) ResolveEffect(declared Effect) (Effect, error) {
 	if err := declared.Validate(); err != nil {
 		return 0, fmt.Errorf("%w for %q", err, op)

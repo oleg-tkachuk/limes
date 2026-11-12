@@ -351,12 +351,12 @@ The instruments: limes.charge.amount and limes.refund.amount, by limes.unit\_cod
 
 Instruments are created per store, and an error creating them is returned. A replayed charge or settle moved nothing and is not counted. limes.tenant\_id is off by default, as it multiplies every series by the number of tenants; with WithTenantAttribute every measurement, a refused charge or settle among them, carries the subject's tenant.
 
-NewStoreEvents returns the callbacks a usage store reports to (pgstore.Config.Events): limes.tenant.wait, a histogram in seconds of how long each metered call waited for its tenant's aggregate row, by limes.operation, the store call:
+NewStoreEvents returns the callbacks a usage store reports to (pgstore.Config.Events): limes.tenant.wait, a histogram in seconds of how long each metered call waited for its tenant's row — the aggregate's, or its stripe's where the store stripes an unlimited tenant — by limes.operation, the store call:
 
 	events, err := otelmetric.NewStoreEvents(otelmetric.WithMeterProvider(provider))
 	store, err := pgstore.NewUsageStore(pgstore.Config{DB: pool, Events: events})
 
-InstrumentRevocationCache reports a limes.RevocationCache's counts — hits, misses, upstream lookups, evictions and entries, each by kind (capability or biscuit), its clears, whole and narrow, and the revocation signal: whether lineage and a signal vouch for it, the signal's connections, losses and notifications — as observable instruments, read only when the provider collects:
+InstrumentRevocationCache reports a limes.RevocationCache's counts — hits, misses, upstream lookups, evictions, stale answers and entries, each by kind (capability or biscuit), its clears, whole and narrow, and the revocation signal: whether lineage and a signal vouch for it, the signal's connections, losses and notifications — as observable instruments, read only when the provider collects:
 
 	reg, err := otelmetric.InstrumentRevocationCache(cache,
 		otelmetric.WithMeterProvider(provider))
@@ -372,7 +372,7 @@ func Instrument(inner meter.UsageStore, opts ...Option) (meter.UsageStore, error
 
 Instrument wraps a meter.UsageStore in OpenTelemetry instruments. Its instruments are created on the global MeterProvider unless WithMeterProvider names another, and carry no tenant unless WithTenantAttribute asks for it.
 
-The result implements every interface of this package that inner does — the optional meter.CopyUsageReader, meter.TenantUsageEraser, meter.MatchingReleaser, meter.TenantReservationLister and meter.Leaser — and forwards meter.FeatureGate, so wrapping a store never hides what it can do, nor turns on what its configuration turned off. A decorator forwards a fixed list of optional interfaces (internal/optionalgen), and a test fails when the list misses one the store has.
+The result implements every interface of package meter that inner does — the optional meter.CopyUsageReader, meter.TenantUsageEraser, meter.MatchingReleaser, meter.TenantReservationLister and meter.Leaser — and forwards meter.FeatureGate, so wrapping a store never hides what it can do, nor turns on what its configuration turned off. The decorator forwards a fixed list of optional interfaces (internal/optionalgen), and a test fails when the list misses one the store has.
 
 <sub>[otelmetric/store.go](../../otelmetric/store.go)</sub>
 <a id="otelmetric.InstrumentRevocationCache"></a>
@@ -394,7 +394,7 @@ InstrumentRevocationCache reports cache's counts (limes.RevocationCacheStats) as
 func NewStoreEvents(opts ...Option) (meter.StoreEvents, error)
 ```
 
-NewStoreEvents returns the callbacks a usage store reports to as it works (pgstore.Config.Events), recorded as instruments: limes.tenant.wait, a histogram of how long each metered call waited for its tenant's aggregate, in seconds, by limes.operation, and by limes.tenant\_id under WithTenantAttribute. The wait is that of the aggregate's row alone, not of the tenant's advisory lock nor of the call's chain (docs/adr/0022-unlimited-tenant-aggregate.md, Decision 6).
+NewStoreEvents returns the callbacks a usage store reports to as it works (pgstore.Config.Events), recorded as instruments: limes.tenant.wait, a histogram of how long each metered call waited for its tenant's row, in seconds, by limes.operation, and by limes.tenant\_id under WithTenantAttribute. The wait is for that row alone — the aggregate's, or the tenant's stripe where the store stripes an unlimited tenant — not for the tenant's advisory lock nor for the counters of the call's chain (docs/adr/0022-unlimited-tenant-aggregate.md, Decision 6).
 
 <sub>[otelmetric/store_events.go](../../otelmetric/store_events.go)</sub>
 <a id="otelmetric.Option"></a>

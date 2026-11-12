@@ -58,14 +58,14 @@ const (
 	outcomeAllowed = "allowed"
 	// outcomeOverrun — committed past a ceiling under meter.OverrunPolicyRecord.
 	outcomeOverrun = "overrun"
-	// outcomeCapExceeded — a capability's, an ancestor's or a copy's ceiling
-	// refused it. The refusals carry their Reason's name, so a dashboard and
+	// outcomeCapExceeded — a budget ceiling refused it: a capability's, an
+	// ancestor's or a lease's. The refusals carry their Reason's name, so a dashboard and
 	// a refused response say the same thing.
 	outcomeCapExceeded = string(limes.ReasonBudgetExceeded)
 	// outcomeTenantExceeded — the tenant aggregate refused it.
 	outcomeTenantExceeded = string(limes.ReasonTenantBudgetExceeded)
-	// outcomeLimitExceeded — a request limit, or a copy quota, refused the
-	// call.
+	// outcomeLimitExceeded — a request limit, a lease's requests or a copy
+	// quota refused the call.
 	outcomeLimitExceeded = string(limes.ReasonRequestLimitExceeded)
 	// outcomeError — it failed for any other reason: a malformed request, a
 	// failed onCharged, a store error.

@@ -27,32 +27,33 @@ var (
 	ErrRefundExceedsCharge error = &familyError{"limes: refund exceeds charge", nil, CodeRefundExceedsCharge}
 
 	// ErrReservationNotFound — Settle named a reservation that does not
-	// exist, was released, or has expired. One already settled is not an
-	// error: Settle returns its charge again (ChargeReceipt.Replayed).
+	// exist, was released, or has expired, or GetReservation one settled or
+	// released. One already settled is no error to Settle: it returns its
+	// charge again (ChargeReceipt.Replayed).
 	ErrReservationNotFound error = &familyError{"limes: reservation not found", limes.ErrNotFound, CodeReservationNotFound}
 
 	// ErrCopyLimitExceeded — counting one more Biscuit copy of the
 	// capability would pass the copy quota of the capability or of an
 	// ancestor (limes.Caveats.Copies), or the store's bound of copies per
-	// capability (Meter, "Copies of a Biscuit"). The request is refused and nothing is
-	// counted. Matches ErrRequestLimitExceeded: the capability has used what
+	// capability (Meter, "Copies of a Biscuit"). The request is refused and
+	// nothing is counted. Matches limes.ErrRequestLimitExceeded: the capability has used what
 	// it may.
 	ErrCopyLimitExceeded error = &familyError{"limes: copy limit exceeded", limes.ErrRequestLimitExceeded, CodeCopyLimitExceeded}
 
-	// ErrUsageNotFound — no usage row exists for this capability.
-	// Get-only; bump/charge always inserts on first hit.
+	// ErrUsageNotFound — GetUsage named a capability with no usage row:
+	// Bump, Charge, Reserve and Lease create it on first use.
 	ErrUsageNotFound error = &familyError{"limes: usage row not found", limes.ErrNotFound, CodeUsageNotFound}
 
-	// ErrTenantBudgetNotFound — Get-only; the tenant has no ceiling set
-	// and has never been charged. A tenant charged before any ceiling was
-	// set has a row, Unlimited, with ResourceVersion 0.
+	// ErrTenantBudgetNotFound — GetTenantBudget named a tenant with no
+	// ceiling set and nothing ever charged or held: Charge, Reserve and a
+	// Lease of an amount create the row, Unlimited, with ResourceVersion 0.
 	ErrTenantBudgetNotFound error = &familyError{"limes: tenant budget row not found", limes.ErrNotFound, CodeTenantBudgetNotFound}
 
 	// ErrTenantBudgetVersionMismatch — SetTenantBudget's OCC guard refused the
 	// write: the stored resource_version is not the one the caller read, so
 	// someone else changed the cap in between. The caller re-reads and decides,
 	// rather than silently overwriting a change it never saw. Matches
-	// ErrConflict.
+	// limes.ErrConflict.
 	ErrTenantBudgetVersionMismatch error = &familyError{"limes: tenant budget resource_version mismatch", limes.ErrConflict, CodeTenantBudgetVersionMismatch}
 )
 
@@ -60,27 +61,27 @@ var (
 // charged under, for a different amount, unit or tenant, or under other
 // Biscuit copies. One reference names one cost; replaying the first receipt
 // would report the second as booked. The error names the reference, never
-// the charge it names. Matches ErrConflict: the request is well formed, and
+// the charge it names. Matches limes.ErrConflict: the request is well formed, and
 // would have charged had the reference been free.
 var ErrExternalRefConflict error = &familyError{"limes: external ref already names a different charge", limes.ErrConflict, CodeExternalRefConflict}
 
 // ErrSettleConflict — Settle named a reservation already settled, for a
 // different amount. One reservation names one cost; replaying the first
-// receipt would report the second as booked. Matches ErrConflict, as
+// receipt would report the second as booked. Matches limes.ErrConflict, as
 // ErrExternalRefConflict does.
 var ErrSettleConflict error = &familyError{"limes: reservation already settled for a different amount", limes.ErrConflict, CodeSettleConflict}
 
 // ErrReserveConflict — Reserve named a ReservationID already on record for
 // another hold: one of another capability, tenant, Biscuit copies, amount,
 // unit, op or actor, or one already settled. One id names one hold;
-// replaying the first would report the second as held. Matches ErrConflict,
+// replaying the first would report the second as held. Matches limes.ErrConflict,
 // as ErrExternalRefConflict does.
 var ErrReserveConflict error = &familyError{"limes: reservation id already names a different hold", limes.ErrConflict, CodeReserveConflict}
 
 // ErrRefundConflict — Refund named a RefundID already on record for a
 // refund of another charge, or of another amount. One id names one refund;
 // replaying the first receipt would report the second as returned. Matches
-// ErrConflict, as ErrExternalRefConflict does.
+// limes.ErrConflict, as ErrExternalRefConflict does.
 var ErrRefundConflict error = &familyError{"limes: refund id already names a different refund", limes.ErrConflict, CodeRefundConflict}
 
 // ErrOutcomeUnknown — a store sent the call's commit and lost the answer: the
@@ -103,12 +104,12 @@ var ErrTenantBudgetBusy error = &familyError{"limes: the tenant's calls in fligh
 
 // ErrLeaseExhausted — a Charge under a lease would take it past what it
 // holds. The caller leases more (Leaser.Lease) and charges again. Matches
-// ErrBudgetExceeded: the budget the capability may spend now is used.
+// limes.ErrBudgetExceeded: the budget the capability may spend now is used.
 var ErrLeaseExhausted error = &familyError{"limes: lease exhausted", limes.ErrBudgetExceeded, CodeLeaseExhausted}
 
 // ErrLeaseRequestsExhausted — a Bump under a lease would take it past the
 // requests it holds. The caller leases more (Leaser.Lease) and bumps again.
-// Matches ErrRequestLimitExceeded: the requests the capability may make now
+// Matches limes.ErrRequestLimitExceeded: the requests the capability may make now
 // are used.
 var ErrLeaseRequestsExhausted error = &familyError{"limes: lease requests exhausted", limes.ErrRequestLimitExceeded, CodeLeaseRequestsExhausted}
 
@@ -118,7 +119,7 @@ var ErrLeaseNotFound error = &familyError{"limes: lease not found", limes.ErrNot
 
 // ErrLeaseNested — Lease named a capability whose ancestor holds an open
 // lease: a lease is drawn from the whole chain, and the ancestor's already
-// holds part of it. Matches ErrConflict.
+// holds part of it. Matches limes.ErrConflict.
 var ErrLeaseNested error = &familyError{"limes: an ancestor holds a lease", limes.ErrConflict, CodeLeaseNested}
 
 // ErrFeatureDisabled — a store implements a feature its configuration
@@ -164,7 +165,7 @@ func refuseRequest(text detail.Text) error {
 	return detail.Wrap(invalidRequest("%s", text), text)
 }
 
-// refuseRequestf is an ErrInvalidRequest saying, for the log, what format
+// refuseRequestf is a limes.ErrInvalidRequest saying, for the log, what format
 // and args make, and carrying text, a constant naming the part of the
 // request refused and the rule it broke: what a client may be shown of it.
 func refuseRequestf(text detail.Text, format string, args ...any) error {

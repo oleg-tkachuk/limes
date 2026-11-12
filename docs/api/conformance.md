@@ -63,7 +63,7 @@ CheckCodes is CheckMapping of limes's codes, the meter's and the exchange's amon
 func CheckMapping[T comparable](t testing.TB, pinned map[limes.Code]T, answer func(limes.Code) T, opts ...Option)
 ```
 
-CheckMapping fails t for every way the consumer's answer to limes's codes — every one, but those opts leave out — differs from pinned, its record of the answers its mapping was written to give: a code answer maps otherwise than pinned, a code not pinned — unless AcceptNewByCategory passes it — and a code pinned that is not checked: which limes no longer answers, or opts left out. Each failure names the entry to pin, so the first failing run writes the table; failures come in the order of their codes' names, which no release changes.
+CheckMapping fails t for every way the consumer's answer to limes's codes — every one, but those opts leave out — differs from pinned, its record of the answers its mapping was written to give: a code answer maps otherwise than pinned, a code not pinned — unless AcceptNewByCategory passes it — and a code pinned that is not checked: which limes no longer answers, or opts left out. Each failure of a code checked names the entry to pin, so the first failing run writes the table; failures come in the order of their codes' names, which no release changes: those of the codes checked first, then those of the codes pinned and not checked.
 
 <sub>[limestest/limestest.go](../../limestest/limestest.go)</sub>
 <a id="limestest.Answer"></a>
@@ -146,7 +146,7 @@ Package storetest checks a limes.Store — and, when it is one, a limes.BiscuitR
 		storetest.Run(t, func(t *testing.T) storetest.Env { … })
 	}
 
-The checks cover what every caller relies on: a record reads back as it was written and is no caller's to change, a duplicate or unknown id is refused with the module's sentinel, Insert refuses a lineage it could not keep whole — a child past MaxDelegationDepth among it — and a tenant it cannot mint for, revocation reaches every descendant down to MaxDelegationDepth and outlasts time passing, purging drops a record with its revocation entries once it has been expired long enough — in batches, never before its children and never inside a verifier's leeway — listing pages in a fixed order and keeps tenants apart, and a Biscuit copy revokes on its own. When the store implements limes.TenantRecordEraser, erasing a tenant keeps what a verifier still needs; when Env.ScopesTenants is set, a call under another tenant's scope is refused with limes.ErrScopeMismatch, and when Env.ReadOnlyCtx is set, every write under a read-only scope is. When Env.Census is set, a census counts each record under one disposition — revoked, through an ancestor too, over expired over active — by tenant and by principal type, a page at a time, and counts no Biscuit copy. When Env.Lister is set, a listing of a tenant's records pages in both orders with no record skipped or repeated, filters by principal type, subject, subject prefix and disposition, gives each record the disposition the census counts it under, and shows no other tenant's; when the lister is a limes.RecordListingReader too, it reads each record as the listing gives it. When Env.BulkRevoker is set, each selector revokes exactly its capabilities, a batch at a time, in one tenant or, by client or session, in every tenant under Env.AllTenantsCtx alone, and a record's session and subject issuer read back, a child's its parent's; with Env.Census and Env.Lister too, a count and a listing by the same selectors name what it revokes. When Env.Exchanges is set, the first claim of a subject token wins, racing ones included, and Purge drops it with its capability. A check that does not finish within Env.CheckTimeout stops the test binary with every goroutine's stack, naming the check.
+The checks cover what every caller relies on: a record reads back as it was written and is no caller's to change, a duplicate or unknown id is refused with the module's sentinel, Insert refuses a lineage it could not keep whole — a child past MaxDelegationDepth among it — and a tenant it cannot mint for, revocation reaches every descendant down to MaxDelegationDepth and outlasts time passing, purging drops a record with its revocation entries once it has been expired long enough — in batches, never before its children and never inside a verifier's leeway — listing pages in a fixed order and keeps tenants apart, and a Biscuit copy revokes on its own. When the store implements limes.TenantRecordEraser, erasing a tenant keeps what a verifier still needs; when Env.ScopesTenants is set, a call under another tenant's scope is refused with limes.ErrScopeMismatch, and when Env.ReadOnlyCtx is set, every write under a read-only scope is. When Env.Census is set, a census counts each record under one disposition — revoked, through an ancestor too, over expired over active — by tenant and by principal type, a page at a time, and counts no Biscuit copy. When Env.Lister is set, a listing of a tenant's records pages in both orders with no record skipped or repeated, filters by principal type, subject, subject prefix and disposition, gives each record the disposition the census counts it under, and shows no other tenant's, while one of every tenant's gives them all in one id order; when the lister is a limes.RecordListingReader too, it reads each record as the listing gives it. When Env.BulkRevoker is set, each selector revokes exactly its capabilities, a batch at a time, in one tenant or, by client, session or subject issuer, in every tenant under Env.AllTenantsCtx alone, and a record's session and subject issuer read back, a child's its parent's; with Env.Census and Env.Lister too, a count and a listing by the same selectors name what it revokes. When Env.Exchanges is set, the first claim of a subject token wins, racing ones included, and Purge keeps the claim past its capability while the token can still be presented. A check that does not finish within Env.CheckTimeout stops the test binary with every goroutine's stack, naming the check.
 
 <a id="storetest.DefaultCheckTimeout"></a>
 
@@ -234,10 +234,11 @@ type Env struct {
 	// over the same records as Store. Optional: without it, the checks of
 	// limes.ExchangeStore are skipped.
 	Exchanges limes.ExchangeStore
-	// BulkRevoker revokes by subject, client or session over the same
-	// records as Store, which then records each capability's session.
-	// Optional: without it, the checks of limes.BulkRevoker and of sessions
-	// on record are skipped.
+	// BulkRevoker revokes by subject, client, session, on-behalf-of, agent
+	// run or subject issuer over the same records as Store, which then
+	// records each capability's session and subject issuer. Optional:
+	// without it, the checks of limes.BulkRevoker and of sessions and
+	// subject issuers on record are skipped.
 	BulkRevoker limes.BulkRevoker
 	// AllTenantsCtx is a context scoped to writing every tenant's rows, as
 	// housekeeping is (pgstore.WithAllTenants), for a revocation across
@@ -257,7 +258,7 @@ Env is one store under test, fresh for each check. Its fields mirror metertest.E
 
 `import "github.com/oleg-tkachuk/limes/metertest"`
 
-Package metertest checks a meter.UsageStore against the module's contract — its Meter, tenant budgets and housekeeping — the way testing/fstest checks an fs.FS. A UsageStore is the consumer's to write, and most of its contract lives in request fields — a store that ignores ExternalRef or Overrun still compiles, and then charges a repeated cost twice. Run it from the store's own tests:
+Package metertest checks a meter.UsageStore against the module's contract — its Meter, tenant budgets and housekeeping — the way testing/fstest checks an fs.FS. A UsageStore is the consumer's to write, and most of its contract lives in request fields: a store that ignores ExternalRef or Overrun still compiles, and then charges a repeated cost twice. Run it from the store's own tests:
 
 	func TestMeterContract(t *testing.T) {
 		metertest.Run(t, func(t *testing.T) metertest.Env { … })
@@ -265,7 +266,7 @@ Package metertest checks a meter.UsageStore against the module's contract — it
 
 A store that counts requests and spends nothing, a meter.RequestCounter, runs RunCounter instead: the checks of Bump alone, which Run runs too.
 
-The checks cover what a charge does at its ceilings and when it arrives again: rejection that moves nothing — by a Biscuit copy's, the capability's, an ancestor's or the tenant's ceiling, by a failed onCharged or onRefunded, under concurrent charges, siblings' and grandchildren's among them — idempotency on ExternalRef and on a settled reservation, also once the capability is gone (Env.DeleteCapability), on a ReservationID and on a RefundID, which goes with its charge, ChargeByRef, OverrunPolicyRecord past every ceiling, refunds, holds, their listing and their expiry, request counts, copy counters and CopyUsage, units, counters that never pass MaxNanos, a capability not on record and PurgeOrphans (Env.DeleteCapability), DeleteUsage, the tenant aggregate, its version guard and its listing, and the validation of the request; and, where the Env enables them, EraseTenantUsage, limes.ErrScopeMismatch under another tenant's scope and for every write under a read-only one, and a LedgerReader's sums, their order, paging, UTC buckets, period edges, late refunds and overflow, and, when the Ledger is a meter.LedgerHousekeeping, PurgeCharges to its retention. They need a real ledger, not a fake.
+The checks cover what a charge does at its ceilings and when it arrives again: rejection that moves nothing — by a Biscuit copy's, the capability's, an ancestor's or the tenant's ceiling, by a failed onCharged or onRefunded, under concurrent charges, siblings' and grandchildren's among them — idempotency on ExternalRef and on a settled reservation, also once the capability is gone (Env.DeleteCapability), on a ReservationID and on a RefundID, which goes with its charge; ChargeByRef, OverrunPolicyRecord past every ceiling, refunds, holds, their listing and their expiry, request counts, copy counters and CopyUsage, units, counters that never pass MaxNanos, a capability not on record and PurgeOrphans (Env.DeleteCapability), DeleteUsage, the tenant aggregate, its version guard and its listing, and the validation of the request. Where the store or the Env enables them, they cover leases (meter.Leaser), EraseTenantUsage, ReleaseMatching, ListTenantReservations, limes.ErrScopeMismatch under another tenant's scope and for every write under a read-only one, a LedgerReader's sums, their order, paging, UTC buckets, period edges, late refunds and overflow, and, when the Ledger is a meter.LedgerHousekeeping, PurgeCharges to its retention. They need a real ledger, not a fake.
 
 Concurrent calls that each promise to move one thing once — refunds of one charge, settles and releases of one hold, top-ups of one lease, charges racing EraseTenantUsage, writes of a tenant ceiling at one version — are held to moving it once.
 
@@ -380,7 +381,7 @@ type CounterEnv struct {
 	// is refused with limes.ErrScopeMismatch and counts nothing. Optional:
 	// without it, that check is skipped.
 	ScopesTenants bool
-	// ReadOnlyCtx is a context scoped to reading and writing nothing, under
+	// ReadOnlyCtx is a context scoped to reading, writing nothing, under
 	// which a Bump is refused with limes.ErrScopeMismatch. Optional: without
 	// it, that check is skipped.
 	ReadOnlyCtx context.Context
@@ -416,9 +417,9 @@ type Env struct {
 	CheckTimeout time.Duration
 	// Advance moves the store's clock forward by d. Optional: without it,
 	// the checks that need time to pass are skipped or cut short — a hold's
-	// expiry and ReleaseExpired, its batches, a hold dating the tenant
-	// budget, the accounting period's start, and the ledger's day and week
-	// buckets.
+	// and a lease's expiry and ReleaseExpired, its batches, a hold dating the
+	// tenant budget, the accounting period's start, the ledger's buckets,
+	// period edges and late refunds, and PurgeCharges.
 	Advance func(d time.Duration)
 	// DeleteCapability removes a capability's record, as Store.Purge does
 	// once it has expired. Optional: without it, the checks of what follows
@@ -449,8 +450,9 @@ type Env struct {
 	Ledger meter.LedgerReader
 	// Now reads the store's clock, which stands still while a check runs
 	// but for Advance. Optional: without it, the checks of the ledger's
-	// time buckets, of a hold ending with its capability and of a hold
-	// dating the tenant budget are skipped.
+	// buckets, period edges and late refunds, of PurgeCharges, of a hold
+	// ending with its capability and of a hold dating the tenant budget are
+	// skipped.
 	Now func() time.Time
 	// ExpiryNow and AdvanceExpiry read and move the clock the store
 	// measures holds' and leases' expiry by, where that is not the clock Now
@@ -509,7 +511,7 @@ Package dpoptest checks a dpop.ReplayCache and a dpop.Nonces against the package
 		dpoptest.RunReplayCache(t, func(t *testing.T) dpoptest.ReplayEnv { … })
 	}
 
-The checks cover what the verifier relies on: a proof id is new once and a replay ever after, while it can still be accepted; ids of different keys never collide; a holder's share counts its proofs whatever key signed them, and one past it is refused with dpop.ErrReplayQuota rather than as a replay; concurrent proofs carrying one id let exactly one through; a nonce issued is valid, and one never issued or expired is not.
+The checks cover what the verifier relies on: a proof id is new once and a replay ever after, while it can still be accepted; ids of different keys never collide; a holder's share counts its proofs whatever key signed them, and one past it is refused with dpop.ErrReplayQuota rather than as a replay, until its ids expire; concurrent proofs carrying one id let exactly one through; a nonce issued is valid, and one never issued or expired is not.
 
 <a id="dpoptest.DefaultCheckTimeout"></a>
 
@@ -583,12 +585,12 @@ type ReplayEnv struct {
 	// Now reads the cache's clock. Optional: without it, time.Now.
 	Now func() time.Time
 	// Advance moves the cache's clock forward by d. Optional, with Now:
-	// without both, the check that an id is remembered until it expires is
-	// skipped.
+	// without both, the checks that an id is remembered until it expires
+	// and that a holder's share frees once its ids expire are skipped.
 	Advance func(d time.Duration)
 	// EntriesPerHolder is how many live ids the cache holds for one holder
-	// before it refuses the next with dpop.ErrReplayQuota. Optional: without it, the
-	// checks of that share are skipped.
+	// before it refuses the next with dpop.ErrReplayQuota. Optional: without
+	// it, the checks of that share are skipped.
 	EntriesPerHolder int
 	// CheckTimeout bounds one check, setup aside: past it the suite panics
 	// with every goroutine's stack, naming the check, rather than leave a
@@ -712,8 +714,8 @@ type OnePerToken struct {
 	// Request is an exchange the Exchanger grants, of a subject token no
 	// earlier call returned.
 	Request func(t *testing.T) exchange.Request
-	// NoJTI is an exchange the Exchanger would grant but that its subject
-	// token carries no jti.
+	// NoJTI is an exchange the Exchanger would grant but for its subject
+	// token carrying no jti.
 	NoJTI func(t *testing.T) exchange.Request
 	// Revoke revokes the capability id, as the consumer's operators do.
 	Revoke func(t *testing.T, id uuid.UUID)

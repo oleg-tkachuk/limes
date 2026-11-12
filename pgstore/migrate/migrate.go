@@ -38,12 +38,13 @@ const (
 
 // Options configures Run.
 type Options struct {
-	// RuntimeRoles are the roles the stores serve as: roles that do not own
-	// the tables, so row-level security binds them. Each gets USAGE on the
+	// RuntimeRoles are the roles the stores serve as: roles that own nothing
+	// in the schema, which pgstore.CheckSchema checks. Each gets USAGE on the
 	// schema, SELECT, INSERT, UPDATE and DELETE on its tables, SELECT alone
 	// on the version table (for CheckSchema), EXECUTE on its functions —
-	// which no other role has — and the same on every table a later
-	// migration creates. Granting is idempotent, so each Run grants again.
+	// which no other role has — USAGE on its sequences, and the same on
+	// every table and sequence a later migration creates (ddl.Grants). An
+	// empty name, or "public" in any case, is refused (ddl.CheckRuntimeRoles). Granting is idempotent, so each Run grants again.
 	// Empty: Run grants nothing, and the roles are the consumer's to grant
 	// (Grants).
 	RuntimeRoles []string
@@ -51,8 +52,9 @@ type Options struct {
 
 // Run brings the store's schema up to the one this version of the package
 // queries, running each migration not yet applied in order, then grants the
-// runtime roles opts names. Run it before the stores serve, as the role that
-// owns the schema, and before any migration of the consumer's that refers to
+// runtime roles opts names. It refuses a nil conn with limes.ErrInvalidRequest,
+// and a schema of its name owned by another role with ErrSchemaOwner. Run it
+// before the stores serve, as the role that owns the schema, and before any migration of the consumer's that refers to
 // its tables.
 //
 // It holds a session advisory lock while it migrates, so replicas starting
@@ -65,7 +67,7 @@ type Options struct {
 //
 // Migration 014, which pgstore v0.31.0 brought, now builds its three indexes
 // CONCURRENTLY, outside a transaction, holding no writes, as every later
-// migration that indexes an existing table does, so a Migrate at startup
+// migration that indexes an existing table does, so a Run at startup
 // holds none. Its first form, in v0.31.0 and the releases up to the one that
 // changed it, built them with a plain CREATE INDEX, which held writes to
 // limes.capabilities and limes.revocations for some seconds on a million
@@ -114,7 +116,7 @@ func Run(ctx context.Context, conn *pgx.Conn, opts Options) error {
 // ownSchema creates the store's schema, which the version table lives in,
 // so it comes first; and refuses one of its name made earlier by another
 // role, which is that role's to change: it could drop or replace the tables
-// and policies Migrate puts in it.
+// and policies Run puts in it.
 func ownSchema(ctx context.Context, conn *pgx.Conn) error {
 	if _, err := conn.Exec(ctx, "CREATE SCHEMA IF NOT EXISTS "+pgx.Identifier{schema}.Sanitize()); err != nil {
 		return fmt.Errorf("migrate: create schema: %w", err)
@@ -130,7 +132,8 @@ func ownSchema(ctx context.Context, conn *pgx.Conn) error {
 }
 
 // loadMigrations is a migrator holding the embedded migrations, as tern
-// renders them. With no conn it only holds them, as Steps reads them.
+// renders them. With no conn it only holds them, as a test that holds
+// Steps to tern's reads them.
 func loadMigrations(ctx context.Context, conn *pgx.Conn) (*tern.Migrator, error) {
 	m, err := tern.NewMigrator(ctx, conn, versionTable)
 	if err != nil {

@@ -81,7 +81,7 @@ The well-known paths the metadata documents are served under (RFC 9728 §3, RFC 
 const AuthorizationDetailsTypeCaveats = "https://github.com/oleg-tkachuk/limes/exchange#caveats"
 ```
 
-AuthorizationDetailsTypeCaveats is the RFC 9396 type of the authorization\_details entry an introspection answer carries: an active capability's caveats, its members those of the token's limes\_caveats claim.
+AuthorizationDetailsTypeCaveats is the RFC 9396 type of the authorization\_details entry an introspection answer carries, as does a token response to a request with authorization\_details: an active capability's caveats, its members those of the token's limes\_caveats claim.
 
 <sub>[exchange/introspect.go](../../exchange/introspect.go)</sub>
 <a id="exchange.BearerMethodHeader"></a>
@@ -187,7 +187,7 @@ The refusals of an exchange, one per RFC 6749 §5.2 error (and RFC 8707's invali
 func AuthorizationServerMetadataURL(issuer string) (string, error)
 ```
 
-AuthorizationServerMetadataURL is where the metadata of the authorization server with issuer identifier issuer is served (RFC 8414 §3.1).
+AuthorizationServerMetadataURL is where the metadata of the authorization server with issuer identifier issuer is served (RFC 8414 §3.1). An issuer that is not an https URL without a query or fragment is limes.ErrInvalidConfig.
 
 <sub>[exchange/metadata.go](../../exchange/metadata.go)</sub>
 <a id="exchange.ErrorCodes"></a>
@@ -209,7 +209,7 @@ ErrorCodes is every error code ErrorOf answers with, in a fixed order.
 func NewAuthorizationServerMetadataHandler(md AuthorizationServerMetadata) (http.Handler, error)
 ```
 
-NewAuthorizationServerMetadataHandler serves md as the token exchange's metadata, setting its grant and response types, and refusing a document whose issuer or endpoints are not https URLs.
+NewAuthorizationServerMetadataHandler serves md as the token exchange's metadata to GET and HEAD, setting its grant and response types. It refuses with limes.ErrInvalidConfig a document whose issuer is not an https URL without a query or fragment (RFC 8414 §2), or whose token endpoint, or JWKS URI when set, is not an https URL without a fragment.
 
 <sub>[exchange/metadata.go](../../exchange/metadata.go)</sub>
 <a id="exchange.NewResourceMetadataHandler"></a>
@@ -220,7 +220,7 @@ NewAuthorizationServerMetadataHandler serves md as the token exchange's metadata
 func NewResourceMetadataHandler(md ResourceMetadata) (http.Handler, error)
 ```
 
-NewResourceMetadataHandler serves md, refusing a document whose resource or authorization servers are not https URLs without a fragment.
+NewResourceMetadataHandler serves md to GET and HEAD, BearerMethodsSupported defaulted. It refuses with limes.ErrInvalidConfig a document whose resource is not an https URL without a fragment, that names no authorization server, or that names one that is not an https URL without a query or fragment (RFC 8414 §2).
 
 <sub>[exchange/metadata.go](../../exchange/metadata.go)</sub>
 <a id="exchange.ParseErrorResponse"></a>
@@ -253,7 +253,7 @@ ResourceChallenge is the WWW-Authenticate value an MCP server answers a request 
 func ResourceMetadataURL(resource string) (string, error)
 ```
 
-ResourceMetadataURL is where the metadata of the resource identified by resource is served: the well-known path between its host and its path (RFC 9728 §3.1).
+ResourceMetadataURL is where the metadata of the resource identified by resource is served: the well-known path between its host and its path (RFC 9728 §3.1). A resource that is not an https URL without a fragment is limes.ErrInvalidConfig.
 
 <sub>[exchange/metadata.go](../../exchange/metadata.go)</sub>
 <a id="exchange.WithResourceMetadata"></a>
@@ -354,13 +354,14 @@ type Config struct {
 	// this mode a subject token without a jti is refused; an exchange of a
 	// capability revoked or expired is refused, never issued anew; one with
 	// a proof by another key than the capability is bound to, or none for a
-	// bound one, or one for a bearer one, is refused; one asking for other
-	// targets than the capability's audience is refused; and a policy that
-	// names no TTL gets the subject token's remaining lifetime, not the
-	// Issuer's default. The policy still runs on every exchange: it names the
-	// tenant. Nil: every exchange issues a capability of its own. The
-	// Issuer's store must read records back (limes.RecordReader), as every
-	// limes.Store does.
+	// bound one, or one for a bearer one, is refused; all with
+	// ErrInvalidGrant. One whose audience, as the policy draws it from the
+	// targets, is not the capability's is refused with ErrTargetExchanged.
+	// A policy that names no TTL gets the subject token's remaining
+	// lifetime, not the Issuer's default. The policy still runs on every
+	// exchange: it names the tenant. Nil: every exchange issues a capability
+	// of its own. The Issuer's store must read records back
+	// (limes.RecordReader), as every limes.Store does.
 	Exchanges limes.ExchangeStore
 	// Now is the clock. Nil: time.Now.
 	Now func() time.Time
@@ -382,12 +383,12 @@ type Decision struct {
 	Issue limes.IssueRequest
 	// Scopes are the scopes granted, each one the grant asked for: the
 	// token response states them as its scope (RFC 6749 §5.1, RFC 8693
-	// §2.2.1). Empty grants none: a policy granting every scope asked
-	// sets Scopes to Grant.Scopes. A grant that asked for scopes and is granted none
-	// is refused with ErrInvalidScope, since a response without scope
-	// would state every scope asked. A scope not asked for is the
-	// policy's fault, answered as the server's failure. A scope named
-	// twice is stated once.
+	// §2.2.1). Empty grants none: a policy granting every scope asked sets
+	// Scopes to Grant.Scopes. A grant that asked for scopes and is granted
+	// none is refused with ErrInvalidScope, since a response without scope
+	// would state every scope asked. A scope not asked for is the policy's
+	// fault, answered as the server's failure. A scope named twice is
+	// stated once.
 	Scopes []string
 }
 ```
@@ -406,7 +407,9 @@ type Error struct {
 	// named none (RFC 9110 §15.5.2).
 	Status int `json:"-"`
 	// Code is the error code: RFC 6749 §5.2's, RFC 8707's invalid_target,
-	// RFC 9396's invalid_authorization_details, or RFC 9449's DPoP codes.
+	// RFC 9396's invalid_authorization_details, RFC 9449's DPoP codes, or
+	// temporarily_unavailable (RFC 6749 §4.1.2.1) for a client past its
+	// share of the DPoP replay cache.
 	Code string `json:"error"`
 	// Description is a fixed, client-safe sentence; never the error's text.
 	Description string `json:"error_description,omitempty"`
@@ -513,7 +516,7 @@ Handler is an RFC 8693 token endpoint over an Exchanger, for a gateway or a toke
 func NewHandler(cfg HandlerConfig) (*Handler, error)
 ```
 
-NewHandler builds a Handler, refusing a config without an exchanger or a client authenticator, or one that checks DPoP with no endpoint URL.
+NewHandler builds a Handler, refusing with limes.ErrInvalidConfig a config without an exchanger or a client authenticator, one whose Exchanger checks DPoP or narrows capabilities with no endpoint URL, or a negative MaxBodyBytes.
 
 <sub>[exchange/handler.go](../../exchange/handler.go)</sub>
 <a id="exchange.Handler.ServeHTTP"></a>
@@ -542,16 +545,17 @@ type HandlerConfig struct {
 	// exchange: 400 unauthorized_client. One that is or wraps ErrServerError
 	// is the server's failure: 500 server_error, the error logged at ERROR
 	// and kept out of the body, so name the client in it. Any other error
-	// refuses the client
-	// as not authenticated, ErrInvalidClient: invalid_client, 401 with a
-	// challenge in the scheme of its Authorization header, or 400 when it
-	// sent none (mTLS, a client assertion). Required.
+	// refuses the client as not authenticated, ErrInvalidClient:
+	// invalid_client, 401 with a challenge in the scheme of its
+	// Authorization header, or 400 when it sent none (mTLS, a client
+	// assertion). Required.
 	Authenticate func(r *http.Request) (Client, error)
 	// EndpointURL is the token endpoint's URL as clients call it, which
-	// their DPoP proofs name (htu). Required when Exchanger checks DPoP.
+	// their DPoP proofs name (htu). Required when the Exchanger checks DPoP
+	// or narrows capabilities (Config.DPoP or Config.Capabilities).
 	EndpointURL string
 	// MaxBodyBytes bounds the request body the Handler reads. Zero:
-	// DefaultMaxBodyBytes. A request whose form the caller parsed already —
+	// DefaultMaxBodyBytes; negative is refused. A request whose form the caller parsed already —
 	// one /token path serving several grants — is read from r.PostForm, its
 	// body left unread, so the caller's own bound is the one that applies;
 	// the Handler still checks its content type, and drops empty values
@@ -578,9 +582,9 @@ type IntrospectionConfig struct {
 	// RFC 7662 §2.1 requires, so the endpoint is no oracle for whoever holds
 	// a token. An error that is or wraps ErrUnauthorizedClient refuses one
 	// authenticated but not allowed to introspect: 400 unauthorized_client.
-	// One that is or wraps ErrServerError is answered 500 server_error, as
-	// the token endpoint answers it. Any other error refuses it as ErrInvalidClient, answered as the token
-	// endpoint answers it (HandlerConfig.Authenticate). Required.
+	// One that is or wraps ErrServerError is answered 500 server_error, and
+	// any other error refuses it as ErrInvalidClient, both as the token
+	// endpoint answers them (HandlerConfig.Authenticate). Required.
 	Authenticate func(r *http.Request) (Client, error)
 	// Audiences are the audiences of the tokens a client may learn about
 	// (RFC 7662 §4): a token whose aud names none of them is answered
@@ -592,10 +596,12 @@ type IntrospectionConfig struct {
 	// gateways trusted with every audience, can reach. It excludes
 	// Audiences.
 	AnyAudience bool
-	// MaxBodyBytes bounds the request body. Zero: DefaultMaxBodyBytes.
+	// MaxBodyBytes bounds the request body. Zero: DefaultMaxBodyBytes;
+	// negative is refused.
 	MaxBodyBytes int64
 	// Logger logs every answer: active at INFO, inactive at WARN with the
-	// reason, the server's failures at ERROR. Nil: slog.Default().
+	// reason, the server's failures at ERROR, as is a Biscuit copy answered
+	// inactive because Verifier does not meter copies. Nil: slog.Default().
 	Logger *slog.Logger
 }
 ```
@@ -624,7 +630,7 @@ IntrospectionHandler is an RFC 7662 token introspection endpoint, for a gateway 
 func NewIntrospectionHandler(cfg IntrospectionConfig) (*IntrospectionHandler, error)
 ```
 
-NewIntrospectionHandler builds an IntrospectionHandler, refusing a config without a verifier or a client authenticator, or that names neither the audiences each client may learn about nor AnyAudience, or both.
+NewIntrospectionHandler builds an IntrospectionHandler, refusing with limes.ErrInvalidConfig a config without a verifier or a client authenticator, one that names neither the audiences each client may learn about nor AnyAudience, or both, or a negative MaxBodyBytes.
 
 <sub>[exchange/introspect.go](../../exchange/introspect.go)</sub>
 <a id="exchange.IntrospectionHandler.ServeHTTP"></a>
@@ -665,7 +671,7 @@ NarrowDecision is what a NarrowPolicy grants: the child to delegate, and the sco
 type NarrowPolicy func(ctx context.Context, n Narrowing) (NarrowDecision, error)
 ```
 
-NarrowPolicy turns a narrowing into the child to delegate and the scopes granted, or refuses it with ErrInvalidTarget, ErrInvalidScope or ErrInvalidAuthorizationDetails, as a Policy does. Its DelegateRequest's Parent is set by the Exchanger; its Audience must be drawn from the narrowing's resources and audiences, or be empty to take them all; its ConfirmationJKT must be empty. Issuer.Delegate holds the child to the parent: narrower caveats, an audience within the parent's, an end no later.
+NarrowPolicy turns a narrowing into the child to delegate and the scopes granted, or refuses it with ErrInvalidTarget, ErrInvalidScope or ErrInvalidAuthorizationDetails, as a Policy does. The Exchanger sets its DelegateRequest's Parent; its Audience must be drawn from the narrowing's resources and audiences, or be empty to take them all; its ConfirmationJKT must be empty. limes.Issuer.Delegate holds the child to the parent: narrower caveats, an audience within the parent's, an end no later.
 
 <sub>[exchange/narrow.go](../../exchange/narrow.go)</sub>
 <a id="exchange.NarrowRequest"></a>
@@ -688,13 +694,13 @@ type NarrowRequest struct {
 	AuthorizationDetails json.RawMessage
 	// DPoP is the request's proof. For a parent bound to a key it is the
 	// proof of holding it, over the subject token, and the child keeps the
-	// binding; for an unbound parent, a token request's proof (RFC 9449 Â§5)
+	// binding; for an unbound parent, a token request's proof (RFC 9449 §5)
 	// binds the child to its key, and none leaves the child a bearer one.
 	DPoP dpop.Proof
 }
 ```
 
-NarrowRequest is an exchange of a capability for a narrower one, for a sub-agent: the capability is the subject token (RFC 8693 Â§2.1), of type IssuedTokenTypeCapability.
+NarrowRequest is an exchange of a capability for a narrower one, for a sub-agent: the capability is the subject token (RFC 8693 §2.1), of type IssuedTokenTypeCapability.
 
 <sub>[exchange/narrow.go](../../exchange/narrow.go)</sub>
 <a id="exchange.Narrowing"></a>
@@ -722,7 +728,7 @@ Narrowing is what a NarrowPolicy decides on: the verified parent, its client, an
 type Policy func(ctx context.Context, g Grant) (Decision, error)
 ```
 
-Policy turns a grant into the capability to issue and the scopes granted, or refuses it with ErrInvalidGrant, ErrInvalidTarget, ErrInvalidScope or ErrInvalidAuthorizationDetails. It refuses authorization\_details of a type it does not understand (RFC 9396 §5). Its Decision.Issue's Audience must be drawn from the grant's resources and audiences, or be empty to take them all; its ConfirmationJKT must be empty, the Exchanger setting it from the proof; its TTL, the Issuer's default when zero (limes.Issuer.DefaultTTL), is capped at the subject token's remaining lifetime. Nothing is granted that the policy did not choose: there is no default policy. A subject token may be exchanged again and again until it expires, each exchange issuing a capability of its own, with ceilings of its own, unless Config.Exchanges issues one capability per subject token: a policy that grants a budget per user, not per exchange, keys it on Grant.Subject (its Issuer and Subject). Set both ceilings explicitly: Caveats.Requests to a Max or Unlimited, since Issue refuses a capability no request can use and the exchange answers that as the server's failure; Caveats.Budget to what it may spend, the zero budget being none.
+Policy turns a grant into the capability to issue and the scopes granted, or refuses it with ErrInvalidGrant, ErrInvalidTarget, ErrInvalidScope or ErrInvalidAuthorizationDetails. It refuses authorization\_details of a type it does not understand (RFC 9396 §5). In its Decision.Issue, Audience must be drawn from the grant's resources and audiences, or be empty to take them all; ConfirmationJKT must be empty, the Exchanger setting it from the proof; SubjectIssuer, when set, must be the subject token's issuer, and OnBehalfOf, when set, must name its subject; an empty SubjectIssuer, Session or ClientID takes the subject token's. TTL, the Issuer's default when zero (limes.Issuer.DefaultTTL; the subject token's remaining lifetime under Config.Exchanges), is capped at the subject token's remaining lifetime. A Decision.Issue breaking these is the policy's fault, answered as the server's failure. Nothing is granted that the policy did not choose: there is no default policy. A subject token may be exchanged again and again until it expires, each exchange issuing a capability of its own, with ceilings of its own, unless Config.Exchanges issues one capability per subject token: a policy that grants a budget per user, not per exchange, keys it on Grant.Subject (its Issuer and Subject). Set both ceilings explicitly: Caveats.Requests to a Max or Unlimited, since Issue refuses a capability no request can use and the exchange answers that as the server's failure; Caveats.Budget to what it may spend, the zero budget being none.
 
 <sub>[exchange/exchange.go](../../exchange/exchange.go)</sub>
 <a id="exchange.Request"></a>
@@ -1031,7 +1037,7 @@ Verifier is the exchange.SubjectVerifier for JWT access tokens (RFC 9068), verif
 func New(cfg Config) (*Verifier, error)
 ```
 
-New builds a Verifier, refusing a config with no issuer or no keys, or one accepting a symmetric algorithm.
+New builds a Verifier, refusing with limes.ErrInvalidConfig a config with no issuer or no keys, an algorithm outside DefaultAlgorithms() (a symmetric one among them), or a negative ClockSkew or one beside NoClockSkew.
 
 <sub>[exchange/jwtverify/jwtverify.go](../../exchange/jwtverify/jwtverify.go)</sub>
 <a id="jwtverify.Verifier.VerifySubject"></a>
@@ -1042,6 +1048,6 @@ New builds a Verifier, refusing a config with no issuer or no keys, or one accep
 func (v *Verifier) VerifySubject(ctx context.Context, token string) (exchange.Subject, error)
 ```
 
-VerifySubject verifies token as an RFC 9068 access token of the configured issuer: its type and algorithm, its signature under the issuer's keys, its lifetime, and every claim the profile requires. A token it refuses is exchange.ErrInvalidGrant; keys it cannot get are another error, the server's.
+VerifySubject verifies token as an RFC 9068 access token of the configured issuer: its type and algorithm, its signature under the issuer's keys (the key its kid names, which it must name), its lifetime, and every claim the profile requires. A token it refuses is exchange.ErrInvalidGrant; keys it cannot get are another error, the server's.
 
 <sub>[exchange/jwtverify/jwtverify.go](../../exchange/jwtverify/jwtverify.go)</sub>

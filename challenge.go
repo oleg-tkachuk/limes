@@ -53,8 +53,9 @@ const (
 
 // Problem is an RFC 9457 problem details object.
 type Problem struct {
-	// Type is a URI naming the kind of problem: the refusal's Reason after
-	// a fixed base, or for a refusal with none the family it belongs to.
+	// Type is a URI naming the kind of problem, after a fixed base
+	// (ProblemTypeURI): a refusal's Reason, or for a refusal with none the
+	// family it belongs to; for any other error, its Code.
 	Type string `json:"type"`
 	// Title is a short, fixed summary of the kind.
 	Title string `json:"title"`
@@ -134,7 +135,9 @@ var internalError = refusal{status: http.StatusInternalServerError, slug: "inter
 // challenge, and hands out a fresh nonce with use_dpop_nonce; when it cannot
 // give one, it logs why (VerifierConfig.Logger) and answers the server's
 // failure, 500, for a challenge without a nonce is one the client cannot
-// satisfy.
+// satisfy. An error it has no answer for — ErrInvalidRequest's family but
+// ErrMalformedAuthorization, ErrNotFound, a store's own failure — is
+// answered 500, without its text.
 func (v *Verifier) ErrorResponse(ctx context.Context, err error, scheme AuthScheme) ErrorResponse {
 	// The first rule err matches answers it; none, the server's fault.
 	r, kind := internalError, internalError.slug

@@ -13,8 +13,10 @@ import (
 	"github.com/oleg-tkachuk/limes"
 )
 
-// Store implements limes.Store and limes.BiscuitRevocationStore: capability
-// records, their revocation entries and the revoked Biscuit copies.
+// Store implements limes.Store, limes.BiscuitRevocationStore,
+// limes.RevocationLineageLookup, limes.BulkRevoker, limes.ExchangeStore and
+// limes.TenantRecordEraser: capability records, their revocation entries,
+// the revoked Biscuit copies and the token exchanges.
 type Store struct {
 	conn
 }
@@ -51,10 +53,13 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
 )
 
 // Insert records req.Capability and who asked for it. The parent must be on
-// record, in the same tenant, and expire no earlier than the child, and the
-// child may have no more than limes.MaxDelegationDepth ancestors on record.
-// A tenant whose usage EraseTenantUsage removed is refused with
-// limes.ErrTenantErased.
+// record (else limes.ErrInvalidRequest), in the same tenant and expire no
+// earlier than the child (else limes.ErrDelegationTooWide), and count its
+// budget in the same unit (else limes.ErrUnitCodeMismatch); the child may
+// have no more than limes.MaxDelegationDepth ancestors on record (else
+// limes.ErrDelegationTooDeep). An id on record is limes.ErrAlreadyExists. A
+// tenant erased by EraseTenant or UsageStore.EraseTenantUsage is refused
+// with limes.ErrTenantErased.
 func (s *Store) Insert(ctx context.Context, req limes.InsertRequest) error {
 	if err := req.Validate(); err != nil {
 		return err
@@ -352,8 +357,9 @@ ON CONFLICT (capability_id) DO NOTHING`
 // Revoke writes the capability's revocation entry, and with CascadeChildren
 // one for every descendant. Each entry also marks its record, and every
 // record below it not marked already, revoked — the flag the census and the
-// listing read (migrate/ddl/migrations/015_revoked_flag.sql) — one UPDATE a generation,
-// by key and by parent, inside this transaction. It first takes the
+// listing read (migrate/ddl/migrations/015_revoked_flag.sql, walked once
+// per statement since 043_mark_revoked_per_statement.sql) — one UPDATE a
+// generation, by key, inside this transaction. It first takes the
 // tenant's revoke lock alone, which every insert of a child shares
 // (lockForRevoke): the revoke waits for the inserts and revokes of the
 // tenant already running, and those that come after wait for it, so no
@@ -453,8 +459,9 @@ DELETE FROM limes.capabilities c USING locked WHERE c.id = locked.id`
 // $1: none of those tokens can be presented again.
 const sqlPurgeExchanges = `DELETE FROM limes.exchanges WHERE token_expires_at < $1`
 
-// Purge removes the capabilities expired for longer than the retention, and
-// the exchanges whose subject tokens did: an exchange outlives its capability
+// Purge removes the capabilities expired for longer than the retention, a
+// batch of at most req.Limit (zero: limes.DefaultHousekeepingLimit), and
+// every exchange whose subject token did: an exchange outlives its capability
 // while its token can be presented (limes.ExchangeStore).
 func (s *Store) Purge(ctx context.Context, req limes.PurgeRequest) (limes.PurgeResult, error) {
 	if err := req.Validate(); err != nil {

@@ -15,7 +15,7 @@ import (
 )
 
 // NarrowRequest is an exchange of a capability for a narrower one, for a
-// sub-agent: the capability is the subject token (RFC 8693 Â§2.1), of type
+// sub-agent: the capability is the subject token (RFC 8693 §2.1), of type
 // IssuedTokenTypeCapability.
 type NarrowRequest struct {
 	// Client is the client asking; its ID is required, for the log and as
@@ -32,7 +32,7 @@ type NarrowRequest struct {
 	AuthorizationDetails json.RawMessage
 	// DPoP is the request's proof. For a parent bound to a key it is the
 	// proof of holding it, over the subject token, and the child keeps the
-	// binding; for an unbound parent, a token request's proof (RFC 9449 Â§5)
+	// binding; for an unbound parent, a token request's proof (RFC 9449 §5)
 	// binds the child to its key, and none leaves the child a bearer one.
 	DPoP dpop.Proof
 }
@@ -61,12 +61,11 @@ type NarrowDecision struct {
 
 // NarrowPolicy turns a narrowing into the child to delegate and the scopes
 // granted, or refuses it with ErrInvalidTarget, ErrInvalidScope or
-// ErrInvalidAuthorizationDetails, as a Policy does. Its DelegateRequest's
-// Parent is
-// set by the Exchanger; its Audience must be drawn from the narrowing's
+// ErrInvalidAuthorizationDetails, as a Policy does. The Exchanger sets its
+// DelegateRequest's Parent; its Audience must be drawn from the narrowing's
 // resources and audiences, or be empty to take them all; its
-// ConfirmationJKT must be empty. Issuer.Delegate holds the child to the
-// parent: narrower caveats, an audience within the parent's, an end no
+// ConfirmationJKT must be empty. limes.Issuer.Delegate holds the child to
+// the parent: narrower caveats, an audience within the parent's, an end no
 // later.
 type NarrowPolicy func(ctx context.Context, n Narrowing) (NarrowDecision, error)
 

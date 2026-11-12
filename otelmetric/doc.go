@@ -35,18 +35,19 @@
 //
 // NewStoreEvents returns the callbacks a usage store reports to
 // (pgstore.Config.Events): limes.tenant.wait, a histogram in seconds of how
-// long each metered call waited for its tenant's aggregate row, by
+// long each metered call waited for its tenant's row — the aggregate's, or
+// its stripe's where the store stripes an unlimited tenant — by
 // limes.operation, the store call:
 //
 //	events, err := otelmetric.NewStoreEvents(otelmetric.WithMeterProvider(provider))
 //	store, err := pgstore.NewUsageStore(pgstore.Config{DB: pool, Events: events})
 //
 // InstrumentRevocationCache reports a limes.RevocationCache's counts —
-// hits, misses, upstream lookups, evictions and entries, each by kind
-// (capability or biscuit), its clears, whole and narrow, and the revocation
-// signal: whether lineage and a signal vouch for it, the signal's
-// connections, losses and notifications — as observable instruments,
-// read only when the provider collects:
+// hits, misses, upstream lookups, evictions, stale answers and entries, each
+// by kind (capability or biscuit), its clears, whole and narrow, and the
+// revocation signal: whether lineage and a signal vouch for it, the
+// signal's connections, losses and notifications — as observable
+// instruments, read only when the provider collects:
 //
 //	reg, err := otelmetric.InstrumentRevocationCache(cache,
 //		otelmetric.WithMeterProvider(provider))

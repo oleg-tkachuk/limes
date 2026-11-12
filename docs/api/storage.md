@@ -117,7 +117,7 @@ ErrCursorRepeated is a page that hands back a cursor the walk has already fetche
 var ErrNotFound = errors.New("limes: not found")
 ```
 
-ErrNotFound is the family of every not-found error: Store.GetRecord returns it, and the meter's not-found sentinels (meter.ErrUsageNotFound and the others) match it under errors.Is. It lives in the core package rather than in a store implementation so that any consumer — in-memory, relational, or otherwise — can satisfy the Store contract using only what this package publishes.
+ErrNotFound is the family of every not-found error: Store.GetRecord returns it, and the meter's not-found sentinels (meter.ErrUsageNotFound and the others) match it under errors.Is. It lives in the core package so that any store can satisfy the Store contract using only what this package publishes.
 
 The verifier never returns it: an id not on record is refused as ErrUnrecorded, or taken as not revoked under VerifierConfig.AllowUnrecorded.
 
@@ -242,7 +242,7 @@ ClaimExchangeRequest is ExchangeStore.ClaimExchange's request: the capability an
 func (r ClaimExchangeRequest) Validate() error
 ```
 
-Validate refuses what ExchangeKey.Validate refuses, and a request with no TokenExpiresAt.
+Validate refuses what ExchangeKey.Validate refuses, and, as ErrInvalidRequest, a request with no TokenExpiresAt.
 
 <sub>[exchange_store.go](../../exchange_store.go)</sub>
 <a id="limes.CountRecordsRequest"></a>
@@ -287,7 +287,7 @@ CountRecordsRequest asks for one page of record counts.
 func (r CountRecordsRequest) Validate() error
 ```
 
-Validate refuses a request that names no tenant and not every tenant, or both, a negative window, or a negative page size.
+Validate refuses, as ErrInvalidRequest, a request that names no tenant and not every tenant, or both, a negative window, a negative page size, or a selector that is not valid UTF-8 or holds a NUL.
 
 <sub>[census.go](../../census.go)</sub>
 <a id="limes.EraseTenantRequest"></a>
@@ -315,7 +315,7 @@ EraseTenantRequest names the tenant EraseTenantRecords erases and who asked, rec
 func (r EraseTenantRequest) Validate() error
 ```
 
-Validate refuses a request naming no tenant.
+Validate refuses, as ErrInvalidRequest, a request naming no tenant, or a Note or Actor that is not valid UTF-8 or holds a NUL.
 
 <sub>[erase_tenant.go](../../erase_tenant.go)</sub>
 <a id="limes.EraseTenantResult"></a>
@@ -363,7 +363,7 @@ ExchangeKey names one subject token an exchange issues one capability for (docs/
 func (k ExchangeKey) Validate() error
 ```
 
-Validate refuses a key without a tenant, an issuer or a token id.
+Validate refuses, as ErrInvalidRequest, a key without a tenant, an issuer or a token id, or whose issuer or token id is not valid UTF-8 or holds a NUL.
 
 <sub>[exchange_store.go](../../exchange_store.go)</sub>
 <a id="limes.ExchangeStore"></a>
@@ -426,7 +426,7 @@ InsertRequest is a capability to record, and who asked for it.
 func (r InsertRequest) Validate() error
 ```
 
-Validate refuses, as ErrInvalidRequest, a capability with no id — nothing could read it back, and the zero id is what a root's ParentID holds — and one with no expiry: no verifier accepts it, Purge never removes it, and a child under it would outlive nothing. Every text it carries, the capability's included, is valid UTF-8 without NUL (docs/compatibility.md): what a store cannot keep as it is is refused, not kept altered.
+Validate refuses, as ErrInvalidRequest, a capability with no id — nothing could read it back, and the zero id is what a root's ParentID holds — one with no expiry: no verifier accepts it, Purge never removes it, and a child under it would outlive nothing — and a child naming a Session or a SubjectIssuer, which takes its parent's. Every text it carries, the capability's included, is valid UTF-8 without NUL (docs/compatibility.md): what a store cannot keep as it is is refused, not kept altered.
 
 <sub>[store.go](../../store.go)</sub>
 <a id="limes.IssuanceStore"></a>
@@ -450,22 +450,21 @@ type IssuanceStore interface {
 	// An id already on record returns ErrAlreadyExists and changes nothing.
 	// It refuses what InsertRequest.Validate refuses, a parent not on
 	// record as ErrInvalidRequest, a child expiring after its parent or in
-	// another tenant as
-	// ErrDelegationTooWide, a child whose budget names another unit than its
-	// parent's as ErrUnitCodeMismatch — metering a child spends from every
-	// ancestor, so a lineage counts in one unit — and a child that would have
-	// more than MaxDelegationDepth ancestors still on record — counted as
-	// IsRevoked counts them — as ErrDelegationTooDeep: Purge and the
-	// IsRevoked walk rely on a lineage that is whole, no deeper than the
-	// walk reaches, expires from the leaves up and stays in one tenant, so a
-	// store that scopes rows by tenant sees all of it. A refused record is
-	// not written. A
-	// store that knows tenants returns ErrUnknownTenant or ErrTenantDeleted
-	// for a tenant it cannot mint for. A store beside a meter.TenantUsageEraser
+	// another tenant as ErrDelegationTooWide, a child whose budget names
+	// another unit than its parent's as ErrUnitCodeMismatch — metering a
+	// child spends from every ancestor, so a lineage counts in one unit —
+	// and a child that would have more than MaxDelegationDepth ancestors
+	// still on record — counted as IsRevoked counts them — as
+	// ErrDelegationTooDeep: Purge and the IsRevoked walk rely on a lineage
+	// that is whole, no deeper than the walk reaches, expires from the
+	// leaves up and stays in one tenant, so a store that scopes rows by
+	// tenant sees all of it. A refused record is not written. A store that
+	// knows tenants returns ErrUnknownTenant or ErrTenantDeleted for a
+	// tenant it cannot mint for. A store beside a meter.TenantUsageEraser
 	// refuses a tenant whose usage it erased as ErrTenantErased, until
-	// PurgeOrphans forgets the mark. The Issuer answers those two refusals
-	// as ErrDelegationDepthExceeded and ErrTenantGone: no presented
-	// capability was revoked.
+	// PurgeOrphans forgets the mark. The Issuer answers ErrDelegationTooDeep
+	// and ErrTenantErased as ErrDelegationDepthExceeded and ErrTenantGone:
+	// no presented capability was revoked.
 	Insert(ctx context.Context, req InsertRequest) error
 
 	// IsRevoked reports whether the capability, or any ancestor of it
@@ -501,7 +500,7 @@ type ListByPrincipalRequest struct {
 	IncludeRevoked bool
 	// Cursor is the one the previous page returned; empty for the first.
 	Cursor string
-	// Limit is the page size; see PageLimit.
+	// Limit is the page size; see PageLimit. Negative is refused.
 	Limit int
 	// contains filtered or unexported fields
 }
@@ -518,7 +517,7 @@ ListByPrincipalRequest is the input shape for Store.ListByPrincipal.
 func (r ListByPrincipalRequest) Validate() error
 ```
 
-Validate reports whether the request names a principal. Every error matches ErrInvalidRequest.
+Validate reports whether the request names a principal, refusing as well a negative limit and a subject that is not valid UTF-8 or holds a NUL. Every error matches ErrInvalidRequest.
 
 <sub>[store.go](../../store.go)</sub>
 <a id="limes.ListOrder"></a>
@@ -631,7 +630,7 @@ Admits reports whether a record of disposition d is one r lists: r names no disp
 func (r ListRecordsRequest) Validate() error
 ```
 
-Validate refuses a request that names neither a tenant nor AllTenants, or both, an unknown principal type, both a subject and a subject prefix, an unknown disposition or order, or a negative page size. Every error matches ErrInvalidRequest.
+Validate refuses a request that names neither a tenant nor AllTenants, or both, an unknown principal type, both a subject and a subject prefix, an unknown disposition or order, a negative page size, or a text filter that is not valid UTF-8 or holds a NUL. Every error matches ErrInvalidRequest.
 
 <sub>[listing.go](../../listing.go)</sub>
 <a id="limes.Page"></a>
@@ -658,8 +657,8 @@ type PurgeRequest struct {
 	// Zero: MinPurgeRetention; anything shorter, negative included, is
 	// refused.
 	ExpiredFor time.Duration
-	// Limit bounds the records removed. Zero: DefaultHousekeepingLimit; negative
-	// is refused.
+	// Limit bounds the records removed. Zero: DefaultHousekeepingLimit;
+	// negative is refused.
 	Limit int
 	// contains filtered or unexported fields
 }
@@ -687,7 +686,7 @@ Retention is how long a capability must have been expired to go: ExpiredFor, or 
 func (r PurgeRequest) Validate() error
 ```
 
-Validate refuses a retention shorter than MinPurgeRetention, other than zero, and a negative limit.
+Validate refuses, as ErrInvalidRequest, a retention shorter than MinPurgeRetention, other than zero, and a negative limit.
 
 <sub>[store.go](../../store.go)</sub>
 <a id="limes.PurgeResult"></a>
@@ -1005,7 +1004,7 @@ RevokeRequest is the input shape for Store.Revoke.
 func (r RevokeRequest) Validate() error
 ```
 
-Validate refuses a request naming no capability, as ErrInvalidRequest: nothing could be revoked under the zero id, and answering ErrNotFound would hide the caller's bug.
+Validate refuses, as ErrInvalidRequest, a request naming no capability — nothing could be revoked under the zero id, and answering ErrNotFound would hide the caller's bug — and a Note or Actor that is not valid UTF-8 or holds a NUL.
 
 <sub>[store.go](../../store.go)</sub>
 <a id="limes.RevokeResult"></a>
@@ -1026,8 +1025,8 @@ type RevokeResult struct {
 	// PriorDisposition is the capability's disposition just before the
 	// call, by the rules and the clock RecordCensus and RecordListingReader
 	// use: revoked — by its own entry or through an ancestor — then
-	// expired, then active. Only a revoke of an active capability stopped something new.
-	// AlreadyRevoked implies RecordDispositionRevoked. Unspecified when the
+	// expired, then active. Only a revoke of an active capability stopped
+	// something new. AlreadyRevoked implies RecordDispositionRevoked. Unspecified when the
 	// store could not tell — a chain past MaxDelegationDepth — though it
 	// wrote the entry all the same.
 	PriorDisposition RecordDisposition
@@ -1060,10 +1059,11 @@ type Store interface {
 	// Purge never removes a capability while a child of it stays on record:
 	// a child expires no later than its parent (Insert refuses one that
 	// would not), and among records expiring together Purge takes the
-	// deepest first. The IsRevoked walk and the Meter's lineage, which stop
-	// at the first ancestor no longer on record, therefore miss no
-	// revocation and no ceiling. Once records go, meter.UsageHousekeeping.PurgeOrphans
-	// releases what the meter still holds for them.
+	// deepest first. The IsRevoked walk and the meter.Meter's lineage, which
+	// stop at the first ancestor no longer on record, therefore miss no
+	// revocation and no ceiling. Once records go,
+	// meter.UsageHousekeeping.PurgeOrphans releases what the meter still
+	// holds for them.
 	Purge(ctx context.Context, req PurgeRequest) (PurgeResult, error)
 
 	// ListByPrincipal lists the capabilities issued to one principal, in
@@ -1091,9 +1091,8 @@ type TenantRecordEraser interface {
 	// revocation entry and its Biscuit copies' — and no other: an id not on
 	// record is not revoked, so a record removed while its token may still
 	// verify would let that token through again. Purge takes the rest as
-	// it expires. It
-	// changes no other tenant's records, and a second call revokes and
-	// removes nothing the first left.
+	// it expires. It changes no other tenant's records, and a second call
+	// revokes and removes nothing the first left.
 	EraseTenantRecords(ctx context.Context, req EraseTenantRequest) (EraseTenantResult, error)
 }
 ```
@@ -1367,7 +1366,7 @@ Purge implements limes.Store, oldest expiry first and, among records expiring to
 func (s *Store) RevocationLineage(_ context.Context, id uuid.UUID) (limes.RevocationAnswer, error)
 ```
 
-RevocationLineage implements limes.RevocationLineageLookup: IsRevoked's answer, and the ancestors still on record it read, nearest first; an id not on record is ErrNotFound.
+RevocationLineage implements limes.RevocationLineageLookup: IsRevoked's answer, and the ancestors still on record it read, nearest first; an id not on record is limes.ErrNotFound.
 
 <sub>[memstore/memstore.go](../../memstore/memstore.go)</sub>
 <a id="memstore.Store.Revoke"></a>
@@ -1451,7 +1450,7 @@ NewUsageStore returns an empty usage store.
 func (s *UsageStore) Bump(_ context.Context, req meter.BumpRequest) (meter.BumpReceipt, error)
 ```
 
-Bump returns ErrRequestLimitExceeded WITHOUT mutating when the increment would cross the capability's ceiling or any ancestor's. A rejected call must be safe to retry.
+Bump returns limes.ErrRequestLimitExceeded WITHOUT mutating when the increment would cross a copy's ceiling, the capability's or any ancestor's. A rejected call must be safe to retry.
 
 <sub>[memstore/memstore.go](../../memstore/memstore.go)</sub>
 <a id="memstore.UsageStore.Charge"></a>
@@ -1501,7 +1500,7 @@ CopyUsage implements meter.CopyUsageReader.
 func (s *UsageStore) DeleteUsage(_ context.Context, req meter.DeleteUsageRequest) error
 ```
 
-DeleteUsage drops the capability's counters and releases its holds first: nothing could settle or release them once it is gone, and they would keep counting against its ancestors and its tenant.
+DeleteUsage drops the capability's counters and its copies' counters, first releasing its holds and settling the leases of it and of those below it: nothing could settle or release them once it is gone, and they would keep counting against its ancestors and its tenant.
 
 <sub>[memstore/memstore.go](../../memstore/memstore.go)</sub>
 <a id="memstore.UsageStore.EraseTenantUsage"></a>
@@ -1512,7 +1511,7 @@ DeleteUsage drops the capability's counters and releases its holds first: nothin
 func (s *UsageStore) EraseTenantUsage(_ context.Context, req meter.EraseTenantUsageRequest) (meter.EraseTenantUsageResult, error)
 ```
 
-EraseTenantUsage implements meter.TenantUsageEraser: it drops the tenant's holds, counters, copies' counters, ledger entries and aggregate, and counts what it dropped.
+EraseTenantUsage implements meter.TenantUsageEraser: it drops the tenant's holds, leases, counters, copies' counters, ledger entries and aggregate, counts what it dropped, and marks the tenant erased on the Records store.
 
 <sub>[memstore/memstore.go](../../memstore/memstore.go)</sub>
 <a id="memstore.UsageStore.GetCharge"></a>
@@ -1622,7 +1621,7 @@ ListTenantReservations implements meter.TenantReservationLister: the tenant's ho
 func (s *UsageStore) PurgeOrphans(_ context.Context, req meter.PurgeOrphansRequest) (meter.PurgeOrphansResult, error)
 ```
 
-PurgeOrphans drops the counters of capabilities no longer on record, a batch at a time, releasing their holds first.
+PurgeOrphans drops the counters of capabilities no longer on record, a batch at a time, releasing their holds and settling their leases first, then forgets the erased mark of each tenant with no record left.
 
 <sub>[memstore/memstore.go](../../memstore/memstore.go)</sub>
 <a id="memstore.UsageStore.Refund"></a>
@@ -1655,7 +1654,7 @@ Release ends a reservation without charging. Idempotent; a hold of another capab
 func (s *UsageStore) ReleaseExpired(_ context.Context, req meter.ReleaseExpiredRequest) (meter.ReleaseExpiredResult, error)
 ```
 
-ReleaseExpired releases every hold past its expiry.
+ReleaseExpired releases the holds past their expiry, soonest expired first, at most a batch (meter.HousekeepingLimit), then settles every lease past its expiry.
 
 <sub>[memstore/memstore.go](../../memstore/memstore.go)</sub>
 <a id="memstore.UsageStore.ReleaseMatching"></a>
@@ -1749,7 +1748,7 @@ UsageStoreConfig configures a UsageStore.
 
 `import "github.com/oleg-tkachuk/limes/pgstore"`
 
-Package pgstore is the reference implementation of the limes storage contracts over PostgreSQL: limes.Store, limes.BiscuitRevocationStore, limes.RevocationLineageLookup and limes.BulkRevoker for capability records and revocations, limes.ExchangeStore for token exchange, meter.UsageStore and meter.CopyUsageReader for the meter, meter.LedgerReader, limes.RecordCensus and limes.RecordLister for reports, meter.LedgerHousekeeping for bounding the ledger, limes.TenantRecordEraser and meter.TenantUsageEraser for removing a tenant, and dpop.ReplayCache (ReplayCache) for DPoP proof ids shared by every replica of a verifier. It passes the module's own contract suites, storetest and metertest, which is how a consumer knows it keeps every rule a store must keep.
+Package pgstore is the reference implementation of the limes storage contracts over PostgreSQL: limes.Store, limes.BiscuitRevocationStore, limes.RevocationLineageLookup and limes.BulkRevoker for capability records and revocations, limes.ExchangeStore for token exchange, meter.UsageStore, meter.CopyUsageReader, meter.Leaser, meter.MatchingReleaser and meter.TenantReservationLister for the meter, meter.LedgerReader, limes.RecordCensus, limes.RecordLister and limes.RecordListingReader for reports, meter.LedgerHousekeeping for bounding the ledger, limes.TenantRecordEraser and meter.TenantUsageEraser for removing a tenant, and dpop.ReplayCache (ReplayCache) for DPoP proof ids shared by every replica of a verifier. It passes the module's own contract suites, storetest and metertest, which is how a consumer knows it keeps every rule a store must keep.
 
 Create the schema once, as the role that owns it, with pgstore/migrate — which a migration job alone imports, so a binary that serves links none of it — granting the role the stores serve as; then build both stores over a pool of that role:
 
@@ -1763,7 +1762,7 @@ CheckSchema returns ErrSchemaMismatch while the schema is not the version this p
 
 The schema needs PostgreSQL 15 or later: the meter reads the records through a view that runs as its caller (security\_invoker), so their row-level security binds it as it binds a read of the table.
 
-Every call runs in one READ COMMITTED transaction on one connection, whatever the database's default — but for the two revocation checks, each a single statement (see Tenants) — and every time it writes or compares against comes from Config.Now, but one: with Config.Now nil, the usage store measures holds' and leases' expiry by the database's clock, now(), the time its transaction began. The replicas of a service share the database and not their clocks: one running ahead would release another's live holds as expired, or refuse their Settle with meter.ErrReservationNotFound. One clock writes and compares a hold's lifetime — its expiry is the database's time plus its TTL, and Settle, Reserve, Lease, a charge or a bump under a lease and ReleaseExpired decide by it. With Config.Now set, that clock decides expiry too, as a test that moves it needs.
+Every call runs in READ COMMITTED transactions on one connection, whatever the database's default — one per call, but for a call that settles leases, each in a transaction of its own, and for the revocation checks (IsRevoked, IsBiscuitRevoked, RevocationLineage), each a single statement (see Tenants) — and every time it writes or compares against comes from Config.Now, but one: with Config.Now nil, the usage store measures holds' and leases' expiry by the database's clock, now(), the time its transaction began. The replicas of a service share the database and not their clocks: one running ahead would release another's live holds as expired, or refuse their Settle with meter.ErrReservationNotFound. One clock writes and compares a hold's lifetime — its expiry is the database's time plus its TTL, and Settle, Reserve, Lease, a charge or a bump under a lease and ReleaseExpired decide by it. With Config.Now set, that clock decides expiry too, as a test that moves it needs.
 
 A capability's expiry is another clock's: the issuer's, which wrote it, and whether the token has expired is its verifier's to decide, by its own clock and leeway. The store does not decide it again by its clock. It ends a hold or a lease no later than the capability's expiry plus a grace — limes.MaxLeeway, the widest leeway a verifier gives, and limes.PurgeClockSkew, how far behind the store's its clock may run — and refuses Reserve and Lease with limes.ErrExpired only past that, where no verifier could still accept the token and its record may be purged (limes.MinPurgeRetention).
 
@@ -1773,7 +1772,7 @@ Charge and Settle hand onCharged the charge's transaction, and Refund hands onRe
 
 Every table keeps its rows' tenant, and the schema's row-level security binds every role — the tables' owner too — to the tenant a call is scoped to, short of a superuser or a role with BYPASSRLS: pass WithTenant(ctx, tenant) to a call for one tenant, WithAllTenants(ctx) to housekeeping (Purge, ReleaseExpired, PurgeOrphans, Ledger.PurgeCharges), and WithAllTenantsReadOnly(ctx) to a read across tenants, such as ListTenantBudgets: its policies admit reads only, and a call that writes under it is refused with limes.ErrScopeMismatch, as one is under a Scope of the consumer's that sets the same read-only setting. A call scoped to none sees no row and writes none. IsRevoked and IsBiscuitRevoked see every tenant whatever the scope: the verifier asks them before it knows the token's tenant, on every request, so each is one statement calling a function of the schema that runs as the tables' owner and scopes itself to every tenant, read only, for its own query — one round trip, no transaction. Only the roles migrate.Run grants (migrate.Options.RuntimeRoles) may execute the schema's functions. migrate.Run runs as the owner, scoped to every tenant for its run; serve as a role that owns nothing, which CheckSchema checks, so that no call can turn the policies off. Config.CheckTenant lets a consumer that keeps its own tenants refuse one it does not hold.
 
-A call whose request names its tenant — Insert, ListByPrincipal, Bump, Charge, Reserve, Settle, Release, GetTenantBudget, SetTenantBudget, the erasers, Ledger.SumCharges, Census.ListRecords and Census.CountRecords for one tenant — under a scope that does not admit that tenant returns limes.ErrScopeMismatch rather than answer as if the tenant's rows were not there (Config.CheckScope). A call that names only an id cannot be checked so, and answers a row out of scope as not found.
+A call whose request names its tenant — Insert, ListByPrincipal, RevokeMatching, ExchangedFor, ClaimExchange, Bump, Charge, Reserve, Settle, Release, Lease, SettleLease, ListTenantReservations, GetTenantBudget, SetTenantBudget, the erasers, and ReleaseMatching, Ledger.SumCharges, Census.ListRecords and Census.CountRecords for one tenant — under a scope that does not admit that tenant returns limes.ErrScopeMismatch rather than answer as if the tenant's rows were not there (Config.CheckScope). A call that names only an id cannot be checked so, and answers a row out of scope as not found.
 
 The schema notifies RevocationChannel on every statement that writes a revocation; a RevocationWatcher beside each verifier clears its revocation caches then, so a revocation reaches every replica at once rather than within the caches' TTL.
 
@@ -1783,7 +1782,7 @@ To remove a tenant, Store.EraseTenant revokes its capabilities, removes the reco
 
 #### Throughput
 
-A tenant's ceiling holds exactly because every call that moves the tenant's spend or holds — Charge, Reserve, Settle, Refund, Release, ReleaseExpired, SetTenantBudget — locks the tenant's budget row for the rest of its transaction. One tenant's charges therefore commit one at a time, whichever capabilities they are on: its throughput is about one charge per charge transaction, and adding connections or replicas does not raise it. Different tenants' charges do not wait on each other, nor does any tenant's Bump, which counts requests and takes no tenant lock, nor IsRevoked. In the package's benchmarks, against PostgreSQL on the same host, a charge transaction took 1.4–3ms — some 350–700 charges a second for one tenant (BenchmarkChargeParallel beside BenchmarkChargeParallelTenants). A network between the service and the database adds its round trip to every statement of the transaction, and onCharged and onRefunded run inside it, holding the lock: keep them short. A tenant that needs more charges a second than that is a sizing question — fewer, larger charges, as Reserve and Settle allow, or a lease for each worker, whose charges lock the lease and not the row — not a setting. A tenant with no ceiling counted in stripes locks no row at all: its calls add to a stripe of their connection's (docs/adr/0022-unlimited-tenant-aggregate.md).
+A tenant's ceiling holds exactly because every call that moves the tenant's spend or holds — Charge, Reserve, Settle, Refund, Release, ReleaseExpired, Lease, SettleLease, SetTenantBudget — locks the tenant's budget row for the rest of its transaction. One tenant's charges therefore commit one at a time, whichever capabilities they are on: its throughput is about one charge per charge transaction, and adding connections or replicas does not raise it. Different tenants' charges do not wait on each other, nor does any tenant's Bump, which counts requests and takes no tenant lock, nor IsRevoked. In the package's benchmarks, against PostgreSQL on the same host, a charge transaction took 1.4–3ms — some 350–700 charges a second for one tenant (BenchmarkChargeParallel beside BenchmarkChargeParallelTenants). A network between the service and the database adds its round trip to every statement of the transaction, and onCharged and onRefunded run inside it, holding the lock: keep them short. A tenant that needs more charges a second than that is a sizing question — fewer, larger charges, as Reserve and Settle allow, or a lease for each worker, whose charges lock the lease and not the row — not a setting. A tenant with no ceiling counted in stripes locks no row at all: its calls add to a stripe of their connection's (docs/adr/0022-unlimited-tenant-aggregate.md).
 
 <a id="pgstore.SettingTenant"></a><a id="pgstore.SettingAllTenants"></a><a id="pgstore.SettingAllTenantsOn"></a><a id="pgstore.SettingAllTenantsRead"></a>
 
@@ -1989,7 +1988,7 @@ The transaction is the callback's while it runs, and no longer: once it returns,
 func WithAllTenants(ctx context.Context) context.Context
 ```
 
-WithAllTenants scopes the calls made with ctx to every tenant, to read and write: for housekeeping (Store.Purge, UsageStore.ReleaseExpired and PurgeOrphans). A read across tenants takes WithAllTenantsReadOnly. A call scoped to none sees no row at all.
+WithAllTenants scopes the calls made with ctx to every tenant, to read and write: for housekeeping (Store.Purge, UsageStore.ReleaseExpired and PurgeOrphans, Ledger.PurgeCharges) and for RevokeMatching and ReleaseMatching with AllTenants. A read across tenants takes WithAllTenantsReadOnly. A call scoped to none sees no row at all.
 
 <sub>[pgstore/scope.go](../../pgstore/scope.go)</sub>
 <a id="pgstore.WithAllTenantsReadOnly"></a>
@@ -2011,7 +2010,7 @@ WithAllTenantsReadOnly scopes the calls made with ctx to reading every tenant's 
 func WithTenant(ctx context.Context, tenant uuid.UUID) context.Context
 ```
 
-WithTenant scopes the calls made with ctx to one tenant: under the row-level security of the store's schema, a role that does not own the tables sees and writes that tenant's rows only.
+WithTenant scopes the calls made with ctx to one tenant: under the row-level security of the store's schema, a role it binds — any but a superuser or one with BYPASSRLS, the tables' owner too — sees and writes that tenant's rows only.
 
 <sub>[pgstore/scope.go](../../pgstore/scope.go)</sub>
 <a id="pgstore.Census"></a>
@@ -2127,12 +2126,12 @@ type Config struct {
 	// as they are. Nil: every tenant is one the store can mint for.
 	CheckTenant func(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error
 	// CheckScope runs after Scope in the transaction of every call whose
-	// request names its tenant — Insert, ListByPrincipal, Bump, Charge,
-	// Reserve, Settle, Release, GetTenantBudget, SetTenantBudget, EraseTenant,
-	// EraseTenantRecords, EraseTenantUsage, Ledger.SumCharges and
-	// Census.ListRecords and Census.CountRecords for one tenant — and
-	// refuses one
-	// whose scope does not admit that tenant with limes.ErrScopeMismatch,
+	// request names its tenant — Insert, ListByPrincipal, RevokeMatching,
+	// ExchangedFor, ClaimExchange, Bump, Charge, Reserve, Settle, Release,
+	// Lease, SettleLease, ListTenantReservations, GetTenantBudget,
+	// SetTenantBudget, EraseTenant, EraseTenantRecords, EraseTenantUsage, and
+	// ReleaseMatching, Ledger.SumCharges, Census.ListRecords and
+	// Census.CountRecords for one tenant — and refuses one whose scope does not admit that tenant with limes.ErrScopeMismatch,
 	// which the call returns as it is. Nil, under the default Scope: the
 	// call's WithTenant or WithAllTenants decides, and with neither
 	// CheckSchemaScope does. Nil beside a Scope of the consumer's: no check,
@@ -2233,7 +2232,7 @@ type Erased struct {
 }
 ```
 
-Erased is what EraseTenant hands its callback once the store's rows of the tenant are gone, in the transaction that removes them. Like the result it carries, it does not compare, so a field added in 1.x breaks no caller.
+Erased is what EraseTenant hands its callback once the store has erased the tenant, in the transaction that erases it. Like the result it carries, it does not compare, so a field added in 1.x breaks no caller.
 
 <sub>[pgstore/erase.go](../../pgstore/erase.go)</sub>
 <a id="pgstore.Ledger"></a>
@@ -2246,7 +2245,7 @@ type Ledger struct {
 }
 ```
 
-Ledger implements meter.LedgerReader over the store's charges ledger.
+Ledger implements meter.LedgerReader and meter.LedgerHousekeeping over the store's charges ledger.
 
 A charge carries the store's time, so a test of a report backdates its charges through Config.Now rather than by writing the charges table, whose columns are this package's own: build the stores on a clock the test sets, record a capability that outlives the period, and move the clock forward before each charge.
 
@@ -2290,7 +2289,7 @@ PurgeCharges implements meter.LedgerHousekeeping: the charges taken more than re
 func (l *Ledger) SumCharges(ctx context.Context, req meter.SumChargesRequest) (limes.Page[meter.ChargeSum], error)
 ```
 
-SumCharges implements meter.LedgerReader, in one transaction scoped to the tenant (Config.CheckScope) or, with AllTenants, to every tenant to read (WithAllTenantsReadOnly), as ListTenantBudgets is.
+SumCharges implements meter.LedgerReader, in one transaction scoped to the tenant (Config.CheckScope) or, with AllTenants, to every tenant (WithAllTenantsReadOnly or WithAllTenants), as ListTenantBudgets is.
 
 <sub>[pgstore/ledger.go](../../pgstore/ledger.go)</sub>
 <a id="pgstore.ReplayCache"></a>
@@ -2461,7 +2460,7 @@ type Store struct {
 }
 ```
 
-Store implements limes.Store and limes.BiscuitRevocationStore: capability records, their revocation entries and the revoked Biscuit copies.
+Store implements limes.Store, limes.BiscuitRevocationStore, limes.RevocationLineageLookup, limes.BulkRevoker, limes.ExchangeStore and limes.TenantRecordEraser: capability records, their revocation entries, the revoked Biscuit copies and the token exchanges.
 
 <sub>[pgstore/store.go](../../pgstore/store.go)</sub>
 <a id="pgstore.NewStore"></a>
@@ -2549,7 +2548,7 @@ GetRecord reads back the capability, who issued it and its own revocation.
 func (s *Store) Insert(ctx context.Context, req limes.InsertRequest) error
 ```
 
-Insert records req.Capability and who asked for it. The parent must be on record, in the same tenant, and expire no earlier than the child, and the child may have no more than limes.MaxDelegationDepth ancestors on record. A tenant whose usage EraseTenantUsage removed is refused with limes.ErrTenantErased.
+Insert records req.Capability and who asked for it. The parent must be on record (else limes.ErrInvalidRequest), in the same tenant and expire no earlier than the child (else limes.ErrDelegationTooWide), and count its budget in the same unit (else limes.ErrUnitCodeMismatch); the child may have no more than limes.MaxDelegationDepth ancestors on record (else limes.ErrDelegationTooDeep). An id on record is limes.ErrAlreadyExists. A tenant erased by EraseTenant or UsageStore.EraseTenantUsage is refused with limes.ErrTenantErased.
 
 <sub>[pgstore/store.go](../../pgstore/store.go)</sub>
 <a id="pgstore.Store.IsBiscuitRevoked"></a>
@@ -2593,7 +2592,7 @@ ListByPrincipal lists one principal's capabilities a page at a time; the cursor 
 func (s *Store) Purge(ctx context.Context, req limes.PurgeRequest) (limes.PurgeResult, error)
 ```
 
-Purge removes the capabilities expired for longer than the retention, and the exchanges whose subject tokens did: an exchange outlives its capability while its token can be presented (limes.ExchangeStore).
+Purge removes the capabilities expired for longer than the retention, a batch of at most req.Limit (zero: limes.DefaultHousekeepingLimit), and every exchange whose subject token did: an exchange outlives its capability while its token can be presented (limes.ExchangeStore).
 
 <sub>[pgstore/store.go](../../pgstore/store.go)</sub>
 <a id="pgstore.Store.RevocationLineage"></a>
@@ -2615,7 +2614,7 @@ RevocationLineage implements limes.RevocationLineageLookup: IsRevoked's answer, 
 func (s *Store) Revoke(ctx context.Context, req limes.RevokeRequest) (limes.RevokeResult, error)
 ```
 
-Revoke writes the capability's revocation entry, and with CascadeChildren one for every descendant. Each entry also marks its record, and every record below it not marked already, revoked — the flag the census and the listing read (migrate/ddl/migrations/015\_revoked\_flag.sql) — one UPDATE a generation, by key and by parent, inside this transaction. It first takes the tenant's revoke lock alone, which every insert of a child shares (lockForRevoke): the revoke waits for the inserts and revokes of the tenant already running, and those that come after wait for it, so no stream of delegations under the capability holds it back. Its row locks on the subtree then last until it commits. A metered call's lineage lock (FOR KEY SHARE) does not conflict with the mark, so charges neither wait for a revoke nor hold one back. A cascading revoke marks the subtree once, with its root's entry; a capability under one revoked before costs nothing past its own row. The first entry of each stands, and the result carries the capability's.
+Revoke writes the capability's revocation entry, and with CascadeChildren one for every descendant. Each entry also marks its record, and every record below it not marked already, revoked — the flag the census and the listing read (migrate/ddl/migrations/015\_revoked\_flag.sql, walked once per statement since 043\_mark\_revoked\_per\_statement.sql) — one UPDATE a generation, by key, inside this transaction. It first takes the tenant's revoke lock alone, which every insert of a child shares (lockForRevoke): the revoke waits for the inserts and revokes of the tenant already running, and those that come after wait for it, so no stream of delegations under the capability holds it back. Its row locks on the subtree then last until it commits. A metered call's lineage lock (FOR KEY SHARE) does not conflict with the mark, so charges neither wait for a revoke nor hold one back. A cascading revoke marks the subtree once, with its root's entry; a capability under one revoked before costs nothing past its own row. The first entry of each stands, and the result carries the capability's.
 
 <sub>[pgstore/store.go](../../pgstore/store.go)</sub>
 <a id="pgstore.Store.RevokeBiscuit"></a>
@@ -2637,7 +2636,7 @@ RevokeBiscuit lists one copy's revocation id under its capability; the first ent
 func (s *Store) RevokeMatching(ctx context.Context, req limes.RevokeMatchingRequest) (limes.RevokeMatchingResult, error)
 ```
 
-RevokeMatching implements limes.BulkRevoker, scoped to the request's tenant as every call naming a tenant is (Config.CheckScope): under the tenant's revoke lock, as Revoke, an entry for a batch of its matching capabilities that have none. With AllTenants it runs under a scope that admits writing every tenant (WithAllTenants), refusing any narrower as limes.ErrScopeMismatch, and a batch spans at most maxTenantsPerBatch tenants, each under its revoke lock.
+RevokeMatching implements limes.BulkRevoker, scoped to the request's tenant as every call naming a tenant is (Config.CheckScope): under the tenant's revoke lock, as Revoke, an entry for a batch of its matching capabilities that have none. With AllTenants it runs under a scope that admits writing every tenant (WithAllTenants), refusing any narrower as limes.ErrScopeMismatch, and a batch spans at most 16 tenants, each under its revoke lock; one cut there reports More.
 
 <sub>[pgstore/bulk_revoke.go](../../pgstore/bulk_revoke.go)</sub>
 <a id="pgstore.TableErase"></a>
@@ -2659,8 +2658,9 @@ TableErase is what Store.EraseTenant does to a tenant's rows in a table.
 const (
 	// EraseRemoves: the erase removes every row of the tenant.
 	EraseRemoves TableErase = iota + 1
-	// EraseKeepsUntilPurge: the rows of records not yet due stay, revoked,
-	// until Store.Purge removes the records and these rows with them.
+	// EraseKeepsUntilPurge: the rows stay, those of records not yet due
+	// revoked, until Store.Purge removes them: with their record, or, for
+	// exchanges, once their subject token has expired.
 	EraseKeepsUntilPurge
 	// EraseMarks: the erase adds the tenant's row, which UsageStore.PurgeOrphans
 	// removes once none of the tenant's records is left.
@@ -2708,9 +2708,9 @@ type UsageStore struct {
 }
 ```
 
-UsageStore implements meter.UsageStore and meter.CopyUsageReader: request and spend counters, holds, the charges ledger and the tenant aggregates. It reads each capability's lineage and ceilings from the records a Store over the same database keeps.
+UsageStore implements meter.UsageStore, meter.CopyUsageReader, meter.Leaser, meter.MatchingReleaser, meter.TenantReservationLister, meter.TenantUsageEraser and meter.FeatureGate: request and spend counters, holds, the charges ledger and the tenant aggregates. It reads each capability's lineage and ceilings from the records a Store over the same database keeps.
 
-Every call locks what it changes in one order — holds by id, then the capabilities' counters by id, then the copies' by revocation id, then the tenant aggregate, then the ledger — so two calls never wait on each other in a cycle (lock\_order\_test.go; docs/adr/0018-fewer-round-trips-per-charge.md). onCharged runs on the call's own transaction: it is the pgx.Tx it is handed.
+Every call locks what it changes in one order — holds by id, then the capabilities' counters by id, then the copies' by revocation id, then the tenant aggregate, then the ledger — so two calls never wait on each other in a cycle (lock\_order\_test.go; docs/adr/0018-fewer-round-trips-per-charge.md). onCharged runs on the call's own transaction, which TxFrom reads from the context it is handed.
 
 A call whose COMMIT left and whose answer did not come back — the connection failed or the context ended first — returns an error matching meter.ErrOutcomeUnknown, wrapping the cause: it may have committed. Bump, Charge, Reserve, Settle, Release, Refund and the leases' calls log it at WARN. One the database answered, or that sent nothing, never does. A keyed id (ChargeRequest.ExternalRef, ReserveRequest.ReservationID, RefundRequest.RefundID) makes the call safe to send again; refunds recorded under one are kept in limes.refunds, removed with their charge.
 
@@ -2778,7 +2778,7 @@ CopyUsage returns the counters of each copy named that has been used.
 func (s *UsageStore) DeleteUsage(ctx context.Context, req meter.DeleteUsageRequest) error
 ```
 
-DeleteUsage drops a capability's counters and its copies', releasing its holds first: nothing could settle or release them once it is gone.
+DeleteUsage drops a capability's counters and its copies', settling its lease and those below it and releasing its holds first: nothing could settle or release them once it is gone.
 
 <sub>[pgstore/usage.go](../../pgstore/usage.go)</sub>
 <a id="pgstore.UsageStore.EraseTenantUsage"></a>
@@ -2789,7 +2789,7 @@ DeleteUsage drops a capability's counters and its copies', releasing its holds f
 func (s *UsageStore) EraseTenantUsage(ctx context.Context, req meter.EraseTenantUsageRequest) (meter.EraseTenantUsageResult, error)
 ```
 
-EraseTenantUsage implements meter.TenantUsageEraser: it marks the tenant erased and removes its holds, aggregate, counters, copies' counters and charges in one transaction scoped to the tenant (Config.CheckScope), counting the rows each statement removed.
+EraseTenantUsage implements meter.TenantUsageEraser: it marks the tenant erased and removes its holds, aggregate, counters, copies' counters and charges in one transaction scoped to the tenant (Config.CheckScope), counting the holds, counters, copies' counters and charges removed.
 
 <sub>[pgstore/erase.go](../../pgstore/erase.go)</sub>
 <a id="pgstore.UsageStore.FeatureEnabled"></a>
@@ -2910,7 +2910,7 @@ ListTenantReservations implements meter.TenantReservationLister: the tenant's ho
 func (s *UsageStore) PurgeOrphans(ctx context.Context, req meter.PurgeOrphansRequest) (meter.PurgeOrphansResult, error)
 ```
 
-PurgeOrphans drops the counters of capabilities no longer on record, as DeleteUsage does, a batch at a time.
+PurgeOrphans drops the counters of capabilities no longer on record, as DeleteUsage does, a batch at a time, and forgets the erase mark of each erased tenant none of whose records is left.
 
 <sub>[pgstore/usage.go](../../pgstore/usage.go)</sub>
 <a id="pgstore.UsageStore.Refund"></a>
@@ -2943,7 +2943,7 @@ Release ends a reservation without charging. Releasing one that is gone is a no-
 func (s *UsageStore) ReleaseExpired(ctx context.Context, req meter.ReleaseExpiredRequest) (meter.ReleaseExpiredResult, error)
 ```
 
-ReleaseExpired releases the holds past their expiry, oldest first.
+ReleaseExpired releases the holds past their expiry, oldest first, in one transaction, then settles the leases past theirs, each in a transaction of its own.
 
 <sub>[pgstore/usage.go](../../pgstore/usage.go)</sub>
 <a id="pgstore.UsageStore.ReleaseMatching"></a>
@@ -2954,7 +2954,7 @@ ReleaseExpired releases the holds past their expiry, oldest first.
 func (s *UsageStore) ReleaseMatching(ctx context.Context, req meter.ReleaseMatchingRequest) (meter.ReleaseMatchingResult, error)
 ```
 
-ReleaseMatching implements meter.MatchingReleaser in one transaction scoped to the request's tenant (Config.CheckScope) — or, with AllTenants, to writing every tenant (WithAllTenants), any narrower scope refused as limes.ErrScopeMismatch: the holds selected are released as ReleaseExpired releases its own, their counters locked in the one order every call takes, tenant by tenant. Those locks are on rows, so a batch across tenants needs no bound on its tenants, as RevokeMatching's does.
+ReleaseMatching implements meter.MatchingReleaser, scoped to the request's tenant (Config.CheckScope) — or, with AllTenants, to writing every tenant (WithAllTenants), any narrower scope refused as limes.ErrScopeMismatch: the holds selected are released in one transaction, as ReleaseExpired releases its own, their counters locked in the one order every call takes, tenant by tenant; then the leases of the matching capabilities are settled, each in a transaction of its own. Those locks are on rows, so a batch across tenants needs no bound on its tenants, as RevokeMatching's does.
 
 <sub>[pgstore/release_matching.go](../../pgstore/release_matching.go)</sub>
 <a id="pgstore.UsageStore.Reserve"></a>
@@ -3042,11 +3042,11 @@ Grants are the statements that give each runtime role what the stores need of th
 func Run(ctx context.Context, conn *pgx.Conn, opts Options) error
 ```
 
-Run brings the store's schema up to the one this version of the package queries, running each migration not yet applied in order, then grants the runtime roles opts names. Run it before the stores serve, as the role that owns the schema, and before any migration of the consumer's that refers to its tables.
+Run brings the store's schema up to the one this version of the package queries, running each migration not yet applied in order, then grants the runtime roles opts names. It refuses a nil conn with limes.ErrInvalidRequest, and a schema of its name owned by another role with ErrSchemaOwner. Run it before the stores serve, as the role that owns the schema, and before any migration of the consumer's that refers to its tables.
 
 It holds a session advisory lock while it migrates, so replicas starting together migrate once. The lock is the one every migration run by github.com/jackc/tern takes; it is reentrant within one session, so a consumer migrating with tern runs Run on the connection its own run holds, never on a second one, which would wait on that run for ever. A consumer with another migration tool runs Run before it, or applies Steps with that tool instead.
 
-Migration 014, which pgstore v0.31.0 brought, now builds its three indexes CONCURRENTLY, outside a transaction, holding no writes, as every later migration that indexes an existing table does, so a Migrate at startup holds none. Its first form, in v0.31.0 and the releases up to the one that changed it, built them with a plain CREATE INDEX, which held writes to limes.capabilities and limes.revocations for some seconds on a million records; a store that ran that one has the indexes, and tern does not run 014 there again.
+Migration 014, which pgstore v0.31.0 brought, now builds its three indexes CONCURRENTLY, outside a transaction, holding no writes, as every later migration that indexes an existing table does, so a Run at startup holds none. Its first form, in v0.31.0 and the releases up to the one that changed it, built them with a plain CREATE INDEX, which held writes to limes.capabilities and limes.revocations for some seconds on a million records; a store that ran that one has the indexes, and tern does not run 014 there again.
 
 Migration 015 adds limes.capabilities.revoked, the flag ListRecords and CountRecords read: a change of the catalog, which rewrites no row and holds the table only for that moment. 016 then marks the records revoked before it, taking only their rows, and 017 builds its indexes CONCURRENTLY.
 
@@ -3076,12 +3076,13 @@ Setup is the SQL a consumer's tool runs once, before the first Step: ddl.Setup.
 
 ```go
 type Options struct {
-	// RuntimeRoles are the roles the stores serve as: roles that do not own
-	// the tables, so row-level security binds them. Each gets USAGE on the
+	// RuntimeRoles are the roles the stores serve as: roles that own nothing
+	// in the schema, which pgstore.CheckSchema checks. Each gets USAGE on the
 	// schema, SELECT, INSERT, UPDATE and DELETE on its tables, SELECT alone
 	// on the version table (for CheckSchema), EXECUTE on its functions —
-	// which no other role has — and the same on every table a later
-	// migration creates. Granting is idempotent, so each Run grants again.
+	// which no other role has — USAGE on its sequences, and the same on
+	// every table and sequence a later migration creates (ddl.Grants). An
+	// empty name, or "public" in any case, is refused (ddl.CheckRuntimeRoles). Granting is idempotent, so each Run grants again.
 	// Empty: Run grants nothing, and the roles are the consumer's to grant
 	// (Grants).
 	RuntimeRoles []string
@@ -3155,7 +3156,7 @@ Statements is ddl.Step.Statements: the step as a tool sends it.
 
 `import "github.com/oleg-tkachuk/limes/pgstore/migrate/ddl"`
 
-Package ddl is pgstore's schema as data: the migrations, the SQL that creates the version table before them, and the grants after, for a consumer that applies them with a migration tool of its own (docs/adr/0011-migrations-as-data.md). It imports nothing outside the standard library, so a program that vendors the SQL links neither tern nor a driver; pgstore/migrate runs the same migrations itself.
+Package ddl is pgstore's schema as data: the migrations, the SQL that creates the version table before them, and the grants after, for a consumer that applies them with a migration tool of its own (docs/adr/0011-migrations-as-data.md). Beyond the standard library it imports only two leaf packages of limes's own (internal/errs and pgstore/internal/pgschema), so a program that vendors the SQL links neither tern nor a driver; pgstore/migrate runs the same migrations itself.
 
 A tool applies Setup once, then each Step not yet applied, in order, then Grants. Each transactional step runs in a transaction of its own: it opens by setting the transaction READ COMMITTED, which PostgreSQL accepts only as a transaction's first statement, and which migration 016 needs, since it reads each level of records by the next statement's snapshot. A non-transactional step runs a statement at a time outside any transaction, as CREATE INDEX CONCURRENTLY needs (Step.Statements).
 
@@ -3178,7 +3179,7 @@ MigrationsDir is where Files keeps the migrations.
 func CheckRuntimeRoles(roles []string) error
 ```
 
-CheckRuntimeRoles refuses a runtime role that is not one role: an empty name, "public" in any case, which would grant every role, and a name with a NUL, which the identifier quoting drops, granting another role than the one named.
+CheckRuntimeRoles refuses, with an error matching limes.ErrInvalidConfig, a runtime role that is not one role: an empty name, "public" in any case, which would grant every role, and a name with a NUL, which the identifier quoting drops, granting another role than the one named.
 
 <sub>[pgstore/migrate/ddl/ddl.go](../../pgstore/migrate/ddl/ddl.go)</sub>
 <a id="ddl.Files"></a>

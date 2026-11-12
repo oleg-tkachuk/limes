@@ -51,8 +51,8 @@ const (
 // limes.ErrInvalidConfig. client fetches it; nil: jwk.DefaultHTTPClient,
 // with a request timeout. Whatever the client's own redirect policy, a
 // redirect to another scheme or host is refused, on a copy of the client:
-// the caller's is left as it is. It does not wait for the first fetch. A token naming a kid the
-// set does not hold, or arriving while no usable set is held, fetches it
+// the caller's is left as it is. It does not wait for the first fetch. A
+// token naming a kid the set does not hold, or arriving while no usable set is held, fetches it
 // again at once, at most once per jwks.DefaultMinRefreshInterval. The last
 // set fetched is served while rawURL is out of reach, for at most
 // jwks.DefaultMaxStale; never fetched or past that, the keys are an error

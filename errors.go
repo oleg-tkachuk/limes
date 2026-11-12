@@ -80,9 +80,10 @@ var (
 	ErrCaveatViolation       = errors.New("limes: caveat violation")
 	ErrBudgetExceeded        = errors.New("limes: budget exceeded")
 
-	// ErrInvalidAmount — an amount that is negative or above MaxNanos, or a
-	// decimal that is not one (ParseAmount). Refunds are explicit; a
-	// negative charge is not one. A malformed request, so it matches
+	// ErrInvalidAmount — an amount that is negative or above MaxNanos, a
+	// decimal that is not one or is finer than a nano (ParseAmount), a float
+	// that is not a number (AmountFromFloat), or JSON that is not a string.
+	// Refunds are explicit; a negative charge is not one. A malformed request, so it matches
 	// ErrInvalidRequest.
 	ErrInvalidAmount error = &familyError{"limes: invalid amount", ErrInvalidRequest}
 
@@ -175,7 +176,8 @@ var (
 	// matches no ErrUnauthenticated sentinel, and is answered 503, to retry.
 	// A lookup's error that is a code of limes's already — a lineage too
 	// deep (ErrDelegationTooDeep), a store's broken invariant
-	// (ErrInternal) — keeps that code.
+	// (ErrInternal) — keeps that code, but for ErrStoreUnavailable and
+	// ErrStoreTimeout, which it wraps like any other failure.
 	ErrRevocationUnavailable = errors.New("limes: revocation status unavailable")
 )
 

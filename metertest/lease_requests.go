@@ -86,7 +86,8 @@ func checkRequestLeaseStopsBumpsAtTheLeaseholder(t *testing.T, f fixture) {
 }
 
 // A lease of requests is held to every request ceiling as that many bumps
-// are: past the child's or the root's it is refused, and holds nothing.
+// are: past the child's or the root's it is refused, and holds nothing. A
+// lease of negative requests is ErrInvalidRequest.
 func checkRequestLeaseIsHeldToEveryCeiling(t *testing.T, f fixture) {
 	l := f.leaser(t)
 	c := f.newRequestChain(t)
@@ -248,9 +249,9 @@ func checkRequestLeaseConcurrency(t *testing.T, f fixture) {
 	expect.That(t, r.RequestCount == total && r.ReservedRequests == 0, "the root once every lease settled = %+v, want %d requests and nothing held", r, total)
 }
 
-// A lease of more requests than a counter can hold is refused, after a
-// request made as before it: its total cannot be counted, so no ceiling
-// may admit it, and nothing is held.
+// A lease that would carry a counter past what it can hold — MaxInt64
+// requests once one is made — is refused with ErrRequestLimitExceeded: its
+// total cannot be counted, so no ceiling may admit it, and nothing is held.
 func checkRequestLeaseThatCannotBeCountedIsRefused(t *testing.T, f fixture) {
 	l := f.leaser(t)
 	c := f.newRequestChain(t)

@@ -67,8 +67,9 @@ type ContextSigner interface {
 	SignContext(ctx context.Context, rand io.Reader, message []byte, opts crypto.SignerOpts) ([]byte, error)
 }
 
-// NewSigner builds a Signer, refusing a kid outside limes's namespace or a
-// key that is not Ed25519.
+// NewSigner builds a Signer, refusing, as ErrInvalidConfig, a kid outside
+// limes's namespace, no key, a key that is not Ed25519, and a set Algorithm
+// other than SigningAlgorithmEd25519 and SigningAlgorithmEdDSA.
 func NewSigner(cfg SignerConfig) (*Signer, error) {
 	if !jwks.IsKeyID(cfg.KeyID) {
 		return nil, invalidConfig("limes: SignerConfig.KeyID %q is not a limes kid (%q and a name)", cfg.KeyID, jwks.KeyIDPrefix)
@@ -417,7 +418,7 @@ func parseHeader(seg string) (jwtHeader, error) {
 	return h, nil
 }
 
-// claimsOf is the payload Sign writes for c: the one place a Capability
+// claimsOf is the payload sign writes for g: the one place a Capability
 // becomes claims.
 func claimsOf(g grant) jwtClaims {
 	c := g.Capability

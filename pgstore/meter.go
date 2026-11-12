@@ -18,8 +18,9 @@ import (
 	"github.com/oleg-tkachuk/limes/meter"
 )
 
-// UsageStore implements meter.UsageStore and meter.CopyUsageReader:
-// request and spend counters, holds, the charges ledger and the tenant
+// UsageStore implements meter.UsageStore, meter.CopyUsageReader,
+// meter.Leaser, meter.MatchingReleaser, meter.TenantReservationLister,
+// meter.TenantUsageEraser and meter.FeatureGate: request and spend counters, holds, the charges ledger and the tenant
 // aggregates. It reads each capability's lineage and ceilings from the
 // records a Store over the same database keeps.
 //
@@ -27,8 +28,8 @@ import (
 // capabilities' counters by id, then the copies' by revocation id, then the
 // tenant aggregate, then the ledger — so two calls never wait on each other
 // in a cycle (lock_order_test.go; docs/adr/0018-fewer-round-trips-per-charge.md).
-// onCharged
-// runs on the call's own transaction: it is the pgx.Tx it is handed.
+// onCharged runs on the call's own transaction, which TxFrom reads from the
+// context it is handed.
 //
 // A call whose COMMIT left and whose answer did not come back — the
 // connection failed or the context ended first — returns an error matching

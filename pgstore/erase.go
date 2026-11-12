@@ -145,8 +145,8 @@ func (s *Store) EraseTenantRecords(ctx context.Context, req limes.EraseTenantReq
 	return out, err
 }
 
-// Erased is what EraseTenant hands its callback once the store's rows of the
-// tenant are gone, in the transaction that removes them. Like the result it
+// Erased is what EraseTenant hands its callback once the store has erased
+// the tenant, in the transaction that erases it. Like the result it
 // carries, it does not compare, so a field added in 1.x breaks no caller.
 type Erased struct {
 	// Tx is the erase's transaction, scoped to the tenant.
@@ -215,7 +215,7 @@ func (s *Store) eraseRecords(ctx context.Context, tx pgx.Tx, req limes.EraseTena
 // EraseTenantUsage implements meter.TenantUsageEraser: it marks the tenant
 // erased and removes its holds, aggregate, counters, copies' counters and
 // charges in one transaction scoped to the tenant (Config.CheckScope),
-// counting the rows each statement removed.
+// counting the holds, counters, copies' counters and charges removed.
 func (s *UsageStore) EraseTenantUsage(ctx context.Context, req meter.EraseTenantUsageRequest) (meter.EraseTenantUsageResult, error) {
 	if err := req.Validate(); err != nil {
 		return meter.EraseTenantUsageResult{}, err

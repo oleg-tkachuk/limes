@@ -84,7 +84,8 @@ type RevokeBiscuitResult struct {
 	Revocation BiscuitRevocation
 }
 
-// Validate refuses a request naming no copy as ErrInvalidRequest.
+// Validate refuses, as ErrInvalidRequest, a request naming no copy, or a
+// Note or Actor that is not valid UTF-8 or holds a NUL.
 func (r RevokeBiscuitRequest) Validate() error {
 	if err := r.Copy.Validate(); err != nil {
 		return fmt.Errorf("revoke biscuit: %w", err)
@@ -127,9 +128,12 @@ func (c BiscuitCopy) Copies() []CopyCeiling { return cloneCopyCeilings(c.copies)
 // BiscuitCopy reads which copy token is, after checking it as Verify does —
 // the sealed token's signature, issuer and tenant, then the Biscuit's
 // signature chain — so that a revocation is only ever recorded against a
-// capability the token genuinely carries. Expiry, audience and revocation are
-// not checked: a copy can be revoked whatever its state. Nor is MeterCopies:
-// a copy carrying limits is named, and can be revoked, on any verifier.
+// capability the token genuinely carries. A token that is not a Biscuit, is
+// longer than VerifierConfig.MaxTokenBytes, or comes to a verifier with no
+// VerifierConfig.Biscuit is ErrInvalidToken. Expiry, audience and revocation
+// are not checked: a copy can be revoked whatever its state. Nor is
+// BiscuitConfig.MeterCopies: a copy carrying limits is named, and can be
+// revoked, on any verifier.
 func (v *Verifier) BiscuitCopy(ctx context.Context, token string) (BiscuitCopy, error) {
 	start := time.Now()
 	c, ids, err := v.biscuitCopy(ctx, token)

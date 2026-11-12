@@ -25,10 +25,10 @@ type RevocationLookup interface {
 }
 
 // RevocationLineageLookup is a RevocationLookup that also names the
-// ancestors an answer covers. A RevocationCache is one, and over one keeps them beside
-// each "not revoked" answer, so ClearRevoked drops only the answers a
-// revocation outdates rather than every one. memstore's Store and pgstore's
-// are each one.
+// ancestors an answer covers. A RevocationCache is one, and over one keeps
+// them beside each "not revoked" answer, so ClearRevoked drops only the
+// answers a revocation outdates rather than every one. memstore's Store and
+// pgstore's are each one.
 type RevocationLineageLookup interface {
 	RevocationLookup
 	// RevocationLineage answers as IsRevoked does, and names the ancestors
@@ -37,9 +37,9 @@ type RevocationLineageLookup interface {
 	// it not revoked, as IsRevoked does — or, to a verifier without
 	// VerifierConfig.AllowUnrecorded, not on record — and keeps that answer
 	// for TTL apart from the others. One that answers such an id not
-	// revoked instead is cached as any other, and defeats
-	// the record check without a word: NewVerifier cannot tell
-	// it from one that keeps this contract, which storetest checks.
+	// revoked instead is cached as any other, and defeats the record check
+	// without a word: NewVerifier cannot tell it from one that keeps this
+	// contract, which storetest checks.
 	RevocationLineage(ctx context.Context, id uuid.UUID) (RevocationAnswer, error)
 }
 
@@ -201,8 +201,8 @@ type RevocationCacheConfig struct {
 	// one never evicts another. Zero: DefaultRevocationCacheEntries. A Biscuit
 	// answer is one entry per revocation id, keyed by the id, a block
 	// signature, and one per set of ids asked about together, keyed by a
-	// SHA-256 digest of the set, whatever its size. Over a RevocationLineageLookup a
-	// capability's "not revoked" answer keeps its ancestors' ids beside it,
+	// SHA-256 digest of the set, whatever its size. Over a
+	// RevocationLineageLookup a capability's "not revoked" answer keeps its ancestors' ids beside it,
 	// up to MaxDelegationDepth of them, and again in an index ClearRevoked
 	// reads them by: about 32 bytes per generation, so a full cache of
 	// chains 64 deep holds some 200 MB of them at the default bound, against
@@ -217,11 +217,11 @@ type RevocationCacheConfig struct {
 	// logged. Zero: never, the cache failing closed — every failure
 	// returned, as a verifier refuses on it. A revocation the upstream
 	// holds goes unseen for as long, so it trades revocation latency for
-	// availability through a short outage of the store; ErrNotFound, an
-	// answer, is never covered, nor a caller whose context ended; nor, while
-	// a revoked answer dropped to make room (MaxEntries) would still be
-	// kept, a live answer about a delegated capability or about a Biscuit's
-	// revocation ids asked together. A
+	// availability through a short outage of the store. ErrNotFound and
+	// ErrInvalidRequest, answers, are never covered, nor a caller whose
+	// context ended; nor, while a revoked answer dropped to make room
+	// (MaxEntries) would still be kept, a live answer about a delegated
+	// capability or about a Biscuit's revocation ids asked together. A
 	// Biscuit is covered when its revocation ids are asked about together
 	// as before. Negative, or longer than MaxRevocationCacheStale, is
 	// refused.
@@ -232,9 +232,12 @@ type RevocationCacheConfig struct {
 	Now func() time.Time
 }
 
-// NewRevocationCache wires a cache over cfg's upstreams. A negative TTL or
-// bound is refused; a deployment that wants no cache passes its store to the
-// verifier directly.
+// NewRevocationCache wires a cache over cfg's upstreams. It refuses, as
+// ErrInvalidConfig, a nil Capabilities, a Biscuits holding a nil value, a
+// negative TTL or MaxEntries, and a SyncedTTL or MaxStale out of its range;
+// under RequireLineage, a Capabilities that is no RevocationLineageLookup is
+// ErrNoRevocationLineage. A deployment that wants no cache passes its store
+// to the verifier directly.
 func NewRevocationCache(cfg RevocationCacheConfig) (*RevocationCache, error) {
 	if isNilValue(cfg.Capabilities) {
 		return nil, invalidConfig("limes: RevocationCacheConfig.Capabilities required")
@@ -354,7 +357,9 @@ func newCacheConfig(ttl time.Duration, maxEntries int, now func() time.Time) (tt
 
 // IsRevoked serves a fresh cached answer, or asks upstream once on behalf of
 // every concurrent caller asking about the same id. An upstream error is
-// returned to all of them and is never cached.
+// returned to all of them and is never cached, unless MaxStale serves a
+// stale answer in its place. Over a RevocationLineageLookup, an id it has
+// no record of is not revoked.
 func (c *RevocationCache) IsRevoked(ctx context.Context, id uuid.UUID) (bool, error) {
 	if c.lineage == nil {
 		revoked, _, err := c.caps.Get(ctx, id, func(ctx context.Context) (bool, error) { return c.capabilities.IsRevoked(ctx, id) })
@@ -694,7 +699,7 @@ func (c *RevocationCache) extendLocked(ext *ttlcache.Extension) {
 	c.copies.Extend(ext)
 }
 
-// Sweep drops every expired entry, of either kind, and returns how many it
+// Sweep drops every expired entry, of every kind, and returns how many it
 // dropped. Optional housekeeping — lookups skip stale entries, and every new
 // answer drops the expired ones before it.
 func (c *RevocationCache) Sweep() int {

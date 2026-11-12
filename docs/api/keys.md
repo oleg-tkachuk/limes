@@ -88,7 +88,7 @@ ErrUnavailable is returned by Remote when it holds no key set recent enough to t
 var ErrUnknownKID = errors.New("jwks: unknown kid")
 ```
 
-ErrUnknownKID is the typed not-found return from KeyResolver. The verifier wraps it in ErrInvalidToken for caller-facing errors, and it stays matchable, so ops dashboards can tell "we don't know this kid" from "signature mismatch".
+ErrUnknownKID is what a limes.KeyResolver returns for a kid it holds no key for. The verifier wraps it in limes.ErrInvalidToken, the token's fault, and it stays matchable, so ops dashboards can tell "we don't know this kid" from "signature mismatch".
 
 <sub>[jwks/static.go](../../jwks/static.go)</sub>
 <a id="jwks.IsKeyID"></a>
@@ -121,7 +121,7 @@ KeyID is the kid of a key published with none named: KeyIDPrefix and its RFC 763
 func Marshal(keys map[string]ed25519.PublicKey) ([]byte, error)
 ```
 
-Marshal produces a JWKS document for the supplied kid → public key map, with entries sorted by kid so the same key set always serialises to the same bytes (cacheable, diffable, ETag-able). Every entry names AlgorithmEd25519; MarshalAlgorithms names another.
+Marshal produces a JWKS document for the supplied kid → public key map, with entries sorted by kid so the same key set always serialises to the same bytes (cacheable, diffable, ETag-able). Every entry names AlgorithmEd25519; MarshalAlgorithms names another. A key that is not an Ed25519 public key's length is refused with limes.ErrInvalidRequest.
 
 <sub>[jwks/jwks.go](../../jwks/jwks.go)</sub>
 <a id="jwks.MarshalAlgorithms"></a>
@@ -132,7 +132,7 @@ Marshal produces a JWKS document for the supplied kid → public key map, with e
 func MarshalAlgorithms(keys map[string]ed25519.PublicKey, algs map[string]string) ([]byte, error)
 ```
 
-MarshalAlgorithms is Marshal with each key's alg named by algs, kid → name: AlgorithmEdDSA for a key whose signer writes EdDSA, so a library that matches the names finds it. A key algs does not name is AlgorithmEd25519's. A name for a kid keys does not hold, or a name that is neither, is refused: it would describe no key, or one no token names.
+MarshalAlgorithms is Marshal with each key's alg named by algs, kid → name: AlgorithmEdDSA for a key whose signer writes EdDSA, so a library that matches the names finds it. A key algs does not name is AlgorithmEd25519's. A name for a kid keys does not hold, or a name that is neither, is refused with limes.ErrInvalidRequest: it would describe no key, or one no token names.
 
 <sub>[jwks/jwks.go](../../jwks/jwks.go)</sub>
 <a id="jwks.Parse"></a>
@@ -143,7 +143,7 @@ MarshalAlgorithms is Marshal with each key's alg named by algs, kid → name: Al
 func Parse(raw []byte) (map[string]ed25519.PublicKey, error)
 ```
 
-Parse decodes a JWKS document into a kid → public key map. Entries that are not Ed25519 (a future kty), that lack a kid, whose use or key\_ops is not verifying signatures (RFC 7517 §4.2, §4.3), whose key does not decode to an Ed25519 public key, or that are not of the shape a JWK is read in — a member of another JSON type, no object at all — are skipped rather than failing the document (RFC 7517 §5): one malformed or foreign entry must not take every other key — and so every token signed with them — out of service during a rotation. Two Ed25519 keys naming one kid are both skipped; a kid an entry of another kind also names is not (§4.5). A document that is not JSON at all, names a member twice, or has no "keys" array (RFC 7517 §5) is an error: only \`{"keys":\[]}\` withdraws every key.
+Parse decodes a JWKS document into a kid → public key map. Entries that are not Ed25519 (a future kty), that lack a kid, whose alg, when set, names neither AlgorithmEd25519 nor AlgorithmEdDSA, whose use or key\_ops is not verifying signatures (RFC 7517 §4.2, §4.3), whose key does not decode to an Ed25519 public key, or that are not of the shape a JWK is read in — a member of another JSON type, no object at all — are skipped rather than failing the document (RFC 7517 §5): one malformed or foreign entry must not take every other key — and so every token signed with them — out of service during a rotation. Two Ed25519 keys naming one kid are both skipped; a kid an entry of another kind also names is not (§4.5). A document that is not JSON at all, names a member twice, or has no "keys" array (RFC 7517 §5) is an error: only \`{"keys":\[]}\` withdraws every key.
 
 <sub>[jwks/jwks.go](../../jwks/jwks.go)</sub>
 <a id="jwks.Handler"></a>
@@ -241,7 +241,7 @@ A key the issuer withdraws stays accepted until the next refresh, and through an
 func NewRemote(cfg RemoteConfig) (*Remote, error)
 ```
 
-NewRemote validates the config. It does not fetch: the first PublicKey call does, so constructing a verifier never blocks on the network.
+NewRemote builds a Remote, refusing with limes.ErrInvalidConfig a config without a URL or whose URL is not https with a host, a negative interval or MaxDocumentBytes, or intervals that do not nest. It does not fetch: the first PublicKey call does, so constructing a verifier never blocks on the network.
 
 <sub>[jwks/remote.go](../../jwks/remote.go)</sub>
 <a id="jwks.Remote.Block"></a>
@@ -356,7 +356,7 @@ Static is the in-memory implementation used in tests and single-node deploys. Ma
 func NewStatic(cfg StaticConfig) (*Static, error)
 ```
 
-NewStatic builds a resolver over cfg.Keys, refusing an empty kid or a key that is not an Ed25519 public key's length — which the verifier would otherwise read, token by token, as the tokens' fault.
+NewStatic builds a resolver over cfg.Keys, refusing with limes.ErrInvalidConfig an empty kid or a key that is not an Ed25519 public key's length — which the verifier would otherwise read, token by token, as the tokens' fault.
 
 <sub>[jwks/static.go](../../jwks/static.go)</sub>
 <a id="jwks.Static.Keys"></a>
@@ -378,7 +378,7 @@ Keys returns a snapshot of the current key set, e.g. for Marshal: keys of its ow
 func (r *Static) PublicKey(_ context.Context, kid string) (ed25519.PublicKey, error)
 ```
 
-PublicKey implements limes.KeyResolver.
+PublicKey implements limes.KeyResolver: a copy of kid's key, or ErrUnknownKID.
 
 <sub>[jwks/static.go](../../jwks/static.go)</sub>
 <a id="jwks.Static.RemoveKey"></a>

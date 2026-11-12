@@ -18,8 +18,8 @@ const (
 	// CategoryDenied — the credential is good and does not allow the
 	// request.
 	CategoryDenied Category = "denied"
-	// CategoryExhausted — a request, budget, copy or lease limit refused
-	// it.
+	// CategoryExhausted — a request, budget, copy or lease limit, or the
+	// DPoP proof quota of a replay window, refused it.
 	CategoryExhausted Category = "exhausted"
 	// CategoryInvalid — the request itself is wrong: sent again unchanged,
 	// it fails again.
@@ -63,9 +63,10 @@ func CategoryOf(err error) (Category, bool) {
 	return r.category, ok
 }
 
-// CategoryOfCode returns code's category, and false for a code that is none
-// of this package's, the exchange's and the meter's among them. A consumer
-// proving its own mapping of codes reads it beside Codes.
+// CategoryOfCode returns code's category, and false for a code not among
+// Codes: this package's, the meter's and, once module exchange is linked in,
+// the exchange's. A consumer proving its own mapping of codes reads it beside
+// Codes.
 func CategoryOfCode(code Code) (Category, bool) {
 	r, ok := codeRuleOf(code)
 	return r.category, ok

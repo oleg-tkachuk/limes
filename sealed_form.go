@@ -50,9 +50,9 @@ type Unsealed struct {
 }
 
 // ErrCopyCountersNotMetered — a Biscuit sets a copy's own request or budget
-// limit, and the verifier was not told that its Meter counts copies. The
-// limit would go unenforced, so the token is refused instead. The token is
-// not at fault — a verifier with MeterCopies accepts it — so this is the
+// limit, and the verifier was not told that its meter.Meter counts copies.
+// The limit would go unenforced, so the token is refused instead. The token
+// is not at fault — a verifier with MeterCopies accepts it — so this is the
 // server's configuration, outside ErrInvalidToken: ErrorResponse answers it
 // as an internal error, and it has no Reason.
 var ErrCopyCountersNotMetered = errors.New("limes: copy limits need a verifier with MeterCopies")
@@ -75,10 +75,13 @@ func isBiscuit(token string) bool {
 //
 // Like Delegate it takes a VerifiedCapability, so what it signs is what this
 // issuer signed and recorded before, never a value a caller assembled or
-// widened. It refuses one another issuer named, one read from a Biscuit —
-// wrapping a copy again would shed its attenuation and its revocation id;
-// its holder attenuates it instead — and one that has expired or that the
-// store reports revoked.
+// widened. It refuses, as ErrInvalidRequest, the zero VerifiedCapability,
+// one another issuer named, one read from a Biscuit — wrapping a copy again
+// would shed its attenuation and its revocation id; its holder attenuates it
+// instead — and a token past IssuerConfig.MaxTokenBytes; one that has
+// expired as ErrExpired, or that the store reports revoked as ErrRevoked;
+// and, on an issuer with no IssuerConfig.Biscuit, every request as
+// ErrInvalidConfig.
 //
 // It needs no OpShare: a copy attenuated from the form allows no more than
 // the capability, which its bearer could hand on as it is, and a copy that
@@ -169,7 +172,7 @@ type Attenuation struct {
 	// Ops the token keeps.
 	Ops []Op
 	// ResourcePrefixes and ResourceURIs the token keeps. Setting either
-	// replaces both.
+	// replaces both, and drops the token's ResourceNamePrefixes.
 	ResourcePrefixes []string
 	ResourceURIs     []string
 	// Audience the token keeps.
@@ -191,9 +194,10 @@ type Attenuation struct {
 	Budget   *BudgetCeiling
 }
 
-// Validate refuses an attenuation no block can carry: a binding that is no
-// thumbprint, or a copy limit that is not a bound. The verifier refuses
-// such a block whatever form carried it.
+// Validate refuses, as ErrInvalidRequest, an attenuation no block can carry:
+// a binding that is no thumbprint, a copy limit that is Unlimited or out of
+// range, or a copy budget that names a unit. The verifier refuses such a
+// block whatever form carried it.
 func (a Attenuation) Validate() error {
 	if a.ConfirmationJKT != "" {
 		if err := validateThumbprint(a.ConfirmationJKT); err != nil {
@@ -329,8 +333,8 @@ func copyAxisNarrows[C ceiling[C]](axis string, c *C, capability C, enclosing []
 // MaxBiscuitBlocks bounds the attenuation blocks a Biscuit may carry. Each
 // block is a revocation id the verifier looks up, and anyone holding a copy
 // can append blocks offline, so an unbounded chain is a lookup per block on
-// every request. Attenuate refuses to go past it, and the verifier refuses a
-// token that has.
+// every request. biscuit.Attenuate refuses to go past it, and the verifier
+// refuses a token that has.
 const MaxBiscuitBlocks = 32
 
 // unsealedGrant folds u, what a form read past the sealed token parent,

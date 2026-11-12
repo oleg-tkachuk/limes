@@ -65,8 +65,13 @@ const (
 	biscuitFactMaxBudget      = "limes_max_budget_nanos" // integer: a copy's own budget, in nanos
 )
 
-// Attenuate appends a block that narrows token. It needs no key and no
-// network; the result is a new token, and the input still works as before.
+// Attenuate appends a block that narrows token, a Biscuit, by a. It needs no
+// key and no network; the result is a new token, and the input still works
+// as before. A token that is no well-formed Biscuit is refused with
+// limes.ErrInvalidToken. One holding limes.MaxBiscuitBlocks attenuation
+// blocks already, an a that limes.Attenuation.Validate refuses, or an a holding a
+// restriction this release cannot encode is refused with
+// limes.ErrInvalidRequest.
 func Attenuate(token string, a limes.Attenuation) (string, error) {
 	b, err := parseBiscuit(token)
 	if err != nil {
@@ -216,7 +221,7 @@ func (form) Seal(ctx context.Context, sign func(ctx context.Context, root ed2551
 // Open reads a Biscuit's sealed JWT and returns it with the function that
 // finishes reading the token once the caller has verified that JWT: the
 // signature chain under the root the JWT names, then each attenuation
-// block read as an limes.Attenuation.
+// block read as a limes.Attenuation.
 func (form) Open(token string) (string, func(root ed25519.PublicKey) (limes.Unsealed, error), error) {
 	raw, container, err := decodeBiscuitContainer(token)
 	if err != nil {

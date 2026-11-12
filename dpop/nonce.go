@@ -71,8 +71,8 @@ const (
 // accepts the same nonces. A nonce is not bound to the client it was sent
 // to, nor used up by a proof: it limits how long before use a proof can be
 // signed to its lifetime, so keep Lifetime as short as the clients' round
-// trip allows. Rotate by putting the new key first: it issues,
-// and the old ones are still accepted until their nonces expire.
+// trip allows. Rotate by putting the new key first: it issues, and the old
+// ones, kept in Keys until their nonces expire, still accept them.
 type HMACNonces struct {
 	keys     *sealedKeys
 	lifetime time.Duration
@@ -90,8 +90,8 @@ type HMACNoncesConfig struct {
 	Now func() time.Time
 }
 
-// NewHMACNonces builds HMACNonces, refusing no key, a short one, or a
-// negative lifetime.
+// NewHMACNonces builds HMACNonces, refusing with limes.ErrInvalidConfig no
+// key, one shorter than HMACNonceKeyBytes, or a negative lifetime.
 func NewHMACNonces(cfg HMACNoncesConfig) (*HMACNonces, error) {
 	given := cfg.Keys.k.get()
 	if len(given) == 0 {
@@ -118,7 +118,8 @@ func NewHMACNonces(cfg HMACNoncesConfig) (*HMACNonces, error) {
 // not one NewHMACNonces made.
 var errNoNonceKey = errs.Config("dpop: HMACNonces holds no key; make it with NewHMACNonces")
 
-// Nonce implements Nonces. The zero HMACNonces holds no key and issues none.
+// Nonce implements Nonces. The zero HMACNonces holds no key and issues none:
+// its Nonce is limes.ErrInvalidConfig.
 func (n *HMACNonces) Nonce(context.Context) (string, error) {
 	keys := n.keys.get()
 	if len(keys) == 0 || n.now == nil {

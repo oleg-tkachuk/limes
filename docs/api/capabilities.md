@@ -23,7 +23,7 @@ A Capability is a short-lived, signed token granting its bearer a specific set o
   - Mid-flight revocation: a compromised agent's capability is revoked, together with everything it delegated.
   - Sub-capabilities without an operator: an orchestrator narrows its own authority for each sub-agent it spawns, through the Issuer with no admin API in the path, or offline as a Biscuit block with no call at all.
 
-Wire format is JWT compact serialization with Ed25519 signatures (\`alg: Ed25519\`, RFC 9864), or a Biscuit v3 sealing such a token; docs/standards.md lists every standard followed. Verification is local: the signature is checked against a resolved public key, and the store reads, whether the capability is revoked and, for a Biscuit, whether its copy is, go through one short-lived cache ([RevocationCache](revocation.md#limes.RevocationCache)), so consumers scale horizontally without contending on a shared store.
+Wire format is JWT compact serialization with Ed25519 signatures (\`alg: Ed25519\`, RFC 9864, or \`EdDSA\` where SignerConfig.Algorithm asks for it), or a Biscuit v3 sealing such a token; docs/standards.md lists every standard followed. Verification is local: the signature is checked against a resolved public key, and the store reads, whether the capability is revoked and, for a Biscuit, whether its copy is, go through one short-lived cache ([RevocationCache](revocation.md#limes.RevocationCache)), so consumers scale horizontally without contending on a shared store.
 
 #### Packages
 
@@ -172,7 +172,7 @@ MatchResourceName reports whether uri starts with prefix, as strings and across 
 func Narrows(parent, child Capability) error
 ```
 
-Narrows reports whether \`child\` is a narrowing of \`parent\`: every operation child allows is allowed by parent; every resource child can touch is reachable by parent; the budget / request count are no larger, and the validity window starts no earlier and ends no later; the audience is a subset; tainted-read is no broader. Issuer.Delegate runs this check before signing the child token, so a misuse fails at issue time, not later.
+Narrows returns nil when child is a narrowing of parent: the same tenant; an audience that is a subset; a validity window that starts no earlier and ends no later; a key binding when parent has one; every operation allowed by parent; every resource and source IP reachable by parent; request, copy and budget ceilings no larger; tainted reads no broader; and an idempotency key required when parent requires one. A widening is ErrDelegationTooWide; a budget in another unit than parent's, unless it spends nothing and names none, is ErrUnitCodeMismatch. Issuer.Delegate runs this check before signing the child token, so a misuse fails at issue time, not later.
 
 The function is exposed at package level so external tooling can dry-run a delegation without going through the issuer.
 
@@ -206,7 +206,7 @@ type AgentPrincipal struct {
 }
 ```
 
-AgentPrincipal carries the fields specific to AI-agent principals. Threaded into audit + lineage so per-tool-call replay reconstructs the call graph without joining across half a dozen tables.
+AgentPrincipal carries the fields specific to AI-agent principals, for audit and lineage: per-tool-call replay reconstructs the call graph from them.
 
 <sub>[principal.go](../../principal.go)</sub>
 <a id="limes.BudgetCeiling"></a>
@@ -394,8 +394,9 @@ type Caveats struct {
 	// Budget is the cost budget the capability authorises, exact to the
 	// nano, in Budget.UnitCode — the unit every amount metered against the
 	// capability counts in. The zero value allows no spend and needs no
-	// unit: the capability counts requests (Meter.Bump) but no amount, and
-	// a Charge, Reserve or Settle on it with no unit is ErrInvalidRequest.
+	// unit: the capability counts requests (meter.RequestCounter.Bump) but
+	// no amount, and a Charge, Reserve or Settle on it with no unit is
+	// ErrInvalidRequest.
 	// BudgetCeiling{Unlimited: true, UnitCode: u} lifts the bound. Once it
 	// is exhausted, a charge returns ErrBudgetExceeded. A delegated child
 	// whose budget names no unit takes its parent's.
@@ -444,7 +445,7 @@ A child capability may only narrow caveats — set a tighter prefix, drop ops, l
 func (c Caveats) AllowsResource(uri string) bool
 ```
 
-AllowsResource reports whether uri is reachable under the resource caveats: unrestricted caveats allow any uri; restricted ones require an exact ResourceURIs entry or a covering ResourcePrefixes entry. An empty uri, or one with a "." or ".." path segment, is never allowed by restricted caveats — an operation that cannot name what it touches cannot be shown to stay inside the scope.
+AllowsResource reports whether uri is reachable under the resource caveats: unrestricted caveats allow any uri; restricted ones require an exact ResourceURIs entry, a covering ResourcePrefixes entry (MatchResource) or a ResourceNamePrefixes entry it starts with (MatchResourceName). An empty uri, or one with a "." or ".." path segment, is never allowed by restricted caveats — an operation that cannot name what it touches cannot be shown to stay inside the scope.
 
 <sub>[resource.go](../../resource.go)</sub>
 <a id="limes.Caveats.Check"></a>
@@ -468,7 +469,7 @@ The source-IP caveat is per connection rather than per operation, so it is check
 func (c Caveats) CheckSource(addr netip.Addr) error
 ```
 
-CheckSource evaluates the source-IP caveat against the client address the consumer observed. An unknown address (the zero netip.Addr) fails a constrained capability closed: "we could not tell" is not "it matched".
+CheckSource evaluates the source-IP caveat against the client address the consumer observed, and returns ErrSourceIPNotAllowed or nil. An unknown address (the zero netip.Addr) fails a constrained capability closed: "we could not tell" is not "it matched".
 
 <sub>[check.go](../../check.go)</sub>
 <a id="limes.Caveats.RestrictsResources"></a>
@@ -490,7 +491,7 @@ RestrictsResources reports whether the caveats confine the capability to a set o
 func (c Caveats) Validate() error
 ```
 
-Validate reports whether the caveat bag is well formed. The issuer runs it before minting anything, root or delegated, so every signed capability carries caveats with one meaning.
+Validate reports whether the caveat bag is well formed. The issuer runs it before minting anything, root or delegated, so every signed capability carries caveats with one meaning. Every error matches ErrInvalidCaveats.
 
 <sub>[validate.go](../../validate.go)</sub>
 <a id="limes.CheckRequest"></a>
@@ -534,7 +535,7 @@ CheckRequest describes one operation a bearer is attempting, in the terms the ca
 func (req CheckRequest) Mutating() (bool, error)
 ```
 
-Mutating reports whether the operation may change state, resolving its declared Effect. A consumer that gates anything else on the operation's effect — a lookup it runs only for reads — asks here, so that it and Check cannot disagree.
+Mutating reports whether the operation may change state, resolving its declared Effect; a declaration Op.ResolveEffect refuses is ErrEffectConflict. A consumer that gates anything else on the operation's effect — a lookup it runs only for reads — asks here, so that it and Check cannot disagree.
 
 <sub>[check.go](../../check.go)</sub>
 <a id="limes.CopyCeiling"></a>
@@ -566,7 +567,7 @@ CopyCeiling is a limit one attenuation block of a Biscuit set on the copy it end
 func (c CopyCeiling) AdmitsBudget(amount Nanos) bool
 ```
 
-AdmitsBudget reports whether amount spent with the copy in all stays under its own budget; with none of its own, any amount does.
+AdmitsBudget reports whether amount spent with the copy in all stays within its own budget; with none of its own, any amount does.
 
 <sub>[types.go](../../types.go)</sub>
 <a id="limes.CopyCeiling.AdmitsRequests"></a>
@@ -577,7 +578,7 @@ AdmitsBudget reports whether amount spent with the copy in all stays under its o
 func (c CopyCeiling) AdmitsRequests(n int64) bool
 ```
 
-AdmitsRequests reports whether n requests made with the copy in all stay under its own request limit; with none of its own, any number does.
+AdmitsRequests reports whether n requests made with the copy in all stay within its own request limit; with none of its own, any number does.
 
 <sub>[types.go](../../types.go)</sub>
 <a id="limes.CopyQuota"></a>
@@ -720,7 +721,7 @@ type MeterSubject struct {
 }
 ```
 
-MeterSubject is what a Meter counts a request against: a verified capability's id and tenant, its request and budget ceilings, its unit and the limits of the Biscuit copy presented. Only VerifiedCapability.MeterSubject and StoredMeterSubject make one, so a ceiling is the one a verified token carries or a RecordReader reads back — never a value a caller sets on the subject itself. A store reads it through its methods. The zero MeterSubject names no capability and no tenant; a Meter refuses it with ErrInvalidRequest rather than count it anywhere.
+MeterSubject is what a meter.Meter counts a request against: a verified capability's id and tenant, its request and budget ceilings, its unit and the limits of the Biscuit copy presented. Only VerifiedCapability.MeterSubject and StoredMeterSubject make one, so a ceiling is the one a verified token carries or a RecordReader reads back — never a value a caller sets on the subject itself. A store reads it through its methods. The zero MeterSubject names no capability and no tenant; a meter.Meter refuses it with ErrInvalidRequest rather than count it anywhere.
 
 <sub>[meter_subject.go](../../meter_subject.go)</sub>
 <a id="limes.StoredMeterSubject"></a>
@@ -731,7 +732,7 @@ MeterSubject is what a Meter counts a request against: a verified capability's i
 func StoredMeterSubject(ctx context.Context, records RecordReader, capabilityID uuid.UUID) (MeterSubject, error)
 ```
 
-StoredMeterSubject is what the Meter counts a capability against for a cost reported with no token in hand, read from the capability's record — records is the Store, or anything reading its records. It reads the record itself rather than take a Record, whose fields any caller can set, so the ceilings are the ones on record. A stored record names no Biscuit copy, so the subject carries none. A revoked capability still gives one: a cost already incurred belongs in the ledger. ErrNotFound when the capability is not on record.
+StoredMeterSubject is what a meter.Meter counts a capability against for a cost reported with no token in hand, read from the capability's record — records is the Store, or anything reading its records. It reads the record itself rather than take a Record, whose fields any caller can set, so the ceilings are the ones on record. A stored record names no Biscuit copy, so the subject carries none. A revoked capability still gives one: a cost already incurred belongs in the ledger. ErrNotFound when the capability is not on record.
 
 <sub>[meter_subject.go](../../meter_subject.go)</sub>
 <a id="limes.MeterSubject.Budget"></a>
@@ -819,7 +820,7 @@ UnitCode is the unit the capability counts in, its budget's; empty when that nam
 func (s MeterSubject) Validate() error
 ```
 
-Validate refuses a subject that names no capability or no tenant — the zero MeterSubject, a request that set none — or an unknown unit. A metering request's Validate calls it.
+Validate refuses, as ErrInvalidRequest, a subject that names no capability or no tenant — the zero MeterSubject, a request that set none — or an unknown unit. A metering request's Validate calls it.
 
 <sub>[meter_subject.go](../../meter_subject.go)</sub>
 <a id="limes.MeterSubject.ValidateAmounts"></a>
@@ -830,7 +831,7 @@ Validate refuses a subject that names no capability or no tenant — the zero Me
 func (s MeterSubject) ValidateAmounts() error
 ```
 
-ValidateAmounts is Validate for a request that moves an amount, which needs a unit to count it in: no unit is ever assumed.
+ValidateAmounts is Validate for a request that moves an amount, which needs a unit to count it in: no unit is ever assumed, and a subject that names none is ErrInvalidRequest.
 
 <sub>[meter_subject.go](../../meter_subject.go)</sub>
 <a id="limes.Nanos"></a>
@@ -887,7 +888,7 @@ MustParseAmount is ParseAmount for an amount written into the program, a price o
 func ParseAmount(s string) (Nanos, error)
 ```
 
-ParseAmount reads a decimal amount of units — "0.35", "25", "1e-7" — into Nanos exactly. It refuses a negative amount, one finer than a nano and one beyond MaxNanos, rather than rounding any of them.
+ParseAmount reads a decimal amount of units — "0.35", "25", "1e-7" — into Nanos exactly. It refuses, as ErrInvalidAmount, a negative amount, one finer than a nano and one beyond MaxNanos, rather than rounding any of them, and text that is not digits with an optional fraction and an optional exponent of at most three digits.
 
 <sub>[nanos.go](../../nanos.go)</sub>
 <a id="limes.Nanos.Float64"></a>
@@ -964,7 +965,7 @@ UnmarshalText reads a decimal number of units exactly, as ParseAmount does: conf
 func (n Nanos) Validate() error
 ```
 
-Validate reports whether n is usable as a charge or refund amount: not negative and at most MaxNanos. Implementations call it before touching state.
+Validate reports whether n is usable as a charge or refund amount: not negative and at most MaxNanos, else ErrInvalidAmount. Implementations call it before touching state.
 
 <sub>[nanos.go](../../nanos.go)</sub>
 <a id="limes.Op"></a>
@@ -975,7 +976,7 @@ Validate reports whether n is usable as a charge or refund amount: not negative 
 type Op string
 ```
 
-Op is an operation an agent may perform. The package defines a small built-in set (below); a consumer adds its own as namespaced names of the form "\<namespace>:\<name>" — "tool:search", "mcp:github/create\_issue" — which Op.Validate accepts. A consumer-defined operation is treated as state-changing unless the server declares otherwise (Effect). Fine-grained method gating can still layer admin-authored policy on top.
+Op is an operation an agent may perform. The package defines a small built-in set (below); a consumer adds its own as namespaced names of the form "\<namespace>:\<name>" — "tool:search", "mcp:github/create\_issue" — which Op.Validate accepts. A consumer-defined operation is treated as state-changing unless the server declares otherwise (Effect).
 
 <sub>[types.go](../../types.go)</sub>
 <a id="limes.OpGet"></a><a id="limes.OpPut"></a><a id="limes.OpList"></a><a id="limes.OpDelete"></a><a id="limes.OpShare"></a><a id="limes.OpManage"></a>
@@ -1015,7 +1016,7 @@ Builtin reports whether op is one of the operations this package defines.
 func (op Op) ResolveEffect(declared Effect) (Effect, error)
 ```
 
-ResolveEffect returns the effect Check applies to op, given the effect the consumer declared for it. A built-in operation keeps its own effect, and a declaration may only repeat it; a consumer-defined operation takes the declaration, or EffectWrite when there is none.
+ResolveEffect returns the effect Check applies to op, given the effect the consumer declared for it. A built-in operation keeps its own effect, and a declaration may only repeat it; a consumer-defined operation takes the declaration, or EffectWrite when there is none. An effect this package does not define, or one contradicting a built-in operation's, is ErrEffectConflict.
 
 <sub>[effect.go](../../effect.go)</sub>
 <a id="limes.Op.Validate"></a>
@@ -1026,7 +1027,7 @@ ResolveEffect returns the effect Check applies to op, given the effect the consu
 func (op Op) Validate() error
 ```
 
-Validate reports whether op is well formed: a built-in operation, or a namespaced one of the form "\<namespace>:\<name>" made of printable, non-space ASCII.
+Validate reports whether op is well formed: a built-in operation, or a namespaced one of the form "\<namespace>:\<name>" made of printable, non-space ASCII. Every error matches ErrInvalidCaveats.
 
 <sub>[validate.go](../../validate.go)</sub>
 <a id="limes.Principal"></a>

@@ -3,6 +3,7 @@
 // server checks the proof against the key a token is bound to. It depends on
 // no token format: the server says which thumbprint the key must have and
 // which access token the proof must name.
+//
 // An authorization server's token endpoint checks the proof a token request
 // carries with CheckTokenRequest, and binds what it issues to the key that
 // signed it (RFC 9449 §5).
@@ -98,8 +99,8 @@ const (
 // The refusals of a proof. A caller that judges what they mean for the
 // request — limes reads each as a refusal of the credentials — wraps them.
 // Verify returns one of them, ErrNonceRequired, ErrReplayQuota, an error
-// naming a Request it cannot check (no Holder), or a failure of the replay
-// cache or the nonces, which is not a refusal of the proof.
+// naming a Request it cannot check (no Token or no Holder), or a failure of
+// the replay cache or the nonces, which is not a refusal of the proof.
 var (
 	// ErrRequired — the token is key-bound and no proof came with it.
 	ErrRequired = errors.New("dpop: proof required")
@@ -177,8 +178,9 @@ func publicJWK(pub crypto.PublicKey) (jose.JWK, error) {
 }
 
 // Thumbprint is the RFC 7638 SHA-256 thumbprint of pub's JWK, base64url:
-// what to put in an IssueRequest's ConfirmationJKT to bind a capability to
-// the holder of pub.
+// what to put in a limes.IssueRequest's ConfirmationJKT to bind a capability
+// to the holder of pub. A key that is neither Ed25519 nor ECDSA P-256 is
+// limes.ErrInvalidRequest.
 func Thumbprint(pub crypto.PublicKey) (string, error) {
 	j, err := publicJWK(pub)
 	if err != nil {
@@ -219,7 +221,10 @@ type contextSigner interface {
 
 // Sign signs a proof for one request. key is any crypto.Signer whose
 // public key is Ed25519 or ECDSA P-256; one that also has SignContext is
-// given ctx, so a slow or cancelled remote signature is bounded by it.
+// given ctx, so a slow or cancelled remote signature is bounded by it. A
+// request without IssuedAt, a URL that is no absolute URI with a host or
+// that carries userinfo, or a key of another type is
+// limes.ErrInvalidRequest.
 func Sign(ctx context.Context, key crypto.Signer, req SignRequest) (string, error) {
 	if req.IssuedAt.IsZero() {
 		return "", errs.Request("dpop: SignRequest.IssuedAt required")
@@ -330,7 +335,7 @@ type Proof struct {
 // thumbprint of the key the token is bound to, and who holds it.
 type Request struct {
 	Proof Proof
-	// Token is the access token the request presents.
+	// Token is the access token the request presents. Required.
 	Token string
 	// JKT is the RFC 7638 thumbprint of the key the token is bound to.
 	JKT string
@@ -374,7 +379,7 @@ type ReplayCache interface {
 // VerifierConfig configures a Verifier. Zero fields take the defaults named
 // on them; Replay is required.
 type VerifierConfig struct {
-	// Window bounds |now − iat|. Zero: DefaultWindow.
+	// Window bounds |now − iat|. Zero: DefaultWindow; negative is refused.
 	Window time.Duration
 	// Replay refuses a jti seen before. Required: without it a captured
 	// proof is good for the whole window.
@@ -382,7 +387,7 @@ type VerifierConfig struct {
 	// Now is the clock. Nil: time.Now.
 	Now func() time.Time
 	// Nonces, when set, requires every proof to carry a nonce it issued
-	// (RFC 9449 §8); a proof without one is refused with
+	// (RFC 9449 §8); a proof without a valid one is refused with
 	// ErrNonceRequired, and Nonce gives the nonce to send back.
 	Nonces Nonces
 	// MaxProofBytes bounds the proof, refused unread past it. Zero:
@@ -403,8 +408,9 @@ type Verifier struct {
 	cfg VerifierConfig
 }
 
-// NewVerifier builds a Verifier from cfg, refusing one with no ReplayCache,
-// a negative Window or a negative MaxProofBytes.
+// NewVerifier builds a Verifier from cfg, refusing with
+// limes.ErrInvalidConfig one with no ReplayCache, a negative Window or a
+// negative MaxProofBytes.
 func NewVerifier(cfg VerifierConfig) (*Verifier, error) {
 	if cfg.Replay == nil {
 		return nil, errNoReplayCache
@@ -447,10 +453,11 @@ func (v *Verifier) Nonce(ctx context.Context) (string, error) {
 
 // Verify checks req.Proof against the key req.Token is bound to. It passes
 // only with a proof that: is no longer than MaxProofBytes; is a dpop+jwt
-// signed by the key its header carries; whose key's thumbprint is req.JKT;
-// that names this method and URL and this token's hash; that was issued
-// within the window; and whose jti, no longer than MaxJTIBytes, is new.
-// It is Check followed by Record.
+// with no crit header, signed by the public key its header carries; whose
+// key's thumbprint is req.JKT; that names this method and URL and this
+// token's hash; that was issued within the window; that carries a nonce
+// Nonces accepts, when configured; and whose jti, no longer than
+// MaxJTIBytes, is new. It is Check followed by Record.
 func (v *Verifier) Verify(ctx context.Context, req Request) error {
 	checked, err := v.Check(ctx, req)
 	if err != nil {
@@ -498,8 +505,8 @@ type TokenRequest struct {
 }
 
 // CheckTokenRequest is Check for a proof sent to a token endpoint: every
-// check Check makes, but that the proof names no access token (no ath) and
-// may be by any key. The CheckedProof's JKT is that key's thumbprint, to
+// check Check makes, except that the proof must name no access token (no
+// ath) and may be by any key. The CheckedProof's JKT is that key's thumbprint, to
 // bind the issued token to; Record records the proof once the endpoint's
 // own checks pass.
 func (v *Verifier) CheckTokenRequest(ctx context.Context, req TokenRequest) (CheckedProof, error) {
@@ -679,7 +686,8 @@ func (v *Verifier) checkNonce(ctx context.Context, nonce string) error {
 
 // Record records a proof Check accepted in the replay cache, refusing it
 // with ErrReplayed when its jti was seen before, and with the cache's error
-// wrapping ErrReplayQuota when its holder has no room left in it.
+// wrapping ErrReplayQuota when its holder has no room left in it. A
+// CheckedProof Check did not make is limes.ErrInvalidRequest.
 func (v *Verifier) Record(ctx context.Context, p CheckedProof) error {
 	if v == nil || v.cfg.Replay == nil {
 		return errNoReplayCache // a Verifier not made by NewVerifier
@@ -769,10 +777,13 @@ func decodeSegment(seg string, v any) error {
 // may back any number of proofs until it expires, so they bound how early a
 // proof is signed, not how many are.
 //
-// A holder's share caps its rate: an id is kept for the verifier's window
-// plus ReplayClockSkew, so one holder passes at most EntriesPerHolder proofs
-// over that span — with the defaults 1,000 per 65 s, about 15 a second.
-// Past it Seen returns ErrReplayQuota and logs the holder at WARN.
+// A holder's share caps its rate: an id is kept until ReplayClockSkew past
+// the end of its proof's window, which starts at the proof's iat, so one
+// holder sending fresh proofs passes at most EntriesPerHolder of them over
+// the window plus ReplayClockSkew — with the defaults 1,000 per 65 s, about
+// 15 a second. A proof dated earlier within the window is kept for less,
+// down to ReplayClockSkew. Past the share Seen returns ErrReplayQuota and
+// logs the holder at WARN.
 //
 // It keys a proof id by the key that signed it (jkt, jti) across holders,
 // where redisreplay keys it within its holder: the same id under one key for

@@ -63,7 +63,7 @@ type UsageStore interface {
 // anything — its children expired with it, since a child cannot outlive its
 // parent. The capability itself must be on record: Bump, Charge, Reserve and
 // Settle refuse one that is not — never recorded, or purged — with
-// ErrNotFound, since none of its ancestors' ceilings could be read. A cost
+// limes.ErrNotFound, since none of its ancestors' ceilings could be read. A cost
 // reported late is charged only while the record lasts, so keep records
 // (PurgeRequest.ExpiredFor) as long as costs may still arrive.
 //
@@ -124,7 +124,7 @@ type RequestCounter interface {
 	// Bump increments the request counter of the capability and of
 	// each ancestor, and returns the capability's new count. When any
 	// ceiling in the chain would be crossed it returns
-	// ErrRequestLimitExceeded and nothing is mutated. Under a lease that
+	// limes.ErrRequestLimitExceeded and nothing is mutated. Under a lease that
 	// keeps moving while the call locks it, a store may refuse it as
 	// limes.ErrConflict, mutating nothing, for the caller to send again
 	// (Leaser).
@@ -139,11 +139,15 @@ type BudgetMeter interface {
 	// row, and runs onCharged — ALL atomically. Checks, in order:
 	//
 	//   1. Each Biscuit copy's own budget (req.Subject.Copies), innermost
-	//      first → ErrBudgetExceeded.
+	//      first → limes.ErrBudgetExceeded.
 	//   2. The capability's own ceiling (req.Subject.Budget()) →
-	//      ErrBudgetExceeded.
-	//   3. Each ancestor's ceiling → ErrBudgetExceeded.
-	//   4. The tenant aggregate ceiling → ErrTenantBudgetExceeded.
+	//      limes.ErrBudgetExceeded.
+	//   3. Each ancestor's ceiling → limes.ErrBudgetExceeded.
+	//   4. The tenant aggregate ceiling → limes.ErrTenantBudgetExceeded.
+	//
+	// Before them, and under either OverrunPolicy, an amount that would take
+	// a counter past MaxNanos is ErrCounterOverflow, and a counter that
+	// counts in another unit limes.ErrUnitCodeMismatch.
 	//
 	// Any rejection, or an error from onCharged, leaves every counter and
 	// the ledger untouched. onCharged runs inside the charge, atomically
@@ -195,7 +199,7 @@ type BudgetMeter interface {
 	// ErrRefundExceedsCharge and changes nothing. An unknown charge ID —
 	// never charged, or removed from the ledger past its retention
 	// (MinChargeRetention) — returns ErrChargeNotFound, and a request naming neither an Amount nor
-	// Remaining, or both, ErrInvalidRequest. The receipt carries the amount
+	// Remaining, or both, limes.ErrInvalidRequest. The receipt carries the amount
 	// actually refunded.
 	//
 	// A charge counted in a tenant accounting period that has since been
@@ -253,7 +257,7 @@ type BudgetMeter interface {
 	// verifier's may end the hold up to the leeway past the record's expiry
 	// that a verifier may still accept the token for. A capability past
 	// that — one a late cost names through StoredMeterSubject — is refused
-	// ErrExpired; a store that shares the verifier's clock may refuse it
+	// limes.ErrExpired; a store that shares the verifier's clock may refuse it
 	// from the record's expiry on.
 	// Rejections return the Charge sentinels and hold nothing.
 	//
@@ -342,8 +346,9 @@ type TenantBudgets interface {
 	// configured AND has never been charged).
 	//
 	// The aggregate counts from the tenant's first charge or reservation,
-	// whether or not a ceiling has been set: Charge and Reserve create the
-	// row, with no ceiling and ResourceVersion 0, when it is missing. A
+	// whether or not a ceiling has been set: Charge, Reserve and a
+	// Leaser.Lease of an amount create the row, with no ceiling and
+	// ResourceVersion 0, when it is missing. A
 	// ceiling set afterwards is measured against that spend and those holds.
 	GetTenantBudget(ctx context.Context, tenantID uuid.UUID) (TenantBudget, error)
 
@@ -352,8 +357,8 @@ type TenantBudgets interface {
 	// this on each billing close. ResetSpend=false adjusts the cap
 	// mid-cycle without affecting accumulated spend. It refuses what
 	// SetTenantBudgetRequest.Validate refuses — a ceiling outside
-	// 0..MaxNanos is ErrInvalidAmount — and changes nothing. A ceiling in a
-	// unit other than the row's returns ErrUnitCodeMismatch while anything
+	// 0..MaxNanos is limes.ErrInvalidAmount — and changes nothing. A ceiling in a
+	// unit other than the row's returns limes.ErrUnitCodeMismatch while anything
 	// is held in the old unit, or spent in it and not reset. A reset settles
 	// the tenant's leases first; a store that cannot keep new ones out
 	// meanwhile may refuse it as limes.ErrConflict, changing nothing, and
@@ -371,8 +376,8 @@ type TenantBudgets interface {
 	//   - TenantBudgetFilterUnlimited: rows whose ceiling is Unlimited.
 	// Limit is the page size, as PageLimit reads it.
 	// It refuses what ListTenantBudgetsRequest.Validate refuses, and a store
-	// that scopes tenants refuses with ErrScopeMismatch a call whose scope
-	// admits fewer than every tenant, as CountRecords does: under it the
+	// that scopes tenants refuses with limes.ErrScopeMismatch a call whose scope
+	// admits fewer than every tenant, as limes.RecordCensus.CountRecords does: under it the
 	// page would read as every tenant's while it showed fewer.
 	//
 	// Rows come most at risk first. Ceilings of 0, which allow nothing,
@@ -461,7 +466,7 @@ type ChargeRequest struct {
 	// unit and the presented copy's limits: VerifiedCapability.MeterSubject.
 	// No conversion happens: a counter the charge moves — the
 	// capability's, an ancestor's, the tenant's — that already counts in
-	// another unit refuses it with ErrUnitCodeMismatch, and so does a
+	// another unit refuses it with limes.ErrUnitCodeMismatch, and so does a
 	// reservation.
 	Subject limes.MeterSubject
 	// Amount is the cost, in the subject's unit. Within 0..MaxNanos
@@ -481,8 +486,9 @@ type ChargeRequest struct {
 }
 
 // Validate refuses an amount out of range, an unknown overrun policy, an
-// external ref past MaxExternalRefBytes, and a subject that names no
-// capability, no tenant or no unit, or an unknown unit.
+// external ref ValidateExternalRef refuses, an Op or Actor that is not valid
+// UTF-8 or holds a NUL, and a subject that names no capability, no tenant or
+// no unit, or an unknown unit.
 func (r ChargeRequest) Validate() error {
 	if err := r.Amount.Validate(); err != nil {
 		return err
@@ -624,7 +630,7 @@ type ReserveRequest struct {
 	Amount limes.Nanos
 	// TTL is how long the hold lasts if never settled or released, at most
 	// until its capability expires (Meter.Reserve). 0 =
-	// DefaultReservationTTL; negative is ErrInvalidRequest.
+	// DefaultReservationTTL; negative is limes.ErrInvalidRequest.
 	TTL time.Duration
 	// Op and Actor are carried onto the charge Settle records.
 	Op    limes.Op
@@ -638,7 +644,8 @@ type ReserveRequest struct {
 }
 
 // Validate refuses an amount out of range, a subject that names no
-// capability, no tenant or no unit, or an unknown unit, and a negative TTL.
+// capability, no tenant or no unit, or an unknown unit, a negative TTL, and
+// an Op or Actor that is not valid UTF-8 or holds a NUL.
 func (r ReserveRequest) Validate() error {
 	if err := r.Amount.Validate(); err != nil {
 		return err
@@ -728,8 +735,8 @@ type RefundRequest struct {
 	RefundID uuid.UUID
 }
 
-// Validate refuses a request that names no amount, or both an amount and
-// Remaining.
+// Validate refuses a request that names no amount, both an amount and
+// Remaining, or an amount out of range.
 func (r RefundRequest) Validate() error {
 	switch {
 	case r.Remaining && r.Amount != 0:
@@ -810,7 +817,7 @@ type SetTenantBudgetRequest struct {
 
 // Validate refuses a request with no tenant, a ceiling that does not
 // validate — among them one that lets something be spent and names no unit
-// — or a negative ExpectedVersion, as ErrInvalidRequest. A store calls it before reading the
+// — or a negative ExpectedVersion, as limes.ErrInvalidRequest. A store calls it before reading the
 // tenant's row, so a malformed request is refused as one, never as a
 // version conflict.
 func (r SetTenantBudgetRequest) Validate() error {
@@ -855,7 +862,7 @@ func (f TenantBudgetFilter) String() string {
 }
 
 // Validate refuses a filter this package does not define, as
-// ErrInvalidRequest.
+// limes.ErrInvalidRequest.
 func (f TenantBudgetFilter) Validate() error {
 	if f > TenantBudgetFilterUnlimited {
 		return refuseRequestf("list tenant budgets: the filter is unknown", "list tenant budgets: unknown filter %s", f)
@@ -916,7 +923,7 @@ type Usage struct {
 	// against the ceiling as made.
 	ReservedRequests int64
 	// UnitCode is the unit the counters count in: the subject's, recorded
-	// by the first Bump, Charge or Reserve of a subject that names one, so
+	// by the first Bump, Charge, Reserve or Lease of a subject that names one, so
 	// a capability that has only been bumped reads its unit too. Empty
 	// while none has.
 	UnitCode string
@@ -966,7 +973,7 @@ type CopyUsageRequest struct {
 }
 
 // Validate refuses a request naming no capability, no copy, more than
-// MaxCopyUsageIDs, or an empty revocation id, as ErrInvalidRequest.
+// MaxCopyUsageIDs, or an empty revocation id, as limes.ErrInvalidRequest.
 func (r CopyUsageRequest) Validate() error {
 	if r.CapabilityID == uuid.Nil() {
 		return refuseRequest("copy usage: no capability")
@@ -1082,7 +1089,7 @@ type PurgeOrphansRequest struct {
 	Limit int
 }
 
-// Validate refuses a negative Limit, as ErrInvalidRequest.
+// Validate refuses a negative Limit, as limes.ErrInvalidRequest.
 func (r PurgeOrphansRequest) Validate() error {
 	return validateHousekeepingLimit("purge orphans", r.Limit)
 }
@@ -1100,7 +1107,7 @@ type ReleaseExpiredRequest struct {
 	Limit int
 }
 
-// Validate refuses a negative Limit, as ErrInvalidRequest.
+// Validate refuses a negative Limit, as limes.ErrInvalidRequest.
 func (r ReleaseExpiredRequest) Validate() error {
 	return validateHousekeepingLimit("release expired", r.Limit)
 }
@@ -1138,7 +1145,7 @@ type ChargeByRefRequest struct {
 	ExternalRef string
 }
 
-// Validate refuses, as ErrInvalidRequest, a request that names no charge: no
+// Validate refuses, as limes.ErrInvalidRequest, a request that names no charge: no
 // capability, no reference — a charge taken without one has no reference to
 // find it by — or a reference ValidateExternalRef refuses.
 func (r ChargeByRefRequest) Validate() error {
@@ -1156,7 +1163,7 @@ type DeleteUsageRequest struct {
 	CapabilityID uuid.UUID
 }
 
-// Validate refuses a request naming no capability, as ErrInvalidRequest.
+// Validate refuses a request naming no capability, as limes.ErrInvalidRequest.
 func (r DeleteUsageRequest) Validate() error {
 	if r.CapabilityID == uuid.Nil() {
 		return refuseRequest("delete usage: capability id required")
