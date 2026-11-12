@@ -2592,7 +2592,7 @@ ListByPrincipal lists one principal's capabilities a page at a time; the cursor 
 func (s *Store) Purge(ctx context.Context, req limes.PurgeRequest) (limes.PurgeResult, error)
 ```
 
-Purge removes the capabilities expired for longer than the retention, a batch of at most req.Limit (zero: limes.DefaultHousekeepingLimit), and every exchange whose subject token did: an exchange outlives its capability while its token can be presented (limes.ExchangeStore).
+Purge removes the capabilities expired for longer than the retention, a batch of at most req.Limit (zero: limes.DefaultHousekeepingLimit), and every exchange whose subject token did: an exchange outlives its capability while its token can be presented (limes.ExchangeStore). A scope that admits no tenant is refused with limes.ErrScopeMismatch, rather than purging nothing on every call while the records grow.
 
 <sub>[pgstore/store.go](../../pgstore/store.go)</sub>
 <a id="pgstore.Store.RevocationLineage"></a>
@@ -2910,7 +2910,7 @@ ListTenantReservations implements meter.TenantReservationLister: the tenant's ho
 func (s *UsageStore) PurgeOrphans(ctx context.Context, req meter.PurgeOrphansRequest) (meter.PurgeOrphansResult, error)
 ```
 
-PurgeOrphans drops the counters of capabilities no longer on record, as DeleteUsage does, a batch at a time, and forgets the erase mark of each erased tenant none of whose records is left.
+PurgeOrphans drops the counters of capabilities no longer on record, as DeleteUsage does, a batch at a time, and forgets the erase mark of each erased tenant none of whose records is left. A scope that admits no tenant is refused with limes.ErrScopeMismatch, rather than purging nothing on every call.
 
 <sub>[pgstore/usage.go](../../pgstore/usage.go)</sub>
 <a id="pgstore.UsageStore.Refund"></a>
@@ -2943,7 +2943,7 @@ Release ends a reservation without charging. Releasing one that is gone is a no-
 func (s *UsageStore) ReleaseExpired(ctx context.Context, req meter.ReleaseExpiredRequest) (meter.ReleaseExpiredResult, error)
 ```
 
-ReleaseExpired releases the holds past their expiry, oldest first, in one transaction, then settles the leases past theirs, each in a transaction of its own.
+ReleaseExpired releases the holds past their expiry, oldest first, in one transaction, then settles the leases past theirs, each in a transaction of its own. A scope that admits no tenant is refused with limes.ErrScopeMismatch, rather than releasing nothing on every call.
 
 <sub>[pgstore/usage.go](../../pgstore/usage.go)</sub>
 <a id="pgstore.UsageStore.ReleaseMatching"></a>

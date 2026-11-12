@@ -462,7 +462,9 @@ const sqlPurgeExchanges = `DELETE FROM limes.exchanges WHERE token_expires_at < 
 // Purge removes the capabilities expired for longer than the retention, a
 // batch of at most req.Limit (zero: limes.DefaultHousekeepingLimit), and
 // every exchange whose subject token did: an exchange outlives its capability
-// while its token can be presented (limes.ExchangeStore).
+// while its token can be presented (limes.ExchangeStore). A scope that admits
+// no tenant is refused with limes.ErrScopeMismatch, rather than purging
+// nothing on every call while the records grow.
 func (s *Store) Purge(ctx context.Context, req limes.PurgeRequest) (limes.PurgeResult, error) {
 	if err := req.Validate(); err != nil {
 		return limes.PurgeResult{}, err
@@ -473,7 +475,7 @@ func (s *Store) Purge(ctx context.Context, req limes.PurgeRequest) (limes.PurgeR
 	}
 	var purged int64
 	cutoff := s.clock().Add(-req.Retention())
-	err := s.inTx(ctx, func(tx pgx.Tx) error {
+	err := s.inHousekeepingTx(ctx, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, sqlPurge, cutoff, limit)
 		if err != nil {
 			return err

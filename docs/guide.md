@@ -1317,7 +1317,9 @@ retention, with their revocation entries and those of their Biscuit
 copies; then `UsageHousekeeping.PurgeOrphans` releases what the meter
 still holds for them. It never removes a capability while a child stays on
 record: `Insert` refuses a child that would outlive its parent, and among
-records expiring together `Purge` takes the deepest first.
+records expiring together `Purge` takes the deepest first. pgstore's
+`Purge`, `ReleaseExpired` and `PurgeOrphans` remove what their scope
+reaches; one that admits no tenant is `ErrScopeMismatch`.
 
 The retention is at least `MinPurgeRetention` (six minutes, the zero
 value's). A verifier accepts a token up to its `Leeway` past expiry, never

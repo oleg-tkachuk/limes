@@ -428,6 +428,9 @@ type conn struct {
 	// checkEvery refuses, in a call across every tenant, a scope that
 	// admits fewer.
 	checkEvery func(ctx context.Context, tx pgx.Tx) error
+	// checkAny refuses, in housekeeping over the rows its scope reaches, a
+	// scope that admits no tenant.
+	checkAny func(ctx context.Context, tx pgx.Tx) error
 	// leases is the negation of Config.DisableLeases.
 	leases bool
 	// maxCopies is Config.MaxCopiesPerCapability, its default applied.
@@ -480,18 +483,18 @@ func newConn(cfg Config) (conn, error) {
 	txs, path := txBeginnerOf(cfg.DB)
 	cfg.Logger.Info("pgstore: opening transactions",
 		slog.String(logKeyTxPath, path), slog.String(logKeyDBType, fmt.Sprintf("%T", cfg.DB)))
-	checkReadOnly, checkEvery := checkSchemaReadOnly, checkSchemaAdmitsEvery
+	checkReadOnly, checkEvery, checkAny := checkSchemaReadOnly, checkSchemaAdmitsEvery, checkSchemaAdmitsAny
 	if cfg.CheckScope == nil && cfg.Scope == nil {
 		cfg.CheckScope = checkContextScope
 	}
 	if cfg.Scope == nil {
 		cfg.Scope = ScopeFromContext
-		checkReadOnly, checkEvery = nil, checkContextAdmitsEvery
+		checkReadOnly, checkEvery, checkAny = nil, checkContextAdmitsEvery, checkContextAdmitsAny
 	}
 	return conn{
 		db: cfg.DB, txs: txs, now: cfg.Now, scope: cfg.Scope,
 		checkTenant: cfg.CheckTenant, checkScope: cfg.CheckScope,
-		checkReadOnly: checkReadOnly, checkEvery: checkEvery,
+		checkReadOnly: checkReadOnly, checkEvery: checkEvery, checkAny: checkAny,
 		leases:     !cfg.DisableLeases,
 		maxCopies:  int64(cfg.MaxCopiesPerCapability),
 		log:        cfg.Logger,
@@ -606,6 +609,18 @@ func (c conn) inTenantReadTx(ctx context.Context, tenant uuid.UUID, fn func(pgx.
 func (c conn) inEveryTenantReadTx(ctx context.Context, fn func(pgx.Tx) error) error {
 	return c.inReadTx(ctx, func(tx pgx.Tx) error {
 		if err := c.checkEvery(ctx, tx); err != nil {
+			return err
+		}
+		return fn(tx)
+	})
+}
+
+// inHousekeepingTx is inTx for housekeeping over the rows its scope
+// reaches: a scope that admits no tenant is refused before fn reads a row,
+// rather than fn finding nothing to do on every call.
+func (c conn) inHousekeepingTx(ctx context.Context, fn func(pgx.Tx) error) error {
+	return c.inTx(ctx, func(tx pgx.Tx) error {
+		if err := c.checkAny(ctx, tx); err != nil {
 			return err
 		}
 		return fn(tx)

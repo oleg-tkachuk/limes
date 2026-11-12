@@ -301,10 +301,7 @@ func (l *Ledger) PurgeCharges(ctx context.Context, req meter.PurgeChargesRequest
 		return meter.PurgeChargesResult{}, err
 	}
 	var purged int64
-	err := l.inTx(ctx, func(tx pgx.Tx) error {
-		if err := checkSchemaAdmitsAny(ctx, tx); err != nil {
-			return err
-		}
+	err := l.inHousekeepingTx(ctx, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, sqlPurgeCharges, l.clock().Add(-req.Retention()), meter.HousekeepingLimit(req.Limit))
 		purged = tag.RowsAffected()
 		return err
