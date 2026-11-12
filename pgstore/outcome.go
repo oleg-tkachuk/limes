@@ -16,8 +16,10 @@ import (
 // COMMIT may have reached the database, and its answer did not come back.
 //
 // The outcome is known when the database answered: an error of its own
-// (PgError) aborted the transaction before COMMIT ran, or COMMIT answered
-// that it rolled back. It is known too when the transaction had already
+// (PgError) of ERROR severity aborted the transaction, before COMMIT ran or
+// as COMMIT failed, or COMMIT answered that it rolled back. A FATAL or PANIC
+// one ended the session, which it may have done once COMMIT had committed:
+// that is unknown. It is known too when the transaction had already
 // ended (ErrTxClosed), or pgx sent nothing (SafeToRetry) — but for a closed
 // connection (pgconn.ErrConnClosed): pgx reports a COMMIT whose answer a
 // dropped connection lost as that, though COMMIT left, so it is taken as
@@ -26,8 +28,10 @@ import (
 func commitUnanswered(err error) bool {
 	var pgErr *pgconn.PgError
 	switch {
-	case err == nil, errors.As(err, &pgErr):
+	case err == nil:
 		return false
+	case errors.As(err, &pgErr):
+		return endedSession(pgErr)
 	case errors.Is(err, pgx.ErrTxCommitRollback), errors.Is(err, pgx.ErrTxClosed):
 		return false
 	case errors.Is(err, pgconn.ErrConnClosed):
@@ -36,6 +40,26 @@ func commitUnanswered(err error) bool {
 		return false
 	}
 	return true
+}
+
+// The severities PostgreSQL names an error that ends the session with, as
+// sent untranslated (SeverityUnlocalized), and the one that aborts only the
+// transaction.
+const (
+	severityFatal = "FATAL"
+	severityPanic = "PANIC"
+	severityError = "ERROR"
+)
+
+// endedSession reports whether pgErr ended the session rather than the
+// transaction alone. A server older than 9.6 sends the severity only
+// translated (Severity), which then names it in English or not at all.
+func endedSession(pgErr *pgconn.PgError) bool {
+	severity := pgErr.SeverityUnlocalized
+	if severity == "" {
+		severity = pgErr.Severity
+	}
+	return severity == severityFatal || severity == severityPanic
 }
 
 // outcomeOf is err as meter.ErrOutcomeUnknown, wrapping it, when it left the
