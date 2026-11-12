@@ -73,11 +73,19 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 ## pgstore/v0.77.0
 
 - `Store.Purge`, `UsageStore.ReleaseExpired` and `UsageStore.PurgeOrphans`
-  under a scope that admits no tenant refuse with `limes.ErrScopeMismatch`,
-  where they ran over no rows and reported nothing done, as
-  `Ledger.PurgeCharges` already did. Call them under `WithAllTenants`, or
+  under a scope that admits no tenant refuse with `limes.ErrScopeMismatch`
+  (`scope_mismatch`, 500, `internal`), where they ran over no rows and
+  reported nothing done, as `Ledger.PurgeCharges` already did. A worker
+  that called them without a scope purged and released nothing; it now
+  fails on its first call. Call them under `WithAllTenants`, or
   `WithTenant` for one tenant's; a `Config.Scope` of your own must set
   `SettingAllTenants` or `SettingTenant` for them, as for `PurgeCharges`.
+- The rows and batch results the transaction from `TxFrom` hands out hand
+  out no connection: `Rows.Conn` and `BatchResults.Tx` return nil, as the
+  transaction's own `Conn` already did. Run every statement through the
+  transaction itself. Rows a callback leaves open are closed when it
+  returns, and a call on the transaction from a batch's `QueuedQuery`
+  callback is refused with `pgstore.ErrChargeTransaction`.
 
 ## v0.178.0
 
