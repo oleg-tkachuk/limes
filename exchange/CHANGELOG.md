@@ -2,6 +2,23 @@
 
 Every release of the exchange module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.25.0](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.24.2...exchange%2Fv0.25.0) (2026-11-12)
+
+### ⚠ BREAKING CHANGES
+
+* **exchange:** a scope parameter holding a byte outside NQCHAR, or a delimiter other than a space, is invalid_scope.
+* **exchange:** RemoteKeys refuses a key set document past jwks.DefaultMaxDocumentBytes.
+
+### Bug Fixes
+
+* **exchange:** cap the jwks document and let a cancelled fetch hold off none ([0238039](https://github.com/oleg-tkachuk/limes/commit/02380399e021037118c3442893cede9190a3d142))
+* **exchange:** check the client's audiences before the revocation lookup ([151c445](https://github.com/oleg-tkachuk/limes/commit/151c445ff343eb1e67431b60a8362e0976f5a412))
+* **exchange:** read the scope parameter as RFC 6749 splits it ([a1e59ff](https://github.com/oleg-tkachuk/limes/commit/a1e59ffaf3811cd8040e0b1303e62d8b136bef13))
+
+### Dependencies
+
+* require limes v0.180.0
+
 ## [0.24.2](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.24.1...exchange%2Fv0.24.2) (2026-11-12)
 
 ### Bug Fixes

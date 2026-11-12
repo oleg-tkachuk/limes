@@ -2,6 +2,22 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.78.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.77.1...pgstore%2Fv0.78.0) (2026-11-12)
+
+### ⚠ BREAKING CHANGES
+
+* **pgstore:** a callback that sets the session's role has its call refused, and a deadlock it returns while the call's transaction stands is not retried.
+* **pgstore:** a FATAL or PANIC error on a meter call's commit batch is meter.ErrOutcomeUnknown, not store_unavailable.
+
+### Bug Fixes
+
+* **pgstore:** answer a commit batch's session-ending error as an unknown outcome ([827ac15](https://github.com/oleg-tkachuk/limes/commit/827ac1517afacc82c1895ab7ff301a073efe6adb))
+* **pgstore:** refuse a callback's session role and rerun no foreign deadlock ([a13b25b](https://github.com/oleg-tkachuk/limes/commit/a13b25b083796aadea776203e2ff4514aad1791c))
+
+### Dependencies
+
+* require limes v0.180.0
+
 ## [0.77.1](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.77.0...pgstore%2Fv0.77.1) (2026-11-12)
 
 ### Bug Fixes
