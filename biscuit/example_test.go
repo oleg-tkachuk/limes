@@ -225,11 +225,11 @@ func ExampleAttenuate() {
 	s := newExampleStack()
 	c, token := s.issue()
 
-	fullResult, err := s.issuer.Biscuit(context.Background(), limes.BiscuitRequest{Capability: s.verified(token)})
-	full := fullResult.Token
+	fullResult, err := s.issuer.Biscuit(ctx, limes.BiscuitRequest{Capability: s.verified(token)})
 	if err != nil {
 		log.Fatal(err)
 	}
+	full := fullResult.Token
 	// The holder narrows it offline: no key, no network.
 	narrow, err := biscuit.Attenuate(full, limes.Attenuation{
 		Ops:              []limes.Op{limes.OpGet},
