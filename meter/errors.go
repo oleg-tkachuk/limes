@@ -74,8 +74,10 @@ var ErrSettleConflict error = &familyError{"limes: reservation already settled f
 // ErrReserveConflict — Reserve named a ReservationID already on record for
 // another hold: one of another capability, tenant, Biscuit copies, amount,
 // unit, op or actor, or one already settled. One id names one hold;
-// replaying the first would report the second as held. Matches limes.ErrConflict,
-// as ErrExternalRefConflict does.
+// replaying the first would report the second as held. A store whose
+// Reserve cannot see another tenant's settled hold answers the Settle of a
+// hold under its id with it instead. Matches limes.ErrConflict, as
+// ErrExternalRefConflict does.
 var ErrReserveConflict error = &familyError{"limes: reservation id already names a different hold", limes.ErrConflict, CodeReserveConflict}
 
 // ErrRefundConflict — Refund named a RefundID already on record for a
