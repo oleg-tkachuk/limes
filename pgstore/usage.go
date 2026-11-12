@@ -68,6 +68,32 @@ func (s *UsageStore) Refund(ctx context.Context, req meter.RefundRequest, onRefu
 	return receipt, nil
 }
 
+// sqlShareChargeTenantLock shares the erase lock (class $1) of the tenant
+// of charge $2, as sqlShareTenantLock does; it takes none when there is no
+// such charge.
+const sqlShareChargeTenantLock = `SELECT pg_advisory_xact_lock_shared(` +
+	tenantLockKeyOpen + `(SELECT tenant_id FROM limes.charges WHERE id = $2)` + tenantLockKeyClose + `)`
+
+// readRefunded shares the erase lock of the tenant of charge id, before any
+// row is locked, as a charge shares it (readPrelude), and reads the charge,
+// in one batch: a refund writes the tenant's aggregate or its stripe, so
+// SetTenantBudget and an erase, which take the lock alone, wait for it and
+// it for them. The charge's tenant is never changed, so the lock is the
+// one of the charge the call locks later.
+func readRefunded(ctx context.Context, tx pgx.Tx, id uuid.UUID) (ledgerEntry, bool, error) {
+	b := &pgx.Batch{}
+	b.Queue(sqlShareChargeTenantLock, eraseLockClass, id)
+	b.Queue(sqlChargeByID, id)
+	br := tx.SendBatch(ctx, b)
+	e, ok, err := func() (ledgerEntry, bool, error) {
+		if _, err := br.Exec(); err != nil {
+			return ledgerEntry{}, false, err
+		}
+		return scanEntry(br.QueryRow())
+	}()
+	return e, ok, errors.Join(err, br.Close())
+}
+
 // lockRefunded reads the charge req names and locks the counters it
 // debited, then the charge itself, with the refund on record under
 // req.RefundID read beside it. It is read once to learn which counters
@@ -77,7 +103,7 @@ func (s *UsageStore) Refund(ctx context.Context, req meter.RefundRequest, onRefu
 // charge is locked, so a refund of it under the id that committed meanwhile
 // is read.
 func (s *UsageStore) lockRefunded(ctx context.Context, tx pgx.Tx, req meter.RefundRequest) (ledgerEntry, *counters, priorRefund, error) {
-	e, ok, err := readEntry(ctx, tx, sqlChargeByID, req.ChargeID)
+	e, ok, err := readRefunded(ctx, tx, req.ChargeID)
 	if err != nil {
 		return ledgerEntry{}, nil, priorRefund{}, err
 	}
