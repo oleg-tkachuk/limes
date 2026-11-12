@@ -159,7 +159,7 @@ type IssueRequest struct {
 }
 ```
 
-IssueRequest is the input shape for Issuer.Issue. Subject (with its TenantID), IssuedBy, Audience and Caveats are required; TTL, NotBefore and ConfirmationJKT are optional, and the issuer fills in ID, IssuedAt, ExpiresAt and Issuer. Caveats are validated (Caveats.Validate) before anything is persisted.
+IssueRequest is the input shape for Issuer.Issue. Subject (with its TenantID and Subject), IssuedBy, ClientID, Audience and Caveats are required; TTL, NotBefore and ConfirmationJKT are optional, and the issuer fills in ID, IssuedAt, ExpiresAt and Issuer. Caveats are validated (Caveats.Validate) before anything is persisted.
 
 <sub>[issuer.go](../../issuer.go)</sub>
 <a id="limes.IssueResult"></a>

@@ -179,7 +179,8 @@ type Store interface {
 // otherwise — can satisfy the Store contract using only what this package
 // publishes.
 //
-// The verifier never returns it: an id not on record is simply not revoked.
+// The verifier never returns it: an id not on record is refused as
+// ErrUnrecorded, or taken as not revoked under VerifierConfig.AllowUnrecorded.
 var ErrNotFound = errors.New("limes: not found")
 
 // Record is a capability as the Store holds it.

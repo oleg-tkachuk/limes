@@ -156,7 +156,8 @@ func (i *Issuer) sign(ctx context.Context, c Capability) (string, error) {
 }
 
 // IssueRequest is the input shape for Issuer.Issue. Subject (with its
-// TenantID), IssuedBy, Audience and Caveats are required; TTL, NotBefore
+// TenantID and Subject), IssuedBy, ClientID, Audience and Caveats are
+// required; TTL, NotBefore
 // and ConfirmationJKT are optional, and the issuer fills in ID, IssuedAt,
 // ExpiresAt and Issuer. Caveats are
 // validated (Caveats.Validate) before anything is persisted.
