@@ -45,15 +45,15 @@ var ErrChargeTransaction = fmt.Errorf("%w: pgstore: the transaction a callback r
 // The transaction is the callback's while it runs, and no longer: once it
 // returns, every call on it, from any goroutine, fails with
 // pgx.ErrTxClosed, and a call still running then is waited for before the
-// store commits. Calls are taken one at a time, as a pgx.Tx needs, and
-// so are the reads of the rows and batch results it hands out: those still
-// open when the callback returns are closed then, and read no further. A
-// batch's QueuedQuery callbacks run while its Close holds the transaction:
-// a call they make on it, or one from another goroutine meanwhile, is
-// refused with ErrChargeTransaction. A sql.Scanner, driver.Valuer or
-// pgx.CopyFromSource runs inside the call that reads or sends it, holding
-// the transaction: one that calls the transaction waits on itself for ever,
-// with the tenant's locks held, so none may.
+// store commits. It takes one call at a time, as a pgx.Tx does, and so it
+// takes the reads of the rows and batch results it hands out: a call made
+// while another runs is refused with ErrChargeTransaction, never waited
+// for, as pgx refuses a busy connection. That holds for a call from another
+// goroutine, and for one from code the running call runs — a batch's
+// QueuedQuery callback, a sql.Scanner, a driver.Valuer, a
+// pgx.CopyFromSource — which would otherwise wait on itself with the
+// tenant's locks held. Rows and batch results still open when the callback
+// returns are closed then, and read no further.
 // Commit and Rollback return ErrChargeTransaction; a savepoint (Begin) is
 // the callback's to end. Conn is nil, as the connection is the store's, and
 // a call whose transaction the callback ended with SQL of its own — COMMIT,
@@ -75,46 +75,35 @@ func TxFrom(ctx context.Context) (pgx.Tx, bool) {
 type callbackGuard struct {
 	mu     sync.Mutex
 	closed bool
+	// closing is set once the callback has returned, before close waits for
+	// a call still running: a call refused meanwhile is refused as closed.
+	closing atomic.Bool
 	// open closes each result handed out, rows and batches, latest first.
 	open []func()
-	// inBatchCallback is set while a batch's QueuedQuery callback runs,
-	// inside the batch's Close, which holds mu: a call it made would wait
-	// on mu for ever.
-	inBatchCallback atomic.Bool
 }
 
-// errBatchCallbackCall is a call on the transaction from a batch's
-// QueuedQuery callback, refused rather than waited for.
-var errBatchCallbackCall = fmt.Errorf("%w: pgstore: a batch's QueuedQuery callback may not call the transaction its batch is read on", ErrChargeTransaction)
+// errCallInFlight is a call on the transaction while another runs on it,
+// refused rather than waited for: the one running may be what makes it.
+var errCallInFlight = fmt.Errorf("%w: pgstore: a call on the transaction while another runs on it", ErrChargeTransaction)
 
-// enter takes the lock for a call, unless a batch's callback, which runs
-// holding it, is what makes the call.
+// enter takes the lock for a call, refusing one made while another holds
+// it: pgx.ErrTxClosed once the callback has returned, errCallInFlight
+// before.
 func (g *callbackGuard) enter() error {
-	if g.inBatchCallback.Load() {
-		return errBatchCallbackCall
+	if g.mu.TryLock() {
+		return nil
 	}
-	g.mu.Lock()
-	return nil
-}
-
-// inBatch marks each of b's QueuedQuery callbacks as running inside its
-// batch's Close (inBatchCallback).
-func (g *callbackGuard) inBatch(b *pgx.Batch) {
-	for _, q := range b.QueuedQueries {
-		if fn := q.Fn; fn != nil {
-			q.Fn = func(br pgx.BatchResults) error {
-				g.inBatchCallback.Store(true)
-				defer g.inBatchCallback.Store(false)
-				return fn(br)
-			}
-		}
+	if g.closing.Load() {
+		return pgx.ErrTxClosed
 	}
+	return errCallInFlight
 }
 
 // close ends the transaction for the callback, once any call running on it
 // has returned: it closes every result the callback left open, so the
 // connection is free for the store's COMMIT, and refuses every call after.
 func (g *callbackGuard) close() {
+	g.closing.Store(true)
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.closed = true
@@ -184,10 +173,16 @@ func (t *callbackTx) Rollback(ctx context.Context) error {
 	return t.guard.run(func() error { return t.tx.Rollback(ctx) })
 }
 
+// CopyFrom copies rows into table. A copy rows failed is answered with
+// rows' own error: pgx sends it to the server as the copy's failure, whose
+// error back would name a cancelled statement, not why.
 func (t *callbackTx) CopyFrom(ctx context.Context, table pgx.Identifier, columns []string, rows pgx.CopyFromSource) (int64, error) {
 	var n int64
 	err := t.guard.run(func() (err error) {
 		n, err = t.tx.CopyFrom(ctx, table, columns, rows)
+		if sourceErr := rows.Err(); err != nil && sourceErr != nil {
+			return sourceErr
+		}
 		return err
 	})
 	return n, err
@@ -196,7 +191,6 @@ func (t *callbackTx) CopyFrom(ctx context.Context, table pgx.Identifier, columns
 func (t *callbackTx) SendBatch(ctx context.Context, b *pgx.Batch) pgx.BatchResults {
 	var results pgx.BatchResults
 	if err := t.guard.run(func() error {
-		t.guard.inBatch(b)
 		results = t.guard.batch(t.tx.SendBatch(ctx, b))
 		return nil
 	}); err != nil {
@@ -205,17 +199,12 @@ func (t *callbackTx) SendBatch(ctx context.Context, b *pgx.Batch) pgx.BatchResul
 	return results
 }
 
-// LargeObjects is the transaction's large objects: the zero LargeObjects,
-// which no call can use, once the callback has returned. pgx.LargeObjects
-// is a struct over the transaction it was made on, which this one cannot
-// stand in for, so its calls are not taken through the guard: one kept past
-// the callback would run beside the store's COMMIT, and the callback may not
-// keep it.
-func (t *callbackTx) LargeObjects() pgx.LargeObjects {
-	var lo pgx.LargeObjects
-	_ = t.guard.run(func() error { lo = t.tx.LargeObjects(); return nil })
-	return lo
-}
+// LargeObjects is the zero LargeObjects, which no call can use: the
+// transaction lends none. pgx.LargeObjects is a struct over the transaction
+// it was made on, which this one cannot stand in for, so its calls would
+// not be taken one at a time, and one kept past the callback would run
+// beside the store's COMMIT.
+func (t *callbackTx) LargeObjects() pgx.LargeObjects { return pgx.LargeObjects{} }
 
 func (t *callbackTx) Prepare(ctx context.Context, name, sql string) (*pgconn.StatementDescription, error) {
 	var d *pgconn.StatementDescription
