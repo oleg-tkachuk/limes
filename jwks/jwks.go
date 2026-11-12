@@ -99,7 +99,8 @@ var algorithms = []string{AlgorithmEd25519, AlgorithmEdDSA}
 // Marshal produces a JWKS document for the supplied kid → public key
 // map, with entries sorted by kid so the same key set always serialises to
 // the same bytes (cacheable, diffable, ETag-able). Every entry names
-// AlgorithmEd25519; MarshalAlgorithms names another.
+// AlgorithmEd25519; MarshalAlgorithms names another. A key that is not an
+// Ed25519 public key's length is refused with limes.ErrInvalidRequest.
 func Marshal(keys map[string]ed25519.PublicKey) ([]byte, error) {
 	return MarshalAlgorithms(keys, nil)
 }
@@ -108,7 +109,8 @@ func Marshal(keys map[string]ed25519.PublicKey) ([]byte, error) {
 // name: AlgorithmEdDSA for a key whose signer writes EdDSA, so a library
 // that matches the names finds it. A key algs does not name is
 // AlgorithmEd25519's. A name for a kid keys does not hold, or a name that
-// is neither, is refused: it would describe no key, or one no token names.
+// is neither, is refused with limes.ErrInvalidRequest: it would describe no
+// key, or one no token names.
 func MarshalAlgorithms(keys map[string]ed25519.PublicKey, algs map[string]string) ([]byte, error) {
 	for kid, alg := range algs {
 		if _, ok := keys[kid]; !ok {
@@ -139,11 +141,12 @@ func MarshalAlgorithms(keys map[string]ed25519.PublicKey, algs map[string]string
 	return json.Marshal(document{Keys: &entries})
 }
 
-// Parse decodes a JWKS document into a kid → public key map. Entries
-// that are not Ed25519 (a future kty), that lack a kid, whose use or
-// key_ops is not verifying signatures (RFC 7517 §4.2, §4.3), whose key does
-// not decode to an Ed25519 public key, or that are not of the shape a JWK
-// is read in — a member of another JSON type, no object at all — are skipped
+// Parse decodes a JWKS document into a kid → public key map. Entries that
+// are not Ed25519 (a future kty), that lack a kid, whose alg, when set,
+// names neither AlgorithmEd25519 nor AlgorithmEdDSA, whose use or key_ops
+// is not verifying signatures (RFC 7517 §4.2, §4.3), whose key does not
+// decode to an Ed25519 public key, or that are not of the shape a JWK is
+// read in — a member of another JSON type, no object at all — are skipped
 // rather than failing the document (RFC 7517 §5): one malformed or foreign
 // entry must not take every other key — and so every token signed with them
 // — out of service during a rotation. Two Ed25519 keys naming one kid are

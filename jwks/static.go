@@ -10,10 +10,10 @@ import (
 	"github.com/oleg-tkachuk/limes/internal/errs"
 )
 
-// ErrUnknownKID is the typed not-found return from KeyResolver. The
-// verifier wraps it in ErrInvalidToken for caller-facing errors, and it
-// stays matchable, so ops dashboards can tell "we don't know this kid" from
-// "signature mismatch".
+// ErrUnknownKID is what a limes.KeyResolver returns for a kid it holds no
+// key for. The verifier wraps it in limes.ErrInvalidToken, the token's
+// fault, and it stays matchable, so ops dashboards can tell "we don't know
+// this kid" from "signature mismatch".
 var ErrUnknownKID = errors.New("jwks: unknown kid")
 
 // Static is the in-memory implementation used in tests and
@@ -31,9 +31,10 @@ type StaticConfig struct {
 	Keys map[string]ed25519.PublicKey
 }
 
-// NewStatic builds a resolver over cfg.Keys, refusing an empty kid or a key
-// that is not an Ed25519 public key's length — which the verifier would
-// otherwise read, token by token, as the tokens' fault.
+// NewStatic builds a resolver over cfg.Keys, refusing with
+// limes.ErrInvalidConfig an empty kid or a key that is not an Ed25519 public
+// key's length — which the verifier would otherwise read, token by token,
+// as the tokens' fault.
 func NewStatic(cfg StaticConfig) (*Static, error) {
 	keys := make(map[string]ed25519.PublicKey, len(cfg.Keys))
 	for kid, key := range cfg.Keys {
@@ -56,7 +57,8 @@ func validateKey(kid string, key ed25519.PublicKey) error {
 	return nil
 }
 
-// PublicKey implements limes.KeyResolver.
+// PublicKey implements limes.KeyResolver: a copy of kid's key, or
+// ErrUnknownKID.
 func (r *Static) PublicKey(_ context.Context, kid string) (ed25519.PublicKey, error) {
 	r.mu.RLock()
 	k, ok := r.keys[kid]

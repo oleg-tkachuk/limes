@@ -64,7 +64,10 @@ func SealNonceKeys(keys ...[]byte) NonceKeys {
 // Len is how many keys k holds.
 func (k NonceKeys) Len() int { return len(k.k.get()) }
 
-func (k NonceKeys) String() string   { return redactedKeys(k.Len()).String() }
+// String is how many keys k holds, never their bytes.
+func (k NonceKeys) String() string { return redactedKeys(k.Len()).String() }
+
+// GoString is String.
 func (k NonceKeys) GoString() string { return k.String() }
 
 // Format prints the keys as their count under every verb.
