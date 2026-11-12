@@ -1832,8 +1832,8 @@ Refunded is what Meter.Refund hands onRefunded: the refund it runs inside, befor
 
 ```go
 type ReleaseExpiredRequest struct {
-	// Limit bounds the reservations released. Zero:
-	// DefaultHousekeepingLimit; negative is refused.
+	// Limit bounds the reservations released, and apart from them the
+	// leases settled. Zero: DefaultHousekeepingLimit; negative is refused.
 	Limit int
 }
 ```

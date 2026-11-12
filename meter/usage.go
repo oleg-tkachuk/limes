@@ -1102,8 +1102,8 @@ type PurgeOrphansResult struct {
 
 // ReleaseExpiredRequest is one batch of UsageHousekeeping.ReleaseExpired.
 type ReleaseExpiredRequest struct {
-	// Limit bounds the reservations released. Zero:
-	// DefaultHousekeepingLimit; negative is refused.
+	// Limit bounds the reservations released, and apart from them the
+	// leases settled. Zero: DefaultHousekeepingLimit; negative is refused.
 	Limit int
 }
 

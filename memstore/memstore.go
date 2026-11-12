@@ -1859,8 +1859,7 @@ func (s *UsageStore) ReleaseExpired(_ context.Context, req meter.ReleaseExpiredR
 		s.applyHoldLocked(h, -1)
 		delete(s.holds, h.id)
 	}
-	settled := s.settleLeasesLocked(func(l lease) bool { return !l.openAt(now) })
-	return meter.ReleaseExpiredResult{Released: int64(len(due)), SettledLeases: settled}, nil
+	return meter.ReleaseExpiredResult{Released: int64(len(due)), SettledLeases: s.settleDueLeasesLocked(now, limit)}, nil
 }
 
 // Refund returns spend from one ledger entry to the counters it debited,
