@@ -46,6 +46,10 @@ func TestCommitUnanswered(t *testing.T) {
 		"the transaction ended":      {pgx.ErrTxClosed, false},
 		"nothing sent":               {safeToRetry{lost}, false},
 		"the connection closed":      {safeToRetry{pgconn.ErrConnClosed}, true},
+		"a statement timed out":      {&pgconn.PgError{Severity: severityError, SeverityUnlocalized: severityError, Code: pgerrcode.QueryCanceled}, false},
+		"the session ended":          {&pgconn.PgError{Severity: severityFatal, SeverityUnlocalized: severityFatal, Code: pgerrcode.AdminShutdown}, true},
+		"the server crashed":         {&pgconn.PgError{Severity: severityPanic, SeverityUnlocalized: severityPanic, Code: pgerrcode.CrashShutdown}, true},
+		"a localized session end":    {&pgconn.PgError{Severity: severityFatal, Code: pgerrcode.AdminShutdown}, true},
 	} {
 		if got := commitUnanswered(tc.err); got != tc.want {
 			t.Errorf("%s: commitUnanswered(%v) = %v, want %v", name, tc.err, got, tc.want)
