@@ -50,15 +50,17 @@ type scope struct {
 }
 
 // WithTenant scopes the calls made with ctx to one tenant: under the row-level
-// security of the store's schema, a role that does not own the tables sees
-// and writes that tenant's rows only.
+// security of the store's schema, a role it binds — any but a superuser or
+// one with BYPASSRLS, the tables' owner too — sees and writes that tenant's
+// rows only.
 func WithTenant(ctx context.Context, tenant uuid.UUID) context.Context {
 	return context.WithValue(ctx, scopeKey{}, scope{tenant: tenant})
 }
 
 // WithAllTenants scopes the calls made with ctx to every tenant, to read
 // and write: for housekeeping (Store.Purge, UsageStore.ReleaseExpired and
-// PurgeOrphans). A read across tenants takes WithAllTenantsReadOnly. A call
+// PurgeOrphans, Ledger.PurgeCharges) and for RevokeMatching and
+// ReleaseMatching with AllTenants. A read across tenants takes WithAllTenantsReadOnly. A call
 // scoped to none sees no row at all.
 func WithAllTenants(ctx context.Context) context.Context {
 	return context.WithValue(ctx, scopeKey{}, scope{all: true})

@@ -983,7 +983,9 @@ SET ancestors = coalesce(
 WHERE ancestors && $1`
 )
 
-// ReleaseExpired releases the holds past their expiry, oldest first.
+// ReleaseExpired releases the holds past their expiry, oldest first, in one
+// transaction, then settles the leases past theirs, each in a transaction
+// of its own.
 func (s *UsageStore) ReleaseExpired(ctx context.Context, req meter.ReleaseExpiredRequest) (meter.ReleaseExpiredResult, error) {
 	if err := req.Validate(); err != nil {
 		return meter.ReleaseExpiredResult{}, err
@@ -1214,8 +1216,9 @@ func (s *UsageStore) settledThen(ctx context.Context, op meter.StoreOperation, s
 	}
 }
 
-// DeleteUsage drops a capability's counters and its copies', releasing its
-// holds first: nothing could settle or release them once it is gone.
+// DeleteUsage drops a capability's counters and its copies', settling its
+// lease and those below it and releasing its holds first: nothing could
+// settle or release them once it is gone.
 func (s *UsageStore) DeleteUsage(ctx context.Context, req meter.DeleteUsageRequest) error {
 	if err := req.Validate(); err != nil {
 		return err
@@ -1252,7 +1255,8 @@ func (s *UsageStore) DeleteUsage(ctx context.Context, req meter.DeleteUsageReque
 }
 
 // PurgeOrphans drops the counters of capabilities no longer on record, as
-// DeleteUsage does, a batch at a time.
+// DeleteUsage does, a batch at a time, and forgets the erase mark of each
+// erased tenant none of whose records is left.
 func (s *UsageStore) PurgeOrphans(ctx context.Context, req meter.PurgeOrphansRequest) (meter.PurgeOrphansResult, error) {
 	if err := req.Validate(); err != nil {
 		return meter.PurgeOrphansResult{}, err

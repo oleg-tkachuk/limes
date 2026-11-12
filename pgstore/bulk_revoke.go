@@ -150,8 +150,8 @@ func firstTenants(batch []selected) ([]uuid.UUID, []uuid.UUID, bool) {
 // tenant's revoke lock, as Revoke, an entry for a batch of its matching
 // capabilities that have none. With AllTenants it runs under a scope that
 // admits writing every tenant (WithAllTenants), refusing any narrower as
-// limes.ErrScopeMismatch, and a batch spans at most maxTenantsPerBatch
-// tenants, each under its revoke lock.
+// limes.ErrScopeMismatch, and a batch spans at most 16 tenants, each under
+// its revoke lock; one cut there reports More.
 func (s *Store) RevokeMatching(ctx context.Context, req limes.RevokeMatchingRequest) (limes.RevokeMatchingResult, error) {
 	if err := req.Validate(); err != nil {
 		return limes.RevokeMatchingResult{}, err

@@ -13,7 +13,8 @@ import (
 	"github.com/oleg-tkachuk/limes/meter"
 )
 
-// Ledger implements meter.LedgerReader over the store's charges ledger.
+// Ledger implements meter.LedgerReader and meter.LedgerHousekeeping over the
+// store's charges ledger.
 //
 // A charge carries the store's time, so a test of a report backdates its
 // charges through Config.Now rather than by writing the charges table, whose
@@ -128,8 +129,8 @@ type sumCursor struct {
 }
 
 // SumCharges implements meter.LedgerReader, in one transaction scoped to
-// the tenant (Config.CheckScope) or, with AllTenants, to every tenant to
-// read (WithAllTenantsReadOnly), as ListTenantBudgets is.
+// the tenant (Config.CheckScope) or, with AllTenants, to every tenant
+// (WithAllTenantsReadOnly or WithAllTenants), as ListTenantBudgets is.
 func (l *Ledger) SumCharges(ctx context.Context, req meter.SumChargesRequest) (limes.Page[meter.ChargeSum], error) {
 	if err := req.Validate(); err != nil {
 		return limes.Page[meter.ChargeSum]{}, err

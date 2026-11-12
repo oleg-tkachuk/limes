@@ -11,8 +11,9 @@ type TableErase int
 const (
 	// EraseRemoves: the erase removes every row of the tenant.
 	EraseRemoves TableErase = iota + 1
-	// EraseKeepsUntilPurge: the rows of records not yet due stay, revoked,
-	// until Store.Purge removes the records and these rows with them.
+	// EraseKeepsUntilPurge: the rows stay, those of records not yet due
+	// revoked, until Store.Purge removes them: with their record, or, for
+	// exchanges, once their subject token has expired.
 	EraseKeepsUntilPurge
 	// EraseMarks: the erase adds the tenant's row, which UsageStore.PurgeOrphans
 	// removes once none of the tenant's records is left.

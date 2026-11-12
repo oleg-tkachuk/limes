@@ -2,8 +2,10 @@
 // contracts over PostgreSQL: limes.Store, limes.BiscuitRevocationStore,
 // limes.RevocationLineageLookup and limes.BulkRevoker for capability records
 // and revocations, limes.ExchangeStore for token exchange,
-// meter.UsageStore and meter.CopyUsageReader for the meter,
-// meter.LedgerReader, limes.RecordCensus and limes.RecordLister for reports,
+// meter.UsageStore, meter.CopyUsageReader, meter.Leaser,
+// meter.MatchingReleaser and meter.TenantReservationLister for the meter,
+// meter.LedgerReader, limes.RecordCensus, limes.RecordLister and
+// limes.RecordListingReader for reports,
 // meter.LedgerHousekeeping for bounding the ledger,
 // limes.TenantRecordEraser and meter.TenantUsageEraser for removing a
 // tenant, and dpop.ReplayCache (ReplayCache) for DPoP proof ids shared by
@@ -35,9 +37,11 @@
 // through a view that runs as its caller (security_invoker), so their
 // row-level security binds it as it binds a read of the table.
 //
-// Every call runs in one READ COMMITTED transaction on one connection,
-// whatever the database's default — but for the two revocation checks, each
-// a single statement (see Tenants) — and every time it
+// Every call runs in READ COMMITTED transactions on one connection,
+// whatever the database's default — one per call, but for a call that
+// settles leases, each in a transaction of its own, and for the revocation
+// checks (IsRevoked, IsBiscuitRevoked, RevocationLineage), each a single
+// statement (see Tenants) — and every time it
 // writes or compares against comes from Config.Now, but one: with Config.Now
 // nil, the usage store measures holds' and leases' expiry by the database's
 // clock, now(), the time its transaction began. The replicas of a service
@@ -90,12 +94,12 @@
 // off. Config.CheckTenant lets a consumer that keeps its own
 // tenants refuse one it does not hold.
 //
-// A call whose request names its tenant — Insert, ListByPrincipal, Bump,
-// Charge, Reserve, Settle, Release, GetTenantBudget, SetTenantBudget, the
-// erasers, Ledger.SumCharges, Census.ListRecords and Census.CountRecords for
-// one tenant — under a
-// scope
-// that does not admit that tenant returns limes.ErrScopeMismatch rather than
+// A call whose request names its tenant — Insert, ListByPrincipal,
+// RevokeMatching, ExchangedFor, ClaimExchange, Bump, Charge, Reserve,
+// Settle, Release, Lease, SettleLease, ListTenantReservations,
+// GetTenantBudget, SetTenantBudget, the erasers, and ReleaseMatching,
+// Ledger.SumCharges, Census.ListRecords and Census.CountRecords for one
+// tenant — under a scope that does not admit that tenant returns limes.ErrScopeMismatch rather than
 // answer as if the tenant's rows were not there (Config.CheckScope). A call
 // that names only an id cannot be checked so, and answers a row out of scope
 // as not found.
@@ -132,7 +136,7 @@
 //
 // A tenant's ceiling holds exactly because every call that moves the
 // tenant's spend or holds — Charge, Reserve, Settle, Refund, Release,
-// ReleaseExpired, SetTenantBudget — locks the tenant's budget row for the
+// ReleaseExpired, Lease, SettleLease, SetTenantBudget — locks the tenant's budget row for the
 // rest of its transaction. One tenant's charges therefore commit one at a
 // time, whichever capabilities they are on: its throughput is about one
 // charge per charge transaction, and adding connections or replicas does not
@@ -328,12 +332,12 @@ type Config struct {
 	// as they are. Nil: every tenant is one the store can mint for.
 	CheckTenant func(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error
 	// CheckScope runs after Scope in the transaction of every call whose
-	// request names its tenant — Insert, ListByPrincipal, Bump, Charge,
-	// Reserve, Settle, Release, GetTenantBudget, SetTenantBudget, EraseTenant,
-	// EraseTenantRecords, EraseTenantUsage, Ledger.SumCharges and
-	// Census.ListRecords and Census.CountRecords for one tenant — and
-	// refuses one
-	// whose scope does not admit that tenant with limes.ErrScopeMismatch,
+	// request names its tenant — Insert, ListByPrincipal, RevokeMatching,
+	// ExchangedFor, ClaimExchange, Bump, Charge, Reserve, Settle, Release,
+	// Lease, SettleLease, ListTenantReservations, GetTenantBudget,
+	// SetTenantBudget, EraseTenant, EraseTenantRecords, EraseTenantUsage, and
+	// ReleaseMatching, Ledger.SumCharges, Census.ListRecords and
+	// Census.CountRecords for one tenant — and refuses one whose scope does not admit that tenant with limes.ErrScopeMismatch,
 	// which the call returns as it is. Nil, under the default Scope: the
 	// call's WithTenant or WithAllTenants decides, and with neither
 	// CheckSchemaScope does. Nil beside a Scope of the consumer's: no check,

@@ -1,9 +1,10 @@
 // Package ddl is pgstore's schema as data: the migrations, the SQL that
 // creates the version table before them, and the grants after, for a
 // consumer that applies them with a migration tool of its own
-// (docs/adr/0011-migrations-as-data.md). It imports nothing outside the
-// standard library, so a program that vendors the SQL links neither tern nor
-// a driver; pgstore/migrate runs the same migrations itself.
+// (docs/adr/0011-migrations-as-data.md). Beyond the standard library it
+// imports only two leaf packages of limes's own (internal/errs and
+// pgstore/internal/pgschema), so a program that vendors the SQL links
+// neither tern nor a driver; pgstore/migrate runs the same migrations itself.
 //
 // A tool applies Setup once, then each Step not yet applied, in order, then
 // Grants. Each transactional step runs in a transaction of its own: it opens
@@ -189,8 +190,8 @@ const sequencePrivileges = "USAGE"
 // not, in a GRANT.
 const publicRole = "public"
 
-// CheckRuntimeRoles refuses a runtime role that is not one role: an empty
-// name, "public" in any case, which would grant every role, and a name with
+// CheckRuntimeRoles refuses, with an error matching limes.ErrInvalidConfig,
+// a runtime role that is not one role: an empty name, "public" in any case, which would grant every role, and a name with
 // a NUL, which the identifier quoting drops, granting another role than the
 // one named.
 func CheckRuntimeRoles(roles []string) error {
