@@ -98,9 +98,10 @@ var (
 	ErrCaveatViolation       = errors.New("limes: caveat violation")
 	ErrBudgetExceeded        = errors.New("limes: budget exceeded")
 
-	// ErrInvalidAmount — an amount that is negative or above MaxNanos, or a
-	// decimal that is not one (ParseAmount). Refunds are explicit; a
-	// negative charge is not one. A malformed request, so it matches
+	// ErrInvalidAmount — an amount that is negative or above MaxNanos, a
+	// decimal that is not one or is finer than a nano (ParseAmount), a float
+	// that is not a number (AmountFromFloat), or JSON that is not a string.
+	// Refunds are explicit; a negative charge is not one. A malformed request, so it matches
 	// ErrInvalidRequest.
 	ErrInvalidAmount error = &familyError{"limes: invalid amount", ErrInvalidRequest}
 
@@ -193,7 +194,8 @@ var (
 	// matches no ErrUnauthenticated sentinel, and is answered 503, to retry.
 	// A lookup's error that is a code of limes's already — a lineage too
 	// deep (ErrDelegationTooDeep), a store's broken invariant
-	// (ErrInternal) — keeps that code.
+	// (ErrInternal) — keeps that code, but for ErrStoreUnavailable and
+	// ErrStoreTimeout, which it wraps like any other failure.
 	ErrRevocationUnavailable = errors.New("limes: revocation status unavailable")
 )
 ```
@@ -298,8 +300,8 @@ const (
 	// CategoryDenied — the credential is good and does not allow the
 	// request.
 	CategoryDenied Category = "denied"
-	// CategoryExhausted — a request, budget, copy or lease limit refused
-	// it.
+	// CategoryExhausted — a request, budget, copy or lease limit, or the
+	// DPoP proof quota of a replay window, refused it.
 	CategoryExhausted Category = "exhausted"
 	// CategoryInvalid — the request itself is wrong: sent again unchanged,
 	// it fails again.
@@ -361,7 +363,7 @@ CategoryOf returns err's category, and false when err is no error of limes's, as
 func CategoryOfCode(code Code) (Category, bool)
 ```
 
-CategoryOfCode returns code's category, and false for a code that is none of this package's, the exchange's and the meter's among them. A consumer proving its own mapping of codes reads it beside Codes.
+CategoryOfCode returns code's category, and false for a code not among Codes: this package's, the meter's and, once module exchange is linked in, the exchange's. A consumer proving its own mapping of codes reads it beside Codes.
 
 <sub>[category.go](../../category.go)</sub>
 <a id="limes.Code"></a>
@@ -488,7 +490,7 @@ CodeOf returns err's code, and false when err is no error of limes's — nil, or
 func Codes() []Code
 ```
 
-Codes returns every code this package answers, the meter's among them and, once module exchange is linked in, the exchange's, each once, so a consumer can prove its own mapping covers them all. The order is fixed within a release, and no contract: it may change in any release.
+Codes returns every code this package answers, each once: its own, the meter's and, once module exchange is linked in, the exchange's, so a consumer can prove its own mapping covers them all. The order is no contract: it may change in any release.
 
 <sub>[code.go](../../code.go)</sub>
 <a id="limes.DetailCodes"></a>
@@ -532,8 +534,9 @@ ErrorResponse is how to answer a refused request.
 
 ```go
 type Problem struct {
-	// Type is a URI naming the kind of problem: the refusal's Reason after
-	// a fixed base, or for a refusal with none the family it belongs to.
+	// Type is a URI naming the kind of problem, after a fixed base
+	// (ProblemTypeURI): a refusal's Reason, or for a refusal with none the
+	// family it belongs to; for any other error, its Code.
 	Type string `json:"type"`
 	// Title is a short, fixed summary of the kind.
 	Title string `json:"title"`
@@ -593,7 +596,7 @@ Its Detail is set for a refusal of the client's own input — a code of DetailCo
 func ProblemOfCode(code Code) (Problem, bool)
 ```
 
-ProblemOfCode is the problem ProblemOf answers an error with code with, and false for a code that is none of this package's, the meter's among them: a consumer holding only a code, or pinning the contract its mapping was written against (limestest), reads it without an error to hand.
+ProblemOfCode is the problem ProblemOf answers an error with code with, and false for a code not among Codes: a consumer holding only a code, or pinning the contract its mapping was written against (limestest), reads it without an error to hand.
 
 <sub>[code.go](../../code.go)</sub>
 <a id="limes.Reason"></a>
@@ -641,7 +644,7 @@ const (
 )
 ```
 
-The refusals a verifier, Caveats.Check or a Meter returns for a presented capability.
+The refusals a verifier, Caveats.Check or a meter.Meter returns for a presented capability.
 
 <sub>[reason.go](../../reason.go)</sub>
 <a id="limes.ReasonOf"></a>

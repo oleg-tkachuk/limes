@@ -198,9 +198,9 @@ type BulkRevoker interface {
 	// of every tenant — that match every selector req names and have no
 	// entry of their own, in order of tenant and id, and reports how many,
 	// in which tenants, and whether more may match. It refuses what
-	// RevokeMatchingRequest.Validate refuses, a call scoped to another
-	// tenant, and an AllTenants call under a scope that does not admit
-	// writing every tenant, as ErrScopeMismatch.
+	// RevokeMatchingRequest.Validate refuses; a call scoped to another
+	// tenant, or an AllTenants call under a scope that does not admit
+	// writing every tenant, is ErrScopeMismatch.
 	RevokeMatching(ctx context.Context, req RevokeMatchingRequest) (RevokeMatchingResult, error)
 }
 ```
@@ -264,7 +264,7 @@ Concurrent misses for the same question share one upstream call.
 func NewRevocationCache(cfg RevocationCacheConfig) (*RevocationCache, error)
 ```
 
-NewRevocationCache wires a cache over cfg's upstreams. A negative TTL or bound is refused; a deployment that wants no cache passes its store to the verifier directly.
+NewRevocationCache wires a cache over cfg's upstreams. It refuses, as ErrInvalidConfig, a nil Capabilities, a Biscuits holding a nil value, a negative TTL or MaxEntries, and a SyncedTTL or MaxStale out of its range; under RequireLineage, a Capabilities that is no RevocationLineageLookup is ErrNoRevocationLineage. A deployment that wants no cache passes its store to the verifier directly.
 
 <sub>[cache.go](../../cache.go)</sub>
 <a id="limes.RevocationCache.Clear"></a>
@@ -297,7 +297,7 @@ ClearRevoked drops what a revocation of ids outdates: each one's cached "not rev
 func (c *RevocationCache) IsBiscuitRevoked(ctx context.Context, revocationIDs [][]byte) (bool, error)
 ```
 
-IsBiscuitRevoked answers from the cache for each id that has a fresh answer, and asks upstream about all the others in one lookup, shared by every concurrent caller asking about the same ones. A token is revoked when any of its ids is: the ids a token shares with the copies it was attenuated from stay cached, so a fresh attenuation — which anyone holding a copy can make offline — costs one lookup for its new block, and a token of blocks the cache has never seen one lookup in all, not one per block. A "live" answer is then cached for each of them; a "revoked" one for that set and for the token's own ids, as upstream does not say which id it is, and it holds for every copy attenuated from the token. An upstream error is returned and never cached.
+IsBiscuitRevoked answers from the cache for each id that has a fresh answer, and asks upstream about all the others in one lookup, shared by every concurrent caller asking about the same ones. A token is revoked when any of its ids is: the ids a token shares with the copies it was attenuated from stay cached, so a fresh attenuation — which anyone holding a copy can make offline — costs one lookup for its new block, and a token of blocks the cache has never seen one lookup in all, not one per block. A "live" answer is then cached for each of them; a "revoked" one for that set and for the token's own ids, as upstream does not say which id it is, and it holds for every copy attenuated from the token. An upstream error is returned and never cached, unless RevocationCacheConfig.MaxStale serves a stale answer in its place. A cache built without RevocationCacheConfig.Biscuits answers every call with ErrInvalidConfig.
 
 <sub>[biscuit_revocation_cache.go](../../biscuit_revocation_cache.go)</sub>
 <a id="limes.RevocationCache.IsRevoked"></a>
@@ -308,7 +308,7 @@ IsBiscuitRevoked answers from the cache for each id that has a fresh answer, and
 func (c *RevocationCache) IsRevoked(ctx context.Context, id uuid.UUID) (bool, error)
 ```
 
-IsRevoked serves a fresh cached answer, or asks upstream once on behalf of every concurrent caller asking about the same id. An upstream error is returned to all of them and is never cached.
+IsRevoked serves a fresh cached answer, or asks upstream once on behalf of every concurrent caller asking about the same id. An upstream error is returned to all of them and is never cached, unless MaxStale serves a stale answer in its place. Over a RevocationLineageLookup, an id it has no record of is not revoked.
 
 <sub>[cache.go](../../cache.go)</sub>
 <a id="limes.RevocationCache.NewSignal"></a>
@@ -352,7 +352,7 @@ Stats reads the cache's counts. Each kind is read shard by shard, without stoppi
 func (c *RevocationCache) Sweep() int
 ```
 
-Sweep drops every expired entry, of either kind, and returns how many it dropped. Optional housekeeping — lookups skip stale entries, and every new answer drops the expired ones before it.
+Sweep drops every expired entry, of every kind, and returns how many it dropped. Optional housekeeping — lookups skip stale entries, and every new answer drops the expired ones before it.
 
 <sub>[cache.go](../../cache.go)</sub>
 <a id="limes.RevocationCacheConfig"></a>
@@ -403,8 +403,8 @@ type RevocationCacheConfig struct {
 	// one never evicts another. Zero: DefaultRevocationCacheEntries. A Biscuit
 	// answer is one entry per revocation id, keyed by the id, a block
 	// signature, and one per set of ids asked about together, keyed by a
-	// SHA-256 digest of the set, whatever its size. Over a RevocationLineageLookup a
-	// capability's "not revoked" answer keeps its ancestors' ids beside it,
+	// SHA-256 digest of the set, whatever its size. Over a
+	// RevocationLineageLookup a capability's "not revoked" answer keeps its ancestors' ids beside it,
 	// up to MaxDelegationDepth of them, and again in an index ClearRevoked
 	// reads them by: about 32 bytes per generation, so a full cache of
 	// chains 64 deep holds some 200 MB of them at the default bound, against
@@ -419,11 +419,11 @@ type RevocationCacheConfig struct {
 	// logged. Zero: never, the cache failing closed — every failure
 	// returned, as a verifier refuses on it. A revocation the upstream
 	// holds goes unseen for as long, so it trades revocation latency for
-	// availability through a short outage of the store; ErrNotFound, an
-	// answer, is never covered, nor a caller whose context ended; nor, while
-	// a revoked answer dropped to make room (MaxEntries) would still be
-	// kept, a live answer about a delegated capability or about a Biscuit's
-	// revocation ids asked together. A
+	// availability through a short outage of the store. ErrNotFound and
+	// ErrInvalidRequest, answers, are never covered, nor a caller whose
+	// context ended; nor, while a revoked answer dropped to make room
+	// (MaxEntries) would still be kept, a live answer about a delegated
+	// capability or about a Biscuit's revocation ids asked together. A
 	// Biscuit is covered when its revocation ids are asked about together
 	// as before. Negative, or longer than MaxRevocationCacheStale, is
 	// refused.
@@ -545,9 +545,9 @@ type RevocationLineageLookup interface {
 	// it not revoked, as IsRevoked does — or, to a verifier without
 	// VerifierConfig.AllowUnrecorded, not on record — and keeps that answer
 	// for TTL apart from the others. One that answers such an id not
-	// revoked instead is cached as any other, and defeats
-	// the record check without a word: NewVerifier cannot tell
-	// it from one that keeps this contract, which storetest checks.
+	// revoked instead is cached as any other, and defeats the record check
+	// without a word: NewVerifier cannot tell it from one that keeps this
+	// contract, which storetest checks.
 	RevocationLineage(ctx context.Context, id uuid.UUID) (RevocationAnswer, error)
 }
 ```
@@ -691,7 +691,7 @@ RevokeBiscuitRequest is the input shape for BiscuitRevocationStore.RevokeBiscuit
 func (r RevokeBiscuitRequest) Validate() error
 ```
 
-Validate refuses a request naming no copy as ErrInvalidRequest.
+Validate refuses, as ErrInvalidRequest, a request naming no copy, or a Note or Actor that is not valid UTF-8 or holds a NUL.
 
 <sub>[biscuit_revocation.go](../../biscuit_revocation.go)</sub>
 <a id="limes.RevokeBiscuitResult"></a>
@@ -784,7 +784,7 @@ BatchLimit is Limit, or DefaultHousekeepingLimit when it is zero.
 func (r RevokeMatchingRequest) Validate() error
 ```
 
-Validate refuses a request with neither a tenant nor AllTenants, or both, no selector, a selector AllTenants does not take, or a negative limit.
+Validate refuses, as ErrInvalidRequest, a request with neither a tenant nor AllTenants, or both, no selector, a selector AllTenants does not take, a negative limit, or text that is not valid UTF-8 or holds a NUL.
 
 <sub>[bulk_revoke.go](../../bulk_revoke.go)</sub>
 <a id="limes.RevokeMatchingResult"></a>
@@ -833,7 +833,7 @@ Each method returns the store's result and error unchanged. A Revoker is safe fo
 func NewRevoker(cfg RevokerConfig) (*Revoker, error)
 ```
 
-NewRevoker validates wiring and returns a ready Revoker. It refuses no Store, and a Store, Bulk or Biscuits holding a nil value.
+NewRevoker validates wiring and returns a ready Revoker. It refuses, as ErrInvalidConfig, no Store, and a Store, Bulk or Biscuits holding a nil value.
 
 <sub>[revoker.go](../../revoker.go)</sub>
 <a id="limes.Revoker.Revoke"></a>

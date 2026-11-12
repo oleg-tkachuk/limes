@@ -121,8 +121,8 @@ AuthScheme is the authentication scheme a token was presented under.
 const (
 	// AuthSchemeUnspecified is a token that did not come from an
 	// Authorization header — a gRPC metadata entry, a message field.
-	// VerifyRequest checks no scheme for it; a key-bound token still needs
-	// its DPoP proof.
+	// Verify checks no scheme for it (VerifyRequest.Scheme); a key-bound
+	// token still needs its DPoP proof.
 	AuthSchemeUnspecified AuthScheme = ""
 	// AuthSchemeBearer presents a bearer token (RFC 6750).
 	AuthSchemeBearer AuthScheme = "Bearer"
@@ -162,7 +162,7 @@ ParseAuthorizationValues reads every Authorization field a request carries — r
 func (s AuthScheme) Validate() error
 ```
 
-Validate refuses a scheme other than the ones ParseAuthorization returns, or AuthSchemeUnspecified, as ErrInvalidRequest.
+Validate accepts AuthSchemeUnspecified, AuthSchemeBearer and AuthSchemeDPoP, and refuses any other scheme as ErrInvalidRequest.
 
 <sub>[authorization.go](../../authorization.go)</sub>
 <a id="limes.AuthorizeRequest"></a>
@@ -204,8 +204,8 @@ type BiscuitConfig struct {
 
 	// MeterCopies admits Biscuits whose attenuation blocks set a copy's own
 	// request or budget limits (Attenuation.Requests, Attenuation.Budget).
-	// Set it only when the Meter that enforces caveats counts
-	// the copies a MeterSubject carries; off, such a token is refused with
+	// Set it only when the meter.Meter that enforces caveats counts the
+	// copies a MeterSubject carries; off, such a token is refused with
 	// ErrCopyCountersNotMetered rather than accepted with its limits unkept
 	// — once it has passed every other check, so a token refused for what
 	// it is gets that refusal instead.
@@ -290,7 +290,7 @@ Capability is what the token grants: a copy, the caller's to change.
 func (v VerifiedCapability) Copies() []CopyCeiling
 ```
 
-Copies are the request and budget limits the attenuation blocks of a verified Biscuit set, innermost block first; none for a JWT, or a Biscuit whose blocks set none. Each is counted on its own, beside the capability's counters, by every Meter call its MeterSubject is handed.
+Copies are the request and budget limits the attenuation blocks of a verified Biscuit set, innermost block first; none for a JWT, or a Biscuit whose blocks set none. Each is counted on its own, beside the capability's counters, by every meter.Meter call its MeterSubject is handed.
 
 <sub>[verifier.go](../../verifier.go)</sub>
 <a id="limes.VerifiedCapability.FromBiscuit"></a>
@@ -312,7 +312,7 @@ FromBiscuit reports whether the capability was read from a copy of a Biscuit rat
 func (v VerifiedCapability) MeterSubject() MeterSubject
 ```
 
-MeterSubject is what the Meter counts this capability's requests against.
+MeterSubject is what a meter.Meter counts this capability's requests against.
 
 <sub>[meter_subject.go](../../meter_subject.go)</sub>
 <a id="limes.Verifier"></a>
@@ -349,7 +349,7 @@ NewVerifier validates wiring and builds the verifier.
 func (v *Verifier) Authorize(ctx context.Context, req AuthorizeRequest) (VerifiedCapability, error)
 ```
 
-Authorize is Verify followed by every caveat that can be checked without state: the operation, the resource, the idempotency key, the tainted read (Caveats.Check), and the client's address (Caveats.CheckSource). The request and budget limits are stateful: the Meter enforces them, through Bump and Charge, inside the consumer's own transaction. The caveats are checked before the proof's id is recorded, so a presenter they refuse — one outside the allowed networks, say — spends none of the replay cache's room, which every holder of the capability shares.
+Authorize is Verify followed by every caveat that can be checked without state: the operation, the resource, the idempotency key, the tainted read (Caveats.Check), and the client's address (Caveats.CheckSource). The request and budget limits are stateful: a meter.Meter enforces them, through Bump and Charge, inside the consumer's own transaction. The caveats are checked before the proof's id is recorded, so a presenter they refuse — one outside the allowed networks, say — spends none of the replay cache's room, which every holder of the capability shares.
 
 <sub>[verifier.go](../../verifier.go)</sub>
 <a id="limes.Verifier.BiscuitCopy"></a>
@@ -360,7 +360,7 @@ Authorize is Verify followed by every caveat that can be checked without state: 
 func (v *Verifier) BiscuitCopy(ctx context.Context, token string) (BiscuitCopy, error)
 ```
 
-BiscuitCopy reads which copy token is, after checking it as Verify does — the sealed token's signature, issuer and tenant, then the Biscuit's signature chain — so that a revocation is only ever recorded against a capability the token genuinely carries. Expiry, audience and revocation are not checked: a copy can be revoked whatever its state. Nor is MeterCopies: a copy carrying limits is named, and can be revoked, on any verifier.
+BiscuitCopy reads which copy token is, after checking it as Verify does — the sealed token's signature, issuer and tenant, then the Biscuit's signature chain — so that a revocation is only ever recorded against a capability the token genuinely carries. A token that is not a Biscuit, is longer than VerifierConfig.MaxTokenBytes, or comes to a verifier with no VerifierConfig.Biscuit is ErrInvalidToken. Expiry, audience and revocation are not checked: a copy can be revoked whatever its state. Nor is BiscuitConfig.MeterCopies: a copy carrying limits is named, and can be revoked, on any verifier.
 
 <sub>[biscuit_revocation.go](../../biscuit_revocation.go)</sub>
 <a id="limes.Verifier.DPoPNonce"></a>
@@ -382,7 +382,7 @@ DPoPNonce is the nonce to send in the DPoP-Nonce header — with a response refu
 func (v *Verifier) ErrorResponse(ctx context.Context, err error, scheme AuthScheme) ErrorResponse
 ```
 
-ErrorResponse is how to answer a request refused with err, presented under scheme. A refusal about the token is challenged under the scheme the client used (Bearer when it named none); one about the proof, under DPoP. A verifier with DPoP configured also advertises its algorithms in a DPoP challenge, and hands out a fresh nonce with use\_dpop\_nonce; when it cannot give one, it logs why (VerifierConfig.Logger) and answers the server's failure, 500, for a challenge without a nonce is one the client cannot satisfy.
+ErrorResponse is how to answer a request refused with err, presented under scheme. A refusal about the token is challenged under the scheme the client used (Bearer when it named none); one about the proof, under DPoP. A verifier with DPoP configured also advertises its algorithms in a DPoP challenge, and hands out a fresh nonce with use\_dpop\_nonce; when it cannot give one, it logs why (VerifierConfig.Logger) and answers the server's failure, 500, for a challenge without a nonce is one the client cannot satisfy. An error it has no answer for — ErrInvalidRequest's family but ErrMalformedAuthorization, ErrNotFound, a store's own failure — is answered 500, without its text.
 
 <sub>[challenge.go](../../challenge.go)</sub>
 <a id="limes.Verifier.Introspect"></a>
@@ -463,9 +463,9 @@ type VerifierConfig struct {
 	// KeyIssuers binds each kid to the one issuer allowed to sign with it:
 	// a token whose kid is absent from the map, or whose `iss` differs from
 	// the kid's binding, is rejected. Empty binds no kid: enough with one
-	// trusted issuer. With several it is required, unless SharedKeys says otherwise:
-	// any trusted key signing for any trusted issuer is wrong for issuers
-	// that do not share a trust boundary, so it is never the default.
+	// trusted issuer. With several it is required, unless SharedKeys says
+	// otherwise: any trusted key signing for any trusted issuer is wrong for
+	// issuers that do not share a trust boundary, so it is never the default.
 	// One key signs for two issuers — a family of capabilities marked by
 	// an iss of its own — under two kids, each bound here to its issuer:
 	// two Issuers with the same key, each with its kid and IssuerName.
@@ -478,8 +478,8 @@ type VerifierConfig struct {
 	// exclude each other.
 	SharedKeys bool
 
-	// Now is the time function the verifier uses for nbf/exp. Tests
-	// override it; production passes time.Now.
+	// Now is the time function the verifier uses for nbf/exp. Nil:
+	// time.Now.
 	Now func() time.Time
 
 	// Leeway widens the nbf / exp window to absorb clock skew between
@@ -494,9 +494,9 @@ type VerifierConfig struct {
 	// DefaultMaxTokenBytes when zero; negative is refused.
 	MaxTokenBytes int
 
-	// Biscuit accepts the Biscuit form (Issuer.Biscuit, Attenuate) beside
-	// the JWT, as it says. Nil: a Biscuit is refused like any malformed
-	// token.
+	// Biscuit accepts the Biscuit form (Issuer.Biscuit, biscuit.Attenuate)
+	// beside the JWT, as it says. Nil: a Biscuit is refused like any
+	// malformed token.
 	Biscuit *BiscuitConfig
 
 	// DPoP checks the proof of possession a key-bound capability (one with
@@ -539,10 +539,12 @@ VerifierConfig wires the verifier. Keys, Revocations and TrustedIssuers are requ
 
 ```go
 type VerifyRequest struct {
-	// Token is the capability token, a JWT or a Biscuit.
+	// Token is the capability token, a JWT or a Biscuit. Empty is
+	// ErrNoCredentials.
 	Token string
 	// Audience is the service the call is hitting: the token's audience
-	// must include it.
+	// must include it. Required: empty is ErrInvalidRequest, the server's
+	// error rather than the token's.
 	Audience string
 	// DPoP is the request's proof of possession, needed when the
 	// capability is key-bound and ignored when it is not.

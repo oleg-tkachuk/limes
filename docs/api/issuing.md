@@ -89,7 +89,8 @@ type DelegateRequest struct {
 	Subject Principal
 	// Audience defaults to the parent's, and must be a subset of it.
 	Audience []string
-	// Caveats are the child's; see InheritCaveats.
+	// Caveats are the child's; see InheritCaveats. A Budget naming no
+	// UnitCode takes the parent's.
 	Caveats Caveats
 	// InheritCaveats copies the parent's caveats verbatim and ignores
 	// Caveats. It must be asked for: Caveats with no Ops is refused, never
@@ -97,7 +98,7 @@ type DelegateRequest struct {
 	// set — a budget of 2 would become the parent's 25 without a word.
 	InheritCaveats bool
 	// TTL defaults to IssuerConfig.DefaultTTL, and is cut so the child
-	// expires no later than the parent.
+	// expires no later than the parent. Negative is refused.
 	TTL time.Duration
 	// NotBefore is raised, when earlier, to the parent's start: its
 	// NotBefore, else its IssuedAt.
@@ -131,7 +132,7 @@ type IssueRequest struct {
 	IssuedBy  Principal
 	Audience  []string
 	Caveats   Caveats
-	TTL       time.Duration // 0 → DefaultTTL; must reach the next whole second
+	TTL       time.Duration // 0 → DefaultTTL; negative is refused; must reach the next whole second
 	NotBefore time.Time     // zero → valid from issuance, no nbf claim
 	// ConfirmationJKT binds the capability to the key with this RFC 7638
 	// thumbprint (dpop.Thumbprint); empty issues a bearer capability.
@@ -203,7 +204,7 @@ Signing first means a capability whose token cannot be minted — a signer that 
 func NewIssuer(cfg IssuerConfig) (*Issuer, error)
 ```
 
-NewIssuer validates wiring and returns a ready Issuer.
+NewIssuer validates wiring and returns a ready Issuer. A missing Signer, Store or IssuerName, or a negative DefaultTTL or MaxTokenBytes, is ErrInvalidConfig.
 
 <sub>[issuer.go](../../issuer.go)</sub>
 <a id="limes.Issuer.Biscuit"></a>
@@ -216,7 +217,7 @@ func (i *Issuer) Biscuit(ctx context.Context, req BiscuitRequest) (BiscuitResult
 
 Biscuit returns the Biscuit form of a capability this issuer issued: the same capability — same ID, caveats, expiry and binding, revoked together with it — in a token its holder can attenuate offline. One copy can also be revoked on its own; see BiscuitRevocationStore.
 
-Like Delegate it takes a VerifiedCapability, so what it signs is what this issuer signed and recorded before, never a value a caller assembled or widened. It refuses one another issuer named, one read from a Biscuit — wrapping a copy again would shed its attenuation and its revocation id; its holder attenuates it instead — and one that has expired or that the store reports revoked.
+Like Delegate it takes a VerifiedCapability, so what it signs is what this issuer signed and recorded before, never a value a caller assembled or widened. It refuses, as ErrInvalidRequest, the zero VerifiedCapability, one another issuer named, one read from a Biscuit — wrapping a copy again would shed its attenuation and its revocation id; its holder attenuates it instead — and a token past IssuerConfig.MaxTokenBytes; one that has expired as ErrExpired, or that the store reports revoked as ErrRevoked; and, on an issuer with no IssuerConfig.Biscuit, every request as ErrInvalidConfig.
 
 It needs no OpShare: a copy attenuated from the form allows no more than the capability, which its bearer could hand on as it is, and a copy that sets limits of its own is counted against Caveats.Copies. Delegate, which has the issuer mint a new principal, still requires OpShare.
 
@@ -240,7 +241,7 @@ DefaultTTL is the lifetime Issue gives a request naming none: the IssuerConfig.D
 func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (IssueResult, error)
 ```
 
-Delegate mints a child capability narrower than the supplied parent, which the verifier accepted (VerifiedCapability), so its caveats are the ones its token carries. It does not trust it to be current, though: a parent that has expired, or that the store reports revoked (itself or any ancestor), delegates nothing; nor does a Biscuit copy (VerifiedCapability.FromBiscuit), which is ErrInvalidRequest, as Issuer.Biscuit answers it — its holder attenuates it instead. A parent another issuer named is ErrInvalidRequest: this issuer's store holds no record of it, so revoking it there would never reach the child. A child that would have more than MaxDelegationDepth ancestors is ErrDelegationDepthExceeded (403), refused by Store.Insert before it is on record; the parent stays valid. A parent whose caveats do not allow OpShare — the right to delegate — is ErrOpNotAllowed: delegating is the share operation, and a capability granted without it may not have the issuer mint a new principal any part of it.
+Delegate mints a child capability narrower than the supplied parent, which the verifier accepted (VerifiedCapability), so its caveats are the ones its token carries. It does not trust it to be current, though: a parent that has expired (ErrExpired), or that the store reports revoked, itself or any ancestor (ErrRevoked), delegates nothing; a lookup that fails is ErrRevocationUnavailable. Nor does a Biscuit copy (VerifiedCapability.FromBiscuit), which is ErrInvalidRequest, as Issuer.Biscuit answers it — its holder attenuates it instead. The zero Parent, and a parent another issuer named, are ErrInvalidRequest: this issuer's store holds no record of the latter, so revoking it there would never reach the child. A child that would have more than MaxDelegationDepth ancestors is ErrDelegationDepthExceeded (403), refused by Store.Insert before it is on record; the parent stays valid. A parent whose caveats do not allow OpShare — the right to delegate — is ErrOpNotAllowed: delegating is the share operation, and a capability granted without it may not have the issuer mint a new principal any part of it.
 
 A child is metered under its parent: every request and charge the child makes also counts against the parent and each ancestor (meter), so one request of the child is one more on the parent's counter as well, and a parent's limits bound everything delegated from it.
 
@@ -264,7 +265,7 @@ Issue mints a top-level capability. A tenant the store cannot mint for is its re
 func (i *Issuer) Reissue(ctx context.Context, id uuid.UUID) (IssueResult, error)
 ```
 
-Reissue signs the capability on record under id again, and records nothing: an exchange that issues one capability per subject token hands it out again without keeping its token (ExchangeStore). The claims are the record's, so under the same key the token is the one Issue returned. It refuses an id not on record (ErrNotFound), a capability expired (ErrExpired) or revoked (ErrRevoked), and an issuer whose store reads no record (a RecordReader, as every Store is) with ErrInvalidRequest.
+Reissue signs the capability on record under id again, and records nothing: an exchange that issues one capability per subject token hands it out again without keeping its token (ExchangeStore). The claims are the record's, so under the same key the token is the one Issue returned. It refuses an id not on record (ErrNotFound), a capability expired (ErrExpired) or revoked (ErrRevoked), and an issuer whose store reads no record (a RecordReader, as every Store is) with ErrInvalidRequest. A revocation lookup that fails is ErrRevocationUnavailable.
 
 <sub>[issuer.go](../../issuer.go)</sub>
 <a id="limes.IssuerConfig"></a>
@@ -274,18 +275,18 @@ Reissue signs the capability on record under id again, and records nothing: an e
 ```go
 type IssuerConfig struct {
 	// Signer mints tokens (NewSigner), over a key in memory or one held in
-	// a KMS or an HSM.
+	// a KMS or an HSM. Required.
 	Signer *Signer
 
 	// Store records what the issuer mints and answers whether a parent is
-	// revoked. Any Store is one.
+	// revoked. Any Store is one. Required.
 	Store IssuanceStore
 
 	// IssuerName is the value placed in the `iss` claim. Verifiers
-	// require this to be in their TrustedIssuers list.
+	// require this to be in their TrustedIssuers list. Required.
 	IssuerName string
 
-	// DefaultTTL caps the lifetime when IssueRequest.TTL is zero.
+	// DefaultTTL is the lifetime when IssueRequest.TTL is zero.
 	// Zero: DefaultIssueTTL, short enough that revocation propagation
 	// latency rarely matters. Negative is refused.
 	DefaultTTL time.Duration
@@ -295,7 +296,7 @@ type IssuerConfig struct {
 	// refuse unread. Zero: DefaultMaxTokenBytes; negative is refused.
 	MaxTokenBytes int
 
-	// Now is the clock; tests override.
+	// Now is the clock. Nil: time.Now.
 	Now func() time.Time
 
 	// Biscuit is the form Issuer.Biscuit seals a capability in:
@@ -340,7 +341,7 @@ SealedKey is a private key where no formatting reaches it: under any verb, %p in
 func SealKey(key crypto.Signer) SealedKey
 ```
 
-SealKey seals key: an ed25519.PrivateKey, or a pointer to one, of which it keeps a copy, so clearing or reusing the caller's key after leaves the sealed key whole, or a crypto.Signer over a key held elsewhere. A nil key, or a nil pointer to an ed25519.PrivateKey, gives the zero SealedKey.
+SealKey seals key: an ed25519.PrivateKey, or a pointer to one, of which it keeps a copy, so clearing or reusing the caller's key after leaves the sealed key whole, or a crypto.Signer over a key held elsewhere. A nil interface, or a nil pointer to an ed25519.PrivateKey, gives the zero SealedKey.
 
 <sub>[redact.go](../../redact.go)</sub>
 <a id="limes.SealedKey.Format"></a>
@@ -437,7 +438,7 @@ Signer holds the key an Issuer mints capability tokens with: it encodes a Capabi
 func NewSigner(cfg SignerConfig) (*Signer, error)
 ```
 
-NewSigner builds a Signer, refusing a kid outside limes's namespace or a key that is not Ed25519.
+NewSigner builds a Signer, refusing, as ErrInvalidConfig, a kid outside limes's namespace, no key, a key that is not Ed25519, and a set Algorithm other than SigningAlgorithmEd25519 and SigningAlgorithmEdDSA.
 
 <sub>[signer.go](../../signer.go)</sub>
 <a id="limes.Signer.Format"></a>
@@ -573,7 +574,7 @@ GenerateKey makes a fresh Ed25519 signing key under the kid jwks.KeyID derives f
 func LoadKey(path string) (SigningKey, error)
 ```
 
-LoadKey reads the PKCS#8 PEM signing key at path, under the kid jwks.KeyID derives from it; a deployment that names its kids sets SigningKey.KeyID on the result. For a key that lives only as long as the process, GenerateKey; a deployment that may have no key file chooses between the two itself, so a missing mount is never silently a fresh key.
+LoadKey reads the PKCS#8 PEM signing key at path, under the kid jwks.KeyID derives from it; a deployment that names its kids sets SigningKey.KeyID on the result. It refuses, as ErrInvalidConfig, an empty path, a file that is not PEM, a PEM type other than "PRIVATE KEY" and a key that is not Ed25519; a file it cannot read, or PKCS#8 it cannot parse, returns that error wrapped. For a key that lives only as long as the process, GenerateKey; a deployment that may have no key file chooses between the two itself, so a missing mount is never silently a fresh key.
 
 <sub>[keyloader.go](../../keyloader.go)</sub>
 <a id="limes.SigningKey.Format"></a>
