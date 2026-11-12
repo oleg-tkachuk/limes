@@ -1,23 +1,21 @@
 # Defaults
 
-What each field of every `Config` does when it is left at its zero value,
-and the value of every `Default…` constant, options' among them (such as
-the pgstore watcher's heartbeat). These are part of the contract
-([compatibility.md](compatibility.md)): changing what a zero field does, or
-a constant's value, is a break, marked and listed in the release notes.
+What each `Config` field does at its zero value, and the value of every
+`Default…` constant. Both are contract ([compatibility.md](compatibility.md)):
+changing either is a break, marked and listed in the release notes.
 
-A test holds the tables to the code: every exported field of every exported
-`…Config` struct has its row, every exported `Default…` constant of a
-package a consumer's code imports has its row with its value as declared,
-and every `Default…` constant a row names is declared in that package.
-Test-helper packages (`…test`) are left out: their constants tune tests.
+`defaults_doc_test.go` holds the tables to the code. Every exported field of
+every exported `…Config` struct has a row; so does every exported `Default…`
+constant of a package a consumer imports, with its value as declared; every
+`Default…` a row names is declared. Test-helper packages (`…test`) are left
+out.
 
-CI compares two columns between releases: a field's **Default** — the
-value it stands for, or one of `required` (zero is refused when the value
-is built), `off`, `on`, `none` and `refused` — and a constant's **Value**.
-The **Zero value** column is prose, free to be reworded; a change of
-behaviour that keeps the Default cell must change the cell all the same,
-or be marked breaking by hand.
+Between releases CI compares two columns: a field's **Default** and a
+constant's **Value**. A Default cell holds the value the zero field stands
+for, or one of `required` (zero is refused when the value is built), `off`,
+`on`, `none` and `refused`. The **Zero value** column is prose and may be
+reworded. A behaviour change that keeps the Default cell must still change
+it, or be marked breaking by hand.
 
 ## limes
 
@@ -136,8 +134,8 @@ or be marked breaking by hand.
 | `pgstore.Config` | `CheckScope` | `CheckSchemaScope` | Under the default `Scope`; beside a `Scope` of the consumer's, no check. |
 | `pgstore.Config` | `Logger` | `slog.Default()` |  |
 | `pgstore.Config` | `Events` | none | No callback is made. A wait for a tenant's aggregate past 100 ms is still logged at WARN. |
-| `pgstore.Config` | `DisableLeases` | off | The usage store opens a lease when `meter.Leaser.Lease` asks for one, never of itself, and reports `meter.FeatureLeases` enabled. A store that opens none pays one statement per charge and bump a lease could cover, a read of the chain's leases, in the batch the call sends already: no round trip. Set, the read stays, since leases already open are still charged under. |
-| `pgstore.Config` | `DisableTenantStripes` | off | A tenant with no ceiling is counted in stripes: its calls lock no aggregate row. A store with it set still folds stripes another store wrote, and sums them when it reads the aggregate. |
+| `pgstore.Config` | `DisableLeases` | off | A lease opens only when `meter.Leaser.Lease` asks for one, and the store reports `meter.FeatureLeases` enabled. A store that opens none still pays one statement per charge and bump a lease could cover, a read of the chain's leases, in the batch the call already sends: no extra round trip. Set, the read stays: leases already open are still charged under. |
+| `pgstore.Config` | `DisableTenantStripes` | off | A tenant with no ceiling is counted in stripes: its calls lock no aggregate row. Set, the store still folds stripes another store wrote, and sums them when it reads the aggregate. |
 | `pgstore.Config` | `MaxCopiesPerCapability` | `meter.DefaultMaxCopiesPerCapability` |  |
 | `pgstore.Config` | `TenantBudgetLockTimeout` | `5s` | How long `SetTenantBudget` waits for the tenant's calls in flight, and so the longest it stalls the tenant's new ones. |
 | `pgstore.ReplayConfig` | `DB` | required |  |
