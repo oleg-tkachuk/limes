@@ -6,7 +6,7 @@ Checking a presented token and authorizing a call with it. Part of the [API refe
 
 | Package | |
 |---|---|
-| [`github.com/oleg-tkachuk/limes`](#limes) | 17 declarations |
+| [`github.com/oleg-tkachuk/limes`](#limes) | 18 declarations |
 
 <a id="limes"></a>
 
@@ -216,6 +216,26 @@ type BiscuitConfig struct {
 BiscuitConfig is how a verifier reads the Biscuit form (VerifierConfig.Biscuit).
 
 <sub>[verifier.go](../../verifier.go)</sub>
+<a id="limes.IntrospectRequest"></a>
+
+### limes.IntrospectRequest
+
+```go
+type IntrospectRequest struct {
+	// Token is the capability token, a JWT or a Biscuit. Empty is
+	// ErrNoCredentials.
+	Token string
+	// Audiences are the audiences of the tokens the caller may learn
+	// about: the token's audience must name at least one of them.
+	// Required, and none of them empty: otherwise ErrInvalidRequest, the
+	// server's error rather than the token's.
+	Audiences []string
+}
+```
+
+IntrospectRequest is a token to introspect, and the audiences its caller may learn about.
+
+<sub>[verifier.go](../../verifier.go)</sub>
 <a id="limes.Introspection"></a>
 
 ### limes.Introspection
@@ -396,6 +416,19 @@ func (v *Verifier) Introspect(ctx context.Context, token string) (Introspection,
 Introspect answers an introspection endpoint (RFC 7662) about a token a resource server or gateway holds a copy of: nil error if it is active — genuine, from a trusted issuer, within its time window and not revoked, itself, through an ancestor or, for a Biscuit, through a copy — with the capability it carries. It checks neither an audience nor proof of possession: a key-bound token is active though no key was proved, and the answer says the token is bound, not that its presenter holds the key. A token lifted out of the Biscuit it was sealed in is refused, as Verify refuses it. So is a Biscuit copy that sets request or budget limits of its own, on a verifier without BiscuitConfig.MeterCopies: ErrCopyCountersNotMetered, as Verify answers it; with MeterCopies, the answer carries those limits in Introspection.Copies. A refusal of the token is ErrUnauthenticated's family, which the endpoint answers as inactive; any other error is the server's, such as a revocation lookup that failed, and never reads as inactive.
 
 Introspect is no authorization: it yields no VerifiedCapability, so its answer can be neither delegated from nor checked against a request.
+
+Introspect answers about a token of any audience. An endpoint whose callers may each learn only about tokens of some audiences uses IntrospectFor, which refuses any other token before the revocation lookup.
+
+<sub>[verifier.go](../../verifier.go)</sub>
+<a id="limes.Verifier.IntrospectFor"></a>
+
+#### limes.Verifier.IntrospectFor
+
+```go
+func (v *Verifier) IntrospectFor(ctx context.Context, req IntrospectRequest) (Introspection, error)
+```
+
+IntrospectFor is Introspect for a caller that may learn only about tokens of req.Audiences. A token whose audience names none of them is refused as ErrAudienceMismatch once its signatures, issuer and time window have verified, and before the revocation lookup: so a foreign token is refused alike whether the revocation store can answer or not, and a forged one is refused as ever, both as ErrUnauthenticated's family. A token of an audience the caller may ask about is answered as Introspect answers it, a revocation lookup that failed included.
 
 <sub>[verifier.go](../../verifier.go)</sub>
 <a id="limes.Verifier.Verify"></a>

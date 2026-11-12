@@ -645,9 +645,63 @@ type Introspection struct {
 //
 // Introspect is no authorization: it yields no VerifiedCapability, so its
 // answer can be neither delegated from nor checked against a request.
+//
+// Introspect answers about a token of any audience. An endpoint whose
+// callers may each learn only about tokens of some audiences uses
+// IntrospectFor, which refuses any other token before the revocation lookup.
 func (v *Verifier) Introspect(ctx context.Context, token string) (Introspection, error) {
+	return v.introspectObserved(ctx, token, nil)
+}
+
+// IntrospectRequest is a token to introspect, and the audiences its caller
+// may learn about.
+type IntrospectRequest struct {
+	// Token is the capability token, a JWT or a Biscuit. Empty is
+	// ErrNoCredentials.
+	Token string
+	// Audiences are the audiences of the tokens the caller may learn
+	// about: the token's audience must name at least one of them.
+	// Required, and none of them empty: otherwise ErrInvalidRequest, the
+	// server's error rather than the token's.
+	Audiences []string
+}
+
+// IntrospectFor is Introspect for a caller that may learn only about tokens
+// of req.Audiences. A token whose audience names none of them is refused as
+// ErrAudienceMismatch once its signatures, issuer and time window have
+// verified, and before the revocation lookup: so a foreign token is refused
+// alike whether the revocation store can answer or not, and a forged one is
+// refused as ever, both as ErrUnauthenticated's family. A token of an
+// audience the caller may ask about is answered as Introspect answers it, a
+// revocation lookup that failed included.
+func (v *Verifier) IntrospectFor(ctx context.Context, req IntrospectRequest) (Introspection, error) {
+	if err := checkIntrospectRequest(req); err != nil {
+		v.observe(ctx, VerifierOperationIntrospect, time.Now(), nil, false, err)
+		return Introspection{}, err
+	}
+	return v.introspectObserved(ctx, req.Token, req.Audiences)
+}
+
+// checkIntrospectRequest refuses a request with no token, as
+// checkVerifyRequest does, and one naming no audience or an empty one: the
+// server's own call, its error, not the token's.
+func checkIntrospectRequest(req IntrospectRequest) error {
+	if req.Token == "" {
+		return ErrNoCredentials
+	}
+	if len(req.Audiences) == 0 {
+		return refuseRequest("IntrospectRequest.Audiences is required")
+	}
+	if slices.Contains(req.Audiences, "") {
+		return refuseRequest("IntrospectRequest.Audiences names an empty audience")
+	}
+	return nil
+}
+
+// introspectObserved is introspect, logged and reported (observe).
+func (v *Verifier) introspectObserved(ctx context.Context, token string, audiences []string) (Introspection, error) {
 	start := time.Now()
-	in, cap, err := v.introspect(ctx, token)
+	in, cap, err := v.introspect(ctx, token, audiences)
 	v.observe(ctx, VerifierOperationIntrospect, start, cap, in.FromBiscuit, err)
 	if err != nil {
 		return Introspection{}, err
@@ -656,11 +710,17 @@ func (v *Verifier) Introspect(ctx context.Context, token string) (Introspection,
 }
 
 // introspect is Introspect, unlogged, returning the grant too once the
-// token's signature has verified.
-func (v *Verifier) introspect(ctx context.Context, token string) (Introspection, *grant, error) {
+// token's signature has verified. With audiences set, a token naming none of
+// them is refused before the revocation lookup, the only check that needs
+// I/O beyond the keys.
+func (v *Verifier) introspect(ctx context.Context, token string, audiences []string) (Introspection, *grant, error) {
 	cap, biscuitIDs, err := v.authenticate(ctx, token)
 	if err != nil {
 		return Introspection{}, cap, err
+	}
+	if audiences != nil && !slices.ContainsFunc(cap.Audience, func(aud string) bool { return slices.Contains(audiences, aud) }) {
+		return Introspection{}, cap, fmt.Errorf("%w: token audience %v names none of %v",
+			ErrAudienceMismatch, cap.Audience, audiences)
 	}
 	if err := v.checkRevoked(ctx, cap, biscuitIDs); err != nil {
 		return Introspection{}, cap, err

@@ -2073,9 +2073,13 @@ A gateway that cannot read capability tokens can ask about one instead.
 trusted issuer, within its window and not revoked) and what it carries;
 `exchange.IntrospectionHandler` serves that as an RFC 7662 endpoint for
 authenticated callers, with the caveats as an RFC 9396
-`authorization_details` entry. It checks no audience and no proof of
-possession, so its answer authorizes nothing: an active bound token is
-reported bound, not proved. A Biscuit copy with limits of its own is
+`authorization_details` entry. It checks no proof of possession, so its
+answer authorizes nothing: an active bound token is reported bound, not
+proved. `Introspect` answers about a token of any audience;
+`Verifier.IntrospectFor` answers only about tokens of the audiences its
+caller may learn about, and refuses any other once its signature has
+verified and before the revocation lookup, so a foreign token is refused
+alike whether the store can answer or not. A Biscuit copy with limits of its own is
 answered with them (`Introspection.Copies`), or, without
 `BiscuitConfig.MeterCopies`, refused as `Verify` refuses it. A revocation
 store that cannot answer is the endpoint's error, never an inactive token.
