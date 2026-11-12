@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -43,7 +45,12 @@ var ErrChargeTransaction = fmt.Errorf("%w: pgstore: the transaction a callback r
 // The transaction is the callback's while it runs, and no longer: once it
 // returns, every call on it, from any goroutine, fails with
 // pgx.ErrTxClosed, and a call still running then is waited for before the
-// store commits. Calls are taken one at a time, as a pgx.Tx needs.
+// store commits. Calls are taken one at a time, as a pgx.Tx needs, and
+// so are the reads of the rows and batch results it hands out: those still
+// open when the callback returns are closed then, and read no further. A
+// batch's QueuedQuery callbacks run while its Close holds the transaction:
+// a call they make on it, or one from another goroutine meanwhile, is
+// refused with ErrChargeTransaction.
 // Commit and Rollback return ErrChargeTransaction; a savepoint (Begin) is
 // the callback's to end. Conn is nil, as the connection is the store's, and
 // a call whose transaction the callback ended with SQL of its own — COMMIT,
@@ -60,24 +67,66 @@ func TxFrom(ctx context.Context) (pgx.Tx, bool) {
 }
 
 // callbackGuard is what every callbackTx of one callback shares: whether
-// the callback has returned, and the lock that takes calls one at a time.
+// the callback has returned, the lock that takes calls one at a time —
+// reading rows and batch results among them — and the results still open.
 type callbackGuard struct {
 	mu     sync.Mutex
 	closed bool
+	// open closes each result handed out, rows and batches, latest first.
+	open []func()
+	// inBatchCallback is set while a batch's QueuedQuery callback runs,
+	// inside the batch's Close, which holds mu: a call it made would wait
+	// on mu for ever.
+	inBatchCallback atomic.Bool
+}
+
+// errBatchCallbackCall is a call on the transaction from a batch's
+// QueuedQuery callback, refused rather than waited for.
+var errBatchCallbackCall = fmt.Errorf("%w: pgstore: a batch's QueuedQuery callback may not call the transaction its batch is read on", ErrChargeTransaction)
+
+// enter takes the lock for a call, unless a batch's callback, which runs
+// holding it, is what makes the call.
+func (g *callbackGuard) enter() error {
+	if g.inBatchCallback.Load() {
+		return errBatchCallbackCall
+	}
+	g.mu.Lock()
+	return nil
+}
+
+// inBatch marks each of b's QueuedQuery callbacks as running inside its
+// batch's Close (inBatchCallback).
+func (g *callbackGuard) inBatch(b *pgx.Batch) {
+	for _, q := range b.QueuedQueries {
+		if fn := q.Fn; fn != nil {
+			q.Fn = func(br pgx.BatchResults) error {
+				g.inBatchCallback.Store(true)
+				defer g.inBatchCallback.Store(false)
+				return fn(br)
+			}
+		}
+	}
 }
 
 // close ends the transaction for the callback, once any call running on it
-// has returned.
+// has returned: it closes every result the callback left open, so the
+// connection is free for the store's COMMIT, and refuses every call after.
 func (g *callbackGuard) close() {
 	g.mu.Lock()
+	defer g.mu.Unlock()
 	g.closed = true
-	g.mu.Unlock()
+	for _, closeOpen := range slices.Backward(g.open) {
+		closeOpen()
+	}
+	g.open = nil
 }
 
 // run runs call unless the callback has returned, holding the lock while it
 // runs.
 func (g *callbackGuard) run(call func() error) error {
-	g.mu.Lock()
+	if err := g.enter(); err != nil {
+		return err
+	}
 	defer g.mu.Unlock()
 	if g.closed {
 		return pgx.ErrTxClosed
@@ -143,7 +192,11 @@ func (t *callbackTx) CopyFrom(ctx context.Context, table pgx.Identifier, columns
 
 func (t *callbackTx) SendBatch(ctx context.Context, b *pgx.Batch) pgx.BatchResults {
 	var results pgx.BatchResults
-	if err := t.guard.run(func() error { results = t.tx.SendBatch(ctx, b); return nil }); err != nil {
+	if err := t.guard.run(func() error {
+		t.guard.inBatch(b)
+		results = t.guard.batch(t.tx.SendBatch(ctx, b))
+		return nil
+	}); err != nil {
 		return closedBatch{err}
 	}
 	return results
@@ -177,19 +230,25 @@ func (t *callbackTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.
 
 func (t *callbackTx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 	var rows pgx.Rows
-	err := t.guard.run(func() (err error) {
-		rows, err = t.tx.Query(ctx, sql, args...)
-		return err
+	err := t.guard.run(func() error {
+		r, err := t.tx.Query(ctx, sql, args...)
+		if err != nil {
+			return err
+		}
+		rows = t.guard.rows(r)
+		return nil
 	})
 	return rows, err
 }
 
+// QueryRow is Query's first row, read when the callback scans it: the rows
+// stay the guard's until then, as pgx's own QueryRow defers its error.
 func (t *callbackTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
-	var row pgx.Row
-	if err := t.guard.run(func() error { row = t.tx.QueryRow(ctx, sql, args...); return nil }); err != nil {
+	rows, err := t.Query(ctx, sql, args...)
+	if err != nil {
 		return closedRow{err}
 	}
-	return row
+	return firstRow{rows}
 }
 
 // Conn is nil: the connection is the store's, and through it the callback
