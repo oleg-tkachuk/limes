@@ -1,0 +1,33 @@
+# Git hooks. Install once per clone with `lefthook install`.
+#
+# Hooks run one job at a time, and every Go build or test on one thread: a
+# push must not compete with whatever else the machine is building.
+
+pre-commit:
+  parallel: false
+  jobs:
+    # The hook scripts are tested against throwaway repositories with a stub
+    # go; a change to one runs them.
+    - name: hook-scripts-test
+      tags: [hooks]
+      glob: "scripts/hooks/*.sh"
+      run: |
+        set -euo pipefail
+        for t in scripts/hooks/*_test.sh; do
+          env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE -u GIT_PREFIX bash "$t"
+        done
+
+pre-push:
+  parallel: false
+  jobs:
+    # Tests the Go modules the push changes, plus every module built on them
+    # (scripts/hooks/go-test-changed.sh says why each one runs). With the root
+    # module, any file outside a nested module is the root's. The flags match
+    # the Taskfile's: -race -short.
+    - name: go-test-changed
+      tags: [go, test]
+      env:
+        GOMAXPROCS: "1"
+        GOFLAGS: "-p=1"
+        GO_TEST_FLAGS: "-p 1 -parallel 1 -race -short"
+      run: scripts/hooks/go-test-changed.sh {push_files}
