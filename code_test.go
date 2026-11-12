@@ -412,10 +412,12 @@ func standInExchange(t *testing.T) {
 	t.Cleanup(func() { registrations = saved })
 }
 
-// An error carrying its own answer is answered by it — through a wrap, and
-// ahead of a limes error it wraps — though limes holds no rule of its code;
-// a code limes holds a rule of is answered by that rule.
+// An error carrying the answer its component registered is answered by it —
+// through a wrap, and ahead of a limes error it wraps — though limes holds
+// no rule of its code; a code limes holds a rule of is answered by that
+// rule.
 func TestAnErrorCarryingItsAnswer(t *testing.T) {
+	standInExchange(t)
 	for name, tc := range map[string]struct {
 		err  error
 		want Problem
@@ -465,5 +467,54 @@ func TestARegisteredCodeIsAnsweredByCode(t *testing.T) {
 	}
 	if got := link.ExchangeCodes(); !slices.Equal(got, []string{string(CodeInvalidGrant), string(CodeServerError)}) {
 		t.Errorf("the exchange's codes = %q; want its own two, not limes's invalid_request", got)
+	}
+}
+
+// foreignAnswer is an error of a consumer's, or of a dependency's, that
+// happens to carry a limes answer it never registered.
+type foreignAnswer struct{}
+
+// The answer foreignAnswer carries.
+const (
+	foreignCode   = "foreign_code"
+	foreignStatus = http.StatusTeapot
+	foreignTitle  = "A foreign title"
+)
+
+func (foreignAnswer) Error() string              { return "a foreign error" }
+func (foreignAnswer) LimesErrorCode() string     { return foreignCode }
+func (foreignAnswer) LimesErrorStatus() int      { return foreignStatus }
+func (foreignAnswer) LimesErrorTitle() string    { return foreignTitle }
+func (foreignAnswer) LimesErrorCategory() string { return string(CategoryInvalid) }
+
+// An error that names a code no table holds — a consumer's, a
+// dependency's — steers no answer: alone it is no error of limes's, as
+// CodeOf says of a consumer's own, and beside a limes sentinel it is that
+// sentinel's code, status and category that answer.
+func TestAnUnregisteredAnswerSteersNothing(t *testing.T) {
+	if code, ok := CodeOf(foreignAnswer{}); ok {
+		t.Errorf("CodeOf(an unregistered answer) = %q, true; want none", code)
+	}
+	if p, ok := ProblemOf(foreignAnswer{}); ok {
+		t.Errorf("ProblemOf(an unregistered answer) = %+v, true; want none", p)
+	}
+	joined := errors.Join(ErrRevoked, foreignAnswer{})
+	if code, ok := CodeOf(joined); !ok || code != CodeRevoked {
+		t.Errorf("CodeOf(ErrRevoked joined with an unregistered answer) = %q, %v; want %q", code, ok, CodeRevoked)
+	}
+	want, _ := ProblemOf(ErrRevoked)
+	if p, ok := ProblemOf(joined); !ok || p.Status != want.Status || p.Title != want.Title || p.Code != want.Code || p.Category != want.Category {
+		t.Errorf("ProblemOf(ErrRevoked joined with an unregistered answer) = %+v, %v; want %+v", p, ok, want)
+	}
+}
+
+// A code a table holds is found past an unregistered one before it in the
+// error's tree.
+func TestARegisteredCodePastAnUnregisteredOne(t *testing.T) {
+	registered := coded{code: CodeLeaseNotFound}
+	joined := errors.Join(foreignAnswer{}, fmt.Errorf("wrapped: %w", registered))
+	want, _ := CodeOf(registered)
+	if code, ok := CodeOf(joined); !ok || code != want {
+		t.Errorf("CodeOf(an unregistered answer, then %v) = %q, %v; want %q", registered, code, ok, want)
 	}
 }
