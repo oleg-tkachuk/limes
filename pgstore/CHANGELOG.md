@@ -2,6 +2,22 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.77.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.76.2...pgstore%2Fv0.77.0) (2026-11-12)
+
+### ⚠ BREAKING CHANGES
+
+* **pgstore:** refuse housekeeping under a scope that admits no tenant
+
+### Bug Fixes
+
+* **pgstore:** guard the rows and batches a callback's transaction hands out ([965367f](https://github.com/oleg-tkachuk/limes/commit/965367f397784a85b5b608d0bf44a9d1fa301739))
+* **pgstore:** refuse housekeeping under a scope that admits no tenant ([c8d3d65](https://github.com/oleg-tkachuk/limes/commit/c8d3d651ba10e00672ad2a67d49b9c6d272156f8))
+* **pgstore:** report a feature meter does not define as off ([150e678](https://github.com/oleg-tkachuk/limes/commit/150e67848c4f218e717d3de6e8dd54f4f91c36c5))
+
+### Dependencies
+
+* require limes v0.178.0
+
 ## [0.76.2](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.76.1...pgstore%2Fv0.76.2) (2026-11-12)
 
 ### Bug Fixes
