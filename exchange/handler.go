@@ -104,16 +104,17 @@ type HandlerConfig struct {
 	// exchange: 400 unauthorized_client. One that is or wraps ErrServerError
 	// is the server's failure: 500 server_error, the error logged at ERROR
 	// and kept out of the body, so name the client in it. Any other error
-	// refuses the client
-	// as not authenticated, ErrInvalidClient: invalid_client, 401 with a
-	// challenge in the scheme of its Authorization header, or 400 when it
-	// sent none (mTLS, a client assertion). Required.
+	// refuses the client as not authenticated, ErrInvalidClient:
+	// invalid_client, 401 with a challenge in the scheme of its
+	// Authorization header, or 400 when it sent none (mTLS, a client
+	// assertion). Required.
 	Authenticate func(r *http.Request) (Client, error)
 	// EndpointURL is the token endpoint's URL as clients call it, which
-	// their DPoP proofs name (htu). Required when Exchanger checks DPoP.
+	// their DPoP proofs name (htu). Required when the Exchanger checks DPoP
+	// or narrows capabilities (Config.DPoP or Config.Capabilities).
 	EndpointURL string
 	// MaxBodyBytes bounds the request body the Handler reads. Zero:
-	// DefaultMaxBodyBytes. A request whose form the caller parsed already —
+	// DefaultMaxBodyBytes; negative is refused. A request whose form the caller parsed already —
 	// one /token path serving several grants — is read from r.PostForm, its
 	// body left unread, so the caller's own bound is the one that applies;
 	// the Handler still checks its content type, and drops empty values
@@ -130,8 +131,10 @@ type Handler struct {
 	cfg HandlerConfig
 }
 
-// NewHandler builds a Handler, refusing a config without an exchanger or a
-// client authenticator, or one that checks DPoP with no endpoint URL.
+// NewHandler builds a Handler, refusing with limes.ErrInvalidConfig a config
+// without an exchanger or a client authenticator, one whose Exchanger checks
+// DPoP or narrows capabilities with no endpoint URL, or a negative
+// MaxBodyBytes.
 func NewHandler(cfg HandlerConfig) (*Handler, error) {
 	switch {
 	case cfg.Exchanger == nil:
@@ -184,7 +187,9 @@ type Error struct {
 	// named none (RFC 9110 §15.5.2).
 	Status int `json:"-"`
 	// Code is the error code: RFC 6749 §5.2's, RFC 8707's invalid_target,
-	// RFC 9396's invalid_authorization_details, or RFC 9449's DPoP codes.
+	// RFC 9396's invalid_authorization_details, RFC 9449's DPoP codes, or
+	// temporarily_unavailable (RFC 6749 §4.1.2.1) for a client past its
+	// share of the DPoP replay cache.
 	Code string `json:"error"`
 	// Description is a fixed, client-safe sentence; never the error's text.
 	Description string `json:"error_description,omitempty"`

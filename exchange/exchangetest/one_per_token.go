@@ -22,8 +22,8 @@ type OnePerToken struct {
 	// Request is an exchange the Exchanger grants, of a subject token no
 	// earlier call returned.
 	Request func(t *testing.T) exchange.Request
-	// NoJTI is an exchange the Exchanger would grant but that its subject
-	// token carries no jti.
+	// NoJTI is an exchange the Exchanger would grant but for its subject
+	// token carrying no jti.
 	NoJTI func(t *testing.T) exchange.Request
 	// Revoke revokes the capability id, as the consumer's operators do.
 	Revoke func(t *testing.T, id uuid.UUID)

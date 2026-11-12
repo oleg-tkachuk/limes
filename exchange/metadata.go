@@ -81,8 +81,11 @@ type AuthorizationServerMetadata struct {
 	AuthorizationDetailsTypesSupported []string `json:"authorization_details_types_supported,omitempty"`
 }
 
-// NewResourceMetadataHandler serves md, refusing a document whose resource
-// or authorization servers are not https URLs without a fragment.
+// NewResourceMetadataHandler serves md to GET and HEAD, BearerMethodsSupported
+// defaulted. It refuses with limes.ErrInvalidConfig a document whose resource
+// is not an https URL without a fragment, that names no authorization
+// server, or that names one that is not an https URL without a query or
+// fragment (RFC 8414 §2).
 func NewResourceMetadataHandler(md ResourceMetadata) (http.Handler, error) {
 	if err := checkHTTPSURL("ResourceMetadata.Resource", md.Resource); err != nil {
 		return nil, err
@@ -102,8 +105,10 @@ func NewResourceMetadataHandler(md ResourceMetadata) (http.Handler, error) {
 }
 
 // NewAuthorizationServerMetadataHandler serves md as the token exchange's
-// metadata, setting its grant and response types, and refusing a document
-// whose issuer or endpoints are not https URLs.
+// metadata to GET and HEAD, setting its grant and response types. It
+// refuses with limes.ErrInvalidConfig a document whose issuer is not an
+// https URL without a query or fragment (RFC 8414 §2), or whose token
+// endpoint, or JWKS URI when set, is not an https URL without a fragment.
 func NewAuthorizationServerMetadataHandler(md AuthorizationServerMetadata) (http.Handler, error) {
 	if err := checkIssuer("AuthorizationServerMetadata.Issuer", md.Issuer); err != nil {
 		return nil, err
@@ -144,7 +149,8 @@ func metadataHandler(doc any) (http.Handler, error) {
 
 // ResourceMetadataURL is where the metadata of the resource identified by
 // resource is served: the well-known path between its host and its path
-// (RFC 9728 §3.1).
+// (RFC 9728 §3.1). A resource that is not an https URL without a fragment
+// is limes.ErrInvalidConfig.
 func ResourceMetadataURL(resource string) (string, error) {
 	if err := checkHTTPSURL("resource", resource); err != nil {
 		return "", err
@@ -153,7 +159,9 @@ func ResourceMetadataURL(resource string) (string, error) {
 }
 
 // AuthorizationServerMetadataURL is where the metadata of the authorization
-// server with issuer identifier issuer is served (RFC 8414 §3.1).
+// server with issuer identifier issuer is served (RFC 8414 §3.1). An issuer
+// that is not an https URL without a query or fragment is
+// limes.ErrInvalidConfig.
 func AuthorizationServerMetadataURL(issuer string) (string, error) {
 	if err := checkIssuer("issuer", issuer); err != nil {
 		return "", err
