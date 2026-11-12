@@ -78,10 +78,9 @@ func (s *UsageStore) ReleaseMatching(ctx context.Context, req meter.ReleaseMatch
 	if err != nil {
 		return meter.ReleaseMatchingResult{}, err
 	}
+	// The holds are committed: a failed settlement returns them, and the
+	// leases settled before it, with its error, as ReleaseExpired does.
 	settled, named, err := s.settleEach(ctx, meter.StoreOperationReleaseMatching, inTx, sqlMatchingLeasesHead+where+sqlMatchingLeasesTail, args...)
-	if err != nil {
-		return meter.ReleaseMatchingResult{}, err
-	}
 	res.SettledLeases = int64(len(settled))
 	for _, h := range settled {
 		res.Tenants = append(res.Tenants, h.tenantID)
@@ -91,7 +90,7 @@ func (s *UsageStore) ReleaseMatching(ctx context.Context, req meter.ReleaseMatch
 	}
 	// Either batch full, more may match.
 	res.More = res.Released >= int64(limit) || named >= limit
-	return res, nil
+	return res, err
 }
 
 var _ meter.MatchingReleaser = (*UsageStore)(nil)

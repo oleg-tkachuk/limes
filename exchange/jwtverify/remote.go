@@ -19,7 +19,8 @@ import (
 )
 
 // The intervals of RemoteKeys, those a limes verifier's jwks.Remote keeps
-// by default for the issuer's own keys, so the two fail alike.
+// by default for the issuer's own keys, so the two fail alike: both answer
+// an unknown kid as unavailable while fetches fail.
 const (
 	// remoteRefreshInterval is how often the key set is fetched, whatever
 	// the identity provider's Cache-Control says: a set fetched less
@@ -52,8 +53,11 @@ const (
 // with a request timeout. Whatever the client's own redirect policy, a
 // redirect to another scheme or host is refused, on a copy of the client:
 // the caller's is left as it is. It does not wait for the first fetch. A
-// token naming a kid the set does not hold, or arriving while no usable set is held, fetches it
-// again at once, at most once per jwks.DefaultMinRefreshInterval. The last
+// token naming a kid the set does not hold, or arriving while no usable set
+// is held, fetches it again at once, at most once per
+// jwks.DefaultMinRefreshInterval. While the last fetch failed, with none
+// succeeding since, such a kid is an error wrapping jwks.ErrUnavailable
+// rather than a refused token: it may be a key rotated in meanwhile. The last
 // set fetched is served while rawURL is out of reach, for at most
 // jwks.DefaultMaxStale; never fetched or past that, the keys are an error
 // wrapping jwks.ErrUnavailable, the server's. Fetches a token starts, and
@@ -120,6 +124,10 @@ type remote struct {
 
 	mu        sync.Mutex
 	fetchedAt time.Time // when a set was last fetched and read; zero for never
+	// fetchErr is why the last fetch failed, nil once one has succeeded
+	// since: while it is set, a kid the held set lacks may be one the
+	// identity provider rotated in, so it is not refused as unknown.
+	fetchErr error
 
 	// refetching holds one token while a token's fetch runs, a channel so a
 	// caller waiting behind it gives up when its context does.
@@ -137,13 +145,29 @@ func (r *remote) transform(ctx context.Context, res *http.Response) (jwk.Set, er
 	}
 	r.mu.Lock()
 	r.fetchedAt = r.now()
+	r.fetchErr = nil
 	r.mu.Unlock()
 	return set, nil
+}
+
+// failed records err as why the last fetch failed.
+func (r *remote) failed(err error) {
+	r.mu.Lock()
+	r.fetchErr = err
+	r.mu.Unlock()
+}
+
+// lastFetchErr is why the last fetch failed, nil when it succeeded.
+func (r *remote) lastFetchErr() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.fetchErr
 }
 
 // fetchFailed logs a background fetch that failed, and the set served
 // meanwhile, if any.
 func (r *remote) fetchFailed(ctx context.Context, err error) {
+	r.failed(err)
 	fetchedAt := r.lastFetched()
 	if fetchedAt.IsZero() {
 		r.log.WarnContext(ctx, "jwtverify: fetching the identity provider's keys failed; none held", slog.Any("error", err))
@@ -190,7 +214,11 @@ func (r *remote) current() (jwk.Set, error) {
 
 // refetch fetches the set again for a token, unless a token did within
 // remoteMinRefetchInterval, and is the set then held. One fetch runs at a
-// time: a caller arriving during one waits for it and takes its set.
+// time: a caller arriving during one waits for it and takes its set. While
+// the last fetch failed, with none succeeding since, it is
+// jwks.ErrUnavailable even when the fetch is skipped, as jwks.Remote is: a
+// token's kid the held set lacks may be one rotated in meanwhile, and
+// refusing the token would blame it for the endpoint's failure.
 func (r *remote) refetch(ctx context.Context, reason string) (jwk.Set, error) {
 	select {
 	case r.refetching <- struct{}{}:
@@ -202,11 +230,22 @@ func (r *remote) refetch(ctx context.Context, reason string) (jwk.Set, error) {
 	if !r.lastRefetch.IsZero() && now.Sub(r.lastRefetch) < remoteMinRefetchInterval {
 		r.log.DebugContext(ctx, "jwtverify: not fetching the identity provider's keys again so soon", slog.String("reason", reason),
 			slog.Time("last_fetch_started", r.lastRefetch))
-		return r.current()
+		set, err := r.current()
+		if err != nil {
+			return nil, err
+		}
+		if fetchErr := r.lastFetchErr(); fetchErr != nil {
+			return nil, errs.Errorf("%w: jwtverify: the identity provider's keys at %s could not be fetched again: %w", jwks.ErrUnavailable, r.endpoint, fetchErr)
+		}
+		return set, nil
 	}
 	r.lastRefetch = now
 	r.log.InfoContext(ctx, "jwtverify: fetching the identity provider's keys", slog.String("reason", reason))
 	if err := r.ctrl.Refresh(ctx, r.url); err != nil {
+		if ctx.Err() == nil {
+			// A caller giving up is no failure of the endpoint's.
+			r.failed(err)
+		}
 		r.log.WarnContext(ctx, "jwtverify: fetching the identity provider's keys failed", slog.String("reason", reason), slog.Any("error", err))
 		return nil, errs.Errorf("%w: jwtverify: fetch the identity provider's keys at %s: %w", jwks.ErrUnavailable, r.endpoint, err)
 	}

@@ -86,6 +86,8 @@ type MatchingReleaser interface {
 	// still come. It refuses what ReleaseMatchingRequest.Validate refuses,
 	// a call scoped to another tenant as limes.ErrScopeMismatch, and an
 	// AllTenants call under a scope that does not admit writing every
-	// tenant as limes.ErrScopeMismatch too.
+	// tenant as limes.ErrScopeMismatch too. A store that settles the leases
+	// after the holds commit, and fails at a lease, returns the error with
+	// what it committed: the holds released and the leases settled before it.
 	ReleaseMatching(ctx context.Context, req ReleaseMatchingRequest) (ReleaseMatchingResult, error)
 }

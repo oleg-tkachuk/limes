@@ -431,6 +431,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{Name: "ALeasedChargesRefundLeavesCountersRestartedSince", Run: checkLeaseRefundAfterRestart},
 		{Name: "LeasesUnderOneRootStayUnderItsCeiling", Run: checkLeaseConcurrency},
 		{Name: "LeaseIsSettledByAReset", Run: checkLeaseIsSettledByAReset},
+		{Name: "ARefusedResetSettlesNoLease", Run: checkARefusedResetSettlesNoLease},
 		{Name: "RequestLeaseStopsBumpsAtTheLeaseholder", Run: checkRequestLeaseStopsBumpsAtTheLeaseholder},
 		{Name: "RequestLeaseIsHeldToEveryCeiling", Run: checkRequestLeaseIsHeldToEveryCeiling},
 		{Name: "RequestLeaseThatCannotBeCountedIsRefused", Run: checkRequestLeaseThatCannotBeCountedIsRefused},
@@ -1284,7 +1285,7 @@ func checkSettleReplay(t *testing.T, f fixture) {
 func checkReleaseReturnsCopy(t *testing.T, f fixture) {
 	reader, ok := f.Usage.(meter.CopyUsageReader)
 	if !ok {
-		return // a Meter that does not read copies back is checked no further
+		t.Skip("the store reads no copy counters back")
 	}
 	const ttl = time.Minute
 	for name, release := range map[string]func(subject limes.MeterSubject, id uuid.UUID) error{
@@ -1666,7 +1667,7 @@ func checkHoldSettledByItsCopy(t *testing.T, f fixture, first meter.Reservation,
 func checkCopyUsageRefusesInvalid(t *testing.T, f fixture) {
 	reader, ok := f.Usage.(meter.CopyUsageReader)
 	if !ok {
-		return // a Meter that does not read copies back is checked no further
+		t.Skip("the store reads no copy counters back")
 	}
 	tooMany := make([][]byte, meter.MaxCopyUsageIDs+1)
 	for i := range tooMany {
@@ -1690,7 +1691,7 @@ func checkCopyUsageRefusesInvalid(t *testing.T, f fixture) {
 func checkCopyCountersGo(t *testing.T, f fixture) {
 	reader, ok := f.Usage.(meter.CopyUsageReader)
 	if !ok {
-		return // a Meter that does not read copies back is checked no further
+		t.Skip("the store reads no copy counters back")
 	}
 	// requests is each copy's ceiling: the one request it is counted with.
 	const requests = 1
@@ -1732,7 +1733,7 @@ func checkCopyCountersGo(t *testing.T, f fixture) {
 func checkCopySharedID(t *testing.T, f fixture) {
 	reader, ok := f.Usage.(meter.CopyUsageReader)
 	if !ok {
-		return // a Meter that does not read copies back is checked no further
+		t.Skip("the store reads no copy counters back")
 	}
 	tenant, err := f.newTenant()
 	expect.Must(t, err == nil, "%v", err)
@@ -1920,7 +1921,7 @@ func checkCopyOverrun(t *testing.T, f fixture) {
 	expect.Must(t, err == nil && r.Overrun, "recording charge = %+v, %v; want an overrun", r, err)
 	reader, ok := f.Usage.(meter.CopyUsageReader)
 	if !ok {
-		return // a Meter that does not read copies back is checked no further
+		t.Skip("the store reads no copy counters back")
 	}
 	res, err := reader.CopyUsage(f.Ctx, meter.CopyUsageRequest{CapabilityID: f.child, RevocationIDs: [][]byte{copyID}})
 	got := res.Copies

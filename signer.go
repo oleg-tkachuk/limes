@@ -291,7 +291,7 @@ func checkSignable(c Capability) error {
 	if err := c.Subject.Validate(); err != nil {
 		return err
 	}
-	if c.ExpiresAt.Before(c.IssuedAt) || c.ExpiresAt.IsZero() {
+	if !c.ExpiresAt.After(c.IssuedAt) || c.ExpiresAt.IsZero() {
 		return refuseRequest("limes: ExpiresAt must be after IssuedAt")
 	}
 	return checkActing(c)

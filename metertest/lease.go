@@ -373,6 +373,31 @@ func checkLeaseIsSettledByAReset(t *testing.T, f fixture) {
 	expect.That(t, f.usageOf(t, f.root).SpentAmount == leaseCharge, "the root spent %v once the lease settled by the reset, want %v", f.usageOf(t, f.root).SpentAmount, leaseCharge)
 }
 
+// A reset refused at its version guard settles nothing: a rejected call
+// mutates nothing, so the tenant's lease stays open as it was.
+func checkARefusedResetSettlesNoLease(t *testing.T, f fixture) {
+	l := f.leaser(t)
+	child := f.childSubject()
+	f.lease(t, l, child, leased)
+	_, err := f.chargeOf(child, leaseCharge)
+	expect.Must(t, err == nil, "charge: %v", err)
+	before, err := l.GetLease(f.Ctx, f.child)
+	expect.Must(t, err == nil, "GetLease: %v", err)
+	b := f.tenantOf(t)
+	_, err = f.Usage.SetTenantBudget(f.Ctx, meter.SetTenantBudgetRequest{
+		TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Max: tenantBudget, UnitCode: unit}, ResetSpend: true, ExpectedVersion: b.ResourceVersion + 1,
+	})
+	expect.Must(t, errors.Is(err, meter.ErrTenantBudgetVersionMismatch), "reset at a wrong version: err = %v, want ErrTenantBudgetVersionMismatch", err)
+	after, err := l.GetLease(f.Ctx, f.child)
+	expect.Must(t, err == nil, "GetLease after a refused reset: %v, want the lease still open", err)
+	expect.That(t, after.ID == before.ID && after.Amount == before.Amount && after.Spent == before.Spent,
+		"the lease after a refused reset = %v holding %v, %v spent; want %v holding %v, %v spent", after.ID, after.Amount, after.Spent, before.ID, before.Amount, before.Spent)
+	got := f.tenantOf(t)
+	expect.That(t, got.ResourceVersion == b.ResourceVersion && got.SpentAmount == b.SpentAmount && got.ReservedAmount == b.ReservedAmount,
+		"the tenant after a refused reset = version %d, %v spent, %v held; want version %d, %v spent, %v held", got.ResourceVersion, got.SpentAmount, got.ReservedAmount, b.ResourceVersion, b.SpentAmount, b.ReservedAmount)
+	expect.That(t, f.usageOf(t, f.root).SpentAmount == 0, "the root spent %v after a refused reset, want the lease's charge still on the lease", f.usageOf(t, f.root).SpentAmount)
+}
+
 // A Biscuit copy leases nothing: what it charges and bumps goes through the
 // whole chain, which a lease would hold beyond the copy's own ceilings, so
 // a lease of one is refused, as a Reserve past those ceilings is, and

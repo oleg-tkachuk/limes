@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -259,6 +260,26 @@ func TestSealKeyOfANilPointerIsZero(t *testing.T) {
 	var p *ed25519.PrivateKey
 	if k := SealKey(p); !k.IsZero() {
 		t.Error("SealKey of a nil *ed25519.PrivateKey holds a key")
+	}
+}
+
+// An empty ed25519.PrivateKey, nil or not, holds no key, however it is
+// passed: it seals to the zero SealedKey, as a nil interface does.
+func TestSealKeyOfAnEmptyKeyIsZero(t *testing.T) {
+	var nilKey ed25519.PrivateKey
+	empty := ed25519.PrivateKey{}
+	for name, key := range map[string]crypto.Signer{
+		"nil value": nilKey, "empty value": empty, "pointer to nil": &nilKey, "pointer to empty": &empty,
+	} {
+		t.Run(name, func(t *testing.T) {
+			k := SealKey(key)
+			if !k.IsZero() {
+				t.Error("SealKey of an empty ed25519.PrivateKey holds a key")
+			}
+			if _, err := NewSigner(SignerConfig{KeyID: testKID, Key: k}); !errors.Is(err, ErrInvalidConfig) {
+				t.Errorf("NewSigner of an empty key = %v, want ErrInvalidConfig", err)
+			}
+		})
 	}
 }
 

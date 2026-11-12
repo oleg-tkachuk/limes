@@ -116,6 +116,7 @@ func TestSign_RejectsInvalid(t *testing.T) {
 		"invalid subject":   {func(c *Capability) { c.Subject.Type = "" }, "principal"},
 		"reversed times":    {func(c *Capability) { c.ExpiresAt = c.IssuedAt.Add(-time.Minute) }, "ExpiresAt must be after"},
 		"no expiry":         {func(c *Capability) { c.IssuedAt, c.ExpiresAt = time.Time{}, time.Time{} }, "ExpiresAt must be after"},
+		"zero lifetime":     {func(c *Capability) { c.ExpiresAt = c.IssuedAt }, "ExpiresAt must be after"},
 		"missing client id": {func(c *Capability) { c.ClientID = "" }, "ClientID"},
 		"prior actors acting for itself": {
 			func(c *Capability) { c.PriorActors = []string{"agent"} }, "PriorActors need an OnBehalfOf",

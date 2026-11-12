@@ -2024,11 +2024,6 @@ func (s *UsageStore) SetTenantBudget(_ context.Context, args meter.SetTenantBudg
 	if err := s.notErasedLocked(args.TenantID); err != nil {
 		return meter.TenantBudget{}, err
 	}
-	// A reset closes the period: what the tenant's leases spent is the
-	// closing period's, so they are settled into it first.
-	if args.ResetSpend {
-		s.settleLeasesLocked(func(l lease) bool { return l.tenantID == args.TenantID })
-	}
 	b, exists := s.budgets[args.TenantID]
 	// SetTenantBudgetRequest.ExpectedVersion's contract, held as every store
 	// must hold it, or tests pass against a memstore that permits writes a
@@ -2039,8 +2034,20 @@ func (s *UsageStore) SetTenantBudget(_ context.Context, args meter.SetTenantBudg
 	}
 	// A ceiling that names no unit — the zero one — keeps the tenant's.
 	unit := cmp.Or(args.Ceiling.UnitCode, b.Ceiling.UnitCode)
-	if err := checkBudgetUnit(b, exists, args, unit); err != nil {
+	// The unit is checked against the tenant as the reset leaves it, its
+	// leases settled, before anything moves: a refused call mutates nothing.
+	checked := b
+	if args.ResetSpend {
+		checked.ReservedAmount = max0(checked.ReservedAmount - s.leasedLocked(args.TenantID))
+	}
+	if err := checkBudgetUnit(checked, exists, args, unit); err != nil {
 		return meter.TenantBudget{}, err
+	}
+	// A reset closes the period: what the tenant's leases spent is the
+	// closing period's, so they are settled into it first.
+	if args.ResetSpend {
+		s.settleLeasesLocked(func(l lease) bool { return l.tenantID == args.TenantID })
+		b = s.budgets[args.TenantID]
 	}
 	b = s.setBudgetLocked(b, args, unit)
 	s.budgets[args.TenantID] = b

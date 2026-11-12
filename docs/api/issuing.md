@@ -341,7 +341,7 @@ SealedKey is a private key where no formatting reaches it: under any verb, %p in
 func SealKey(key crypto.Signer) SealedKey
 ```
 
-SealKey seals key: an ed25519.PrivateKey, or a pointer to one, of which it keeps a copy, so clearing or reusing the caller's key after leaves the sealed key whole, or a crypto.Signer over a key held elsewhere. A nil interface, or a nil pointer to an ed25519.PrivateKey, gives the zero SealedKey.
+SealKey seals key: an ed25519.PrivateKey, or a pointer to one, of which it keeps a copy, so clearing or reusing the caller's key after leaves the sealed key whole, or a crypto.Signer over a key held elsewhere. A nil interface, an empty ed25519.PrivateKey, nil or not, or a nil pointer to one gives the zero SealedKey.
 
 <sub>[redact.go](../../redact.go)</sub>
 <a id="limes.SealedKey.Format"></a>

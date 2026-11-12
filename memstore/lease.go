@@ -209,6 +209,18 @@ func (l lease) requestsRemaining() int64 {
 func (l lease) coversCharges() bool { return l.amount > 0 }
 func (l lease) coversBumps() bool   { return l.requests > 0 }
 
+// leasedLocked is what tenant's open leases hold of its aggregate: what
+// settling them takes off its ReservedAmount. s.mu must be held.
+func (s *UsageStore) leasedLocked(tenant uuid.UUID) limes.Nanos {
+	var held limes.Nanos
+	for _, l := range s.leases {
+		if l.tenantID == tenant {
+			held += l.amount
+		}
+	}
+	return held
+}
+
 // settleLeasesLocked settles every lease due says. s.mu must be held.
 func (s *UsageStore) settleLeasesLocked(due func(lease) bool) int64 {
 	var settled int64

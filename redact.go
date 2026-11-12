@@ -50,18 +50,21 @@ type SealedKey struct{ s *sealedSigner }
 // SealKey seals key: an ed25519.PrivateKey, or a pointer to one, of which
 // it keeps a copy, so clearing or reusing the caller's key after leaves the
 // sealed key whole, or a crypto.Signer over a key held elsewhere. A nil
-// interface, or a nil pointer to an ed25519.PrivateKey, gives the zero
-// SealedKey.
+// interface, an empty ed25519.PrivateKey, nil or not, or a nil pointer to
+// one gives the zero SealedKey.
 func SealKey(key crypto.Signer) SealedKey {
 	switch p := key.(type) {
 	case nil:
 		return SealedKey{}
 	case *ed25519.PrivateKey:
-		if p == nil {
+		if p == nil || len(*p) == 0 {
 			return SealedKey{}
 		}
 		key = slices.Clone(*p)
 	case ed25519.PrivateKey:
+		if len(p) == 0 {
+			return SealedKey{}
+		}
 		key = slices.Clone(p)
 	}
 	return SealedKey{sealSigner(key)}

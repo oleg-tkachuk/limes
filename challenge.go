@@ -140,19 +140,17 @@ var internalError = refusal{status: http.StatusInternalServerError, slug: "inter
 // answered 500, without its text.
 func (v *Verifier) ErrorResponse(ctx context.Context, err error, scheme AuthScheme) ErrorResponse {
 	// The first rule err matches answers it; none, the server's fault.
-	r, kind := internalError, internalError.slug
 	rule, ok := ruleFor(err)
-	if ok {
-		r, kind = rule.answer, rule.answer.slug
+	if !ok {
+		return internalAnswer()
 	}
+	r, kind := rule.answer, rule.answer.slug
 	if rule.reason != "" {
 		kind = string(rule.reason)
 	}
 	resp := answer(r, kind, rule.reason)
-	if ok {
-		resp.Problem.Code, _ = CodeOf(err)
-		resp.Problem.Category, _ = CategoryOf(err)
-	}
+	resp.Problem.Code, _ = CodeOf(err)
+	resp.Problem.Category, _ = CategoryOf(err)
 	if r.code == "" && !r.bare {
 		return resp
 	}
@@ -171,7 +169,7 @@ func (v *Verifier) ErrorResponse(ctx context.Context, err error, scheme AuthSche
 		if nerr != nil {
 			v.logger().ErrorContext(ctx, "limes: no DPoP nonce for a use_dpop_nonce challenge; answering the server's failure",
 				slog.Any(logKeyError, nerr), slog.String(logKeyReason, string(rule.reason)))
-			return answer(internalError, internalError.slug, "")
+			return internalAnswer()
 		}
 		resp.DPoPNonce = nonce
 	}
@@ -184,6 +182,14 @@ func answer(r refusal, kind string, reason Reason) ErrorResponse {
 		Status:  r.status,
 		Problem: Problem{Type: problemTypeBase + kind, Title: r.title, Status: r.status, Reason: reason},
 	}
+}
+
+// internalAnswer is the server's failure, 500, with no challenge: its
+// problem carries CodeInternal and CategoryInternal, as ProblemFor's does.
+func internalAnswer() ErrorResponse {
+	resp := answer(internalError, internalError.slug, "")
+	resp.Problem.Code, resp.Problem.Category = CodeInternal, CategoryInternal
+	return resp
 }
 
 // logger is VerifierConfig.Logger, or slog.Default() for none.

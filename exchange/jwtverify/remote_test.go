@@ -220,3 +220,31 @@ func TestRemoteKeysIntervalsNest(t *testing.T) {
 		t.Errorf("intervals %v, want them ascending", intervals)
 	}
 }
+
+// A token naming a kid the held set lacks, while the JWKS URL fails, is
+// jwks.ErrUnavailable for as long as no fetch has succeeded since: the kid
+// may be one the identity provider rotated in, so the fault is the
+// endpoint's, also when the rate limit skips the fetch. Once a fetch
+// succeeds without it, the token is refused.
+func TestRemoteKeysUnknownKIDWhileTheURLFails(t *testing.T) {
+	p, rotated := newIDP(t), newIDPKey(t, rotatedKID)
+	srv := newJWKSServer(t, p.keys)
+	keys, clk, _ := remoteFixture(t, srv)
+	v := newVerifier(t, Config{Issuer: idpIssuer, Keys: keys, Now: clock})
+	token := rotated.sign(t, TypeAccessToken, accessClaims())
+	srv.failing.Store(true)
+	for _, attempt := range []string{"first", "within the interval"} {
+		_, err := v.VerifySubject(t.Context(), token)
+		if !errors.Is(err, jwks.ErrUnavailable) || errors.Is(err, exchange.ErrInvalidGrant) {
+			t.Errorf("%s: err = %v, want jwks.ErrUnavailable and no ErrInvalidGrant", attempt, err)
+		}
+	}
+	srv.failing.Store(false)
+	clk.advance(remoteMinRefetchInterval)
+	if _, err := v.VerifySubject(t.Context(), token); !errors.Is(err, exchange.ErrInvalidGrant) {
+		t.Errorf("recovered, kid still absent: err = %v, want ErrInvalidGrant", err)
+	}
+	if _, err := v.VerifySubject(t.Context(), token); !errors.Is(err, exchange.ErrInvalidGrant) {
+		t.Errorf("recovered, within the interval: err = %v, want ErrInvalidGrant", err)
+	}
+}
