@@ -195,7 +195,7 @@ var codeRules = []codeRule{
 
 	// The server's configuration or its upstream: its own to fix.
 	{ErrProofUnsupported, CodeProofUnsupported, http.StatusInternalServerError, "The capability is bound to a key and no proof is checked", CategoryInternal},
-	{ErrNoRevocationLineage, CodeNoRevocationLineage, http.StatusBadGateway, "The revocation upstream names no lineage", CategoryUnavailable},
+	{ErrNoRevocationLineage, CodeNoRevocationLineage, http.StatusInternalServerError, "The revocation upstream names no lineage", CategoryInternal},
 	{ErrCopyCountersNotMetered, CodeCopyCountersNotMetered, http.StatusInternalServerError, "Copy limits need a verifier that meters copies", CategoryInternal},
 	{ErrCursorRepeated, CodeCursorRepeated, http.StatusBadGateway, "The store returned a cursor already fetched", CategoryUnavailable},
 	{ErrStoreUnavailable, CodeStoreUnavailable, http.StatusServiceUnavailable, "The store is unavailable", CategoryUnavailable},

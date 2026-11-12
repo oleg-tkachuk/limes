@@ -17,7 +17,9 @@ import (
 // (InstrumentRevocationCache), read from its Stats when the provider
 // collects. Hits, misses, lookups, evictions, stale answers and entries carry
 // limes.revocation_cache.kind: capability for IsRevoked, biscuit for
-// IsBiscuitRevoked; the clears and the revocation signals' instruments are
+// IsBiscuitRevoked, unrecorded for the answers about a capability the
+// upstream has no record of (RevocationCacheStats.Unrecorded), whose hits
+// capability does not count; the clears and the revocation signals' instruments are
 // of the whole cache and carry none.
 
 // Instrument names, as an exporter shows them.
@@ -58,6 +60,7 @@ const attrKind = "limes.revocation_cache.kind"
 const (
 	kindCapability = "capability"
 	kindBiscuit    = "biscuit"
+	kindUnrecorded = "unrecorded"
 )
 
 // InstrumentRevocationCache reports cache's counts (limes.RevocationCacheStats)
@@ -126,6 +129,7 @@ func InstrumentRevocationCache(cache *limes.RevocationCache, opts ...Option) (me
 	}{
 		{metric.WithAttributes(attribute.String(attrKind, kindCapability)), func(s limes.RevocationCacheStats) limes.RevocationCacheCounts { return s.Capabilities }},
 		{metric.WithAttributes(attribute.String(attrKind, kindBiscuit)), func(s limes.RevocationCacheStats) limes.RevocationCacheCounts { return s.Biscuits }},
+		{metric.WithAttributes(attribute.String(attrKind, kindUnrecorded)), func(s limes.RevocationCacheStats) limes.RevocationCacheCounts { return s.Unrecorded }},
 	}
 	reg, err := meter.RegisterCallback(func(_ context.Context, o metric.Observer) error {
 		st := cache.Stats()

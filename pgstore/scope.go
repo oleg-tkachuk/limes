@@ -217,6 +217,17 @@ func checkSchemaAdmits(ctx context.Context, tx pgx.Tx, query string, refusal err
 	return nil
 }
 
+// checkContextAdmitsAny is checkSchemaAdmitsAny for the default Scope: a
+// call's WithTenant, WithAllTenants or WithAllTenantsReadOnly admits a
+// tenant without a round trip, and one with none is checked against the
+// database, where a role the policies do not bind is admitted.
+func checkContextAdmitsAny(ctx context.Context, tx pgx.Tx) error {
+	if _, ok := ctx.Value(scopeKey{}).(scope); ok {
+		return nil
+	}
+	return checkSchemaAdmitsAny(ctx, tx)
+}
+
 // checkContextAdmitsEvery is checkSchemaAdmitsEvery for the default Scope: a
 // call's WithAllTenants or WithAllTenantsReadOnly admits it without a round
 // trip, WithTenant refuses it, and one with neither is checked against the

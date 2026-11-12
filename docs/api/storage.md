@@ -1977,7 +1977,7 @@ TxFrom returns the transaction a charge or a refund commits on, from the context
 
 The call's writes are in it already — a charge's ledger row, a refund's refunded amount on the charge and, under a RefundID, its limes.refunds row — and its locks held: every counter on the chain and the tenant's aggregate, which every other charge of the tenant waits for until the callback returns and the store commits. The callback keeps to statements on this database, and short ones; a network call there holds the tenant's charges for as long.
 
-The transaction is the callback's while it runs, and no longer: once it returns, every call on it, from any goroutine, fails with pgx.ErrTxClosed, and a call still running then is waited for before the store commits. Calls are taken one at a time, as a pgx.Tx needs. Commit and Rollback return ErrChargeTransaction; a savepoint (Begin) is the callback's to end. Conn is nil, as the connection is the store's, and a call whose transaction the callback ended with SQL of its own — COMMIT, ROLLBACK, or either followed by BEGIN — is refused with ErrChargeTransaction and meter.ErrOutcomeUnknown: the call's writes went before the callback, so that COMMIT committed them, and that ROLLBACK undid them.
+The transaction is the callback's while it runs, and no longer: once it returns, every call on it, from any goroutine, fails with pgx.ErrTxClosed, and a call still running then is waited for before the store commits. Calls are taken one at a time, as a pgx.Tx needs, and so are the reads of the rows and batch results it hands out: those still open when the callback returns are closed then, and read no further. A batch's QueuedQuery callbacks run while its Close holds the transaction: a call they make on it, or one from another goroutine meanwhile, is refused with ErrChargeTransaction. Commit and Rollback return ErrChargeTransaction; a savepoint (Begin) is the callback's to end. Conn is nil, as the connection is the store's, and a call whose transaction the callback ended with SQL of its own — COMMIT, ROLLBACK, or either followed by BEGIN — is refused with ErrChargeTransaction and meter.ErrOutcomeUnknown: the call's writes went before the callback, so that COMMIT committed them, and that ROLLBACK undid them.
 
 <sub>[pgstore/tx.go](../../pgstore/tx.go)</sub>
 <a id="pgstore.WithAllTenants"></a>
@@ -2592,7 +2592,7 @@ ListByPrincipal lists one principal's capabilities a page at a time; the cursor 
 func (s *Store) Purge(ctx context.Context, req limes.PurgeRequest) (limes.PurgeResult, error)
 ```
 
-Purge removes the capabilities expired for longer than the retention, a batch of at most req.Limit (zero: limes.DefaultHousekeepingLimit), and every exchange whose subject token did: an exchange outlives its capability while its token can be presented (limes.ExchangeStore).
+Purge removes the capabilities expired for longer than the retention, a batch of at most req.Limit (zero: limes.DefaultHousekeepingLimit), and every exchange whose subject token did: an exchange outlives its capability while its token can be presented (limes.ExchangeStore). A scope that admits no tenant is refused with limes.ErrScopeMismatch, rather than purging nothing on every call while the records grow.
 
 <sub>[pgstore/store.go](../../pgstore/store.go)</sub>
 <a id="pgstore.Store.RevocationLineage"></a>
@@ -2800,7 +2800,7 @@ EraseTenantUsage implements meter.TenantUsageEraser: it marks the tenant erased 
 func (s *UsageStore) FeatureEnabled(f meter.Feature) bool
 ```
 
-FeatureEnabled implements meter.FeatureGate: every feature the store implements is on, but leases with Config.DisableLeases set.
+FeatureEnabled implements meter.FeatureGate: every feature of package meter is on, as the store implements each, but leases with Config.DisableLeases set; a feature meter does not define is off.
 
 <sub>[pgstore/lease.go](../../pgstore/lease.go)</sub>
 <a id="pgstore.UsageStore.GetCharge"></a>
@@ -2910,7 +2910,7 @@ ListTenantReservations implements meter.TenantReservationLister: the tenant's ho
 func (s *UsageStore) PurgeOrphans(ctx context.Context, req meter.PurgeOrphansRequest) (meter.PurgeOrphansResult, error)
 ```
 
-PurgeOrphans drops the counters of capabilities no longer on record, as DeleteUsage does, a batch at a time, and forgets the erase mark of each erased tenant none of whose records is left.
+PurgeOrphans drops the counters of capabilities no longer on record, as DeleteUsage does, a batch at a time, and forgets the erase mark of each erased tenant none of whose records is left. A scope that admits no tenant is refused with limes.ErrScopeMismatch, rather than purging nothing on every call.
 
 <sub>[pgstore/usage.go](../../pgstore/usage.go)</sub>
 <a id="pgstore.UsageStore.Refund"></a>
@@ -2943,7 +2943,7 @@ Release ends a reservation without charging. Releasing one that is gone is a no-
 func (s *UsageStore) ReleaseExpired(ctx context.Context, req meter.ReleaseExpiredRequest) (meter.ReleaseExpiredResult, error)
 ```
 
-ReleaseExpired releases the holds past their expiry, oldest first, in one transaction, then settles the leases past theirs, each in a transaction of its own.
+ReleaseExpired releases the holds past their expiry, oldest first, in one transaction, then settles the leases past theirs, each in a transaction of its own. A scope that admits no tenant is refused with limes.ErrScopeMismatch, rather than releasing nothing on every call.
 
 <sub>[pgstore/usage.go](../../pgstore/usage.go)</sub>
 <a id="pgstore.UsageStore.ReleaseMatching"></a>

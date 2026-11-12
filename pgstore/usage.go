@@ -985,14 +985,15 @@ WHERE ancestors && $1`
 
 // ReleaseExpired releases the holds past their expiry, oldest first, in one
 // transaction, then settles the leases past theirs, each in a transaction
-// of its own.
+// of its own. A scope that admits no tenant is refused with
+// limes.ErrScopeMismatch, rather than releasing nothing on every call.
 func (s *UsageStore) ReleaseExpired(ctx context.Context, req meter.ReleaseExpiredRequest) (meter.ReleaseExpiredResult, error) {
 	if err := req.Validate(); err != nil {
 		return meter.ReleaseExpiredResult{}, err
 	}
 	limit := meter.HousekeepingLimit(req.Limit)
 	var released int64
-	err := s.inTx(ctx, func(tx pgx.Tx) error {
+	err := s.inHousekeepingTx(ctx, func(tx pgx.Tx) error {
 		holds, err := collectHolds(ctx, tx, sqlDueHolds, s.dueAt(), limit)
 		if err != nil {
 			return err
@@ -1256,7 +1257,9 @@ func (s *UsageStore) DeleteUsage(ctx context.Context, req meter.DeleteUsageReque
 
 // PurgeOrphans drops the counters of capabilities no longer on record, as
 // DeleteUsage does, a batch at a time, and forgets the erase mark of each
-// erased tenant none of whose records is left.
+// erased tenant none of whose records is left. A scope that admits no
+// tenant is refused with limes.ErrScopeMismatch, rather than purging nothing
+// on every call.
 func (s *UsageStore) PurgeOrphans(ctx context.Context, req meter.PurgeOrphansRequest) (meter.PurgeOrphansResult, error) {
 	if err := req.Validate(); err != nil {
 		return meter.PurgeOrphansResult{}, err
@@ -1264,14 +1267,15 @@ func (s *UsageStore) PurgeOrphans(ctx context.Context, req meter.PurgeOrphansReq
 	limit := meter.HousekeepingLimit(req.Limit)
 	// The orphans' leases first, each in a transaction of its own, and
 	// again should one open before their counters go.
+	scoped := func(fn func(pgx.Tx) error) error { return s.inHousekeepingTx(ctx, fn) }
 	settle := func() error {
-		_, _, err := s.settleEach(ctx, meter.StoreOperationPurgeOrphans, func(fn func(pgx.Tx) error) error { return s.inTx(ctx, fn) }, sqlOrphanLeases, limit)
+		_, _, err := s.settleEach(ctx, meter.StoreOperationPurgeOrphans, scoped, sqlOrphanLeases, limit)
 		return err
 	}
 	var purged int64
 	var dropped []uuid.UUID
 	drop := func() error {
-		return s.inTx(ctx, func(tx pgx.Tx) error {
+		return scoped(func(tx pgx.Tx) error {
 			return s.dropOrphans(ctx, tx, limit, &purged, &dropped)
 		})
 	}

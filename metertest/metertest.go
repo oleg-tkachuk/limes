@@ -426,6 +426,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{Name: "LeaseRefundGoesWhereTheChargeWent", Run: checkLeaseRefund},
 		{Name: "LeaseIsBypassedByHoldsAndOverruns", Run: checkLeaseIsBypassedByHoldsAndOverruns},
 		{Name: "LeaseExpiresIntoTheChain", Run: checkLeaseExpires},
+		{Name: "LeaseExpiryIsBatched", Run: checkLeaseExpiryIsBatched},
 		{Name: "LeaseIsSettledBeforeItsCountersGo", Run: checkLeaseIsSettledBeforeItsCountersGo},
 		{Name: "ALeaseIsSettledBeforeAnAncestorsCountersGo", Run: checkLeaseIsSettledBeforeAnAncestorsCountersGo},
 		{Name: "ALeasedChargesRefundLeavesCountersRestartedSince", Run: checkLeaseRefundAfterRestart},

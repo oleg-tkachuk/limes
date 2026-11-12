@@ -231,6 +231,27 @@ func checkLeaseExpires(t *testing.T, f fixture) {
 	expect.That(t, f.usageOf(t, f.root).ReservedAmount == 0 && f.tenantOf(t).ReservedAmount == 0, "the root or the tenant still holds the expired lease")
 }
 
+// ReleaseExpired settles at most its limit of leases past their end a call,
+// as it releases at most that many holds, and the next call the rest.
+func checkLeaseExpiryIsBatched(t *testing.T, f fixture) {
+	l := f.leaser(t)
+	advance := f.advanceExpiry()
+	if advance == nil {
+		t.Skip("Env.Advance and Env.AdvanceExpiry not set")
+	}
+	const leases, batch = 3, 1
+	for range leases {
+		f.leasedIn(t, l, f.root, "client-"+uuid.New().String())
+	}
+	advance(2 * meter.DefaultLeaseTTL)
+	for i := range leases {
+		res, err := f.Usage.ReleaseExpired(f.Ctx, meter.ReleaseExpiredRequest{Limit: batch})
+		expect.Must(t, err == nil && res.SettledLeases == batch, "ReleaseExpired call %d with a limit of %d = %+v, %v; want %d settled", i+1, batch, res, err, batch)
+	}
+	res, err := f.Usage.ReleaseExpired(f.Ctx, meter.ReleaseExpiredRequest{Limit: batch})
+	expect.That(t, err == nil && res.SettledLeases == 0, "ReleaseExpired once every lease settled = %+v, %v; want none", res, err)
+}
+
 // A leaseholder's counters dropped settle its lease first: the root and
 // the tenant are charged what it spent and hold nothing.
 func checkLeaseIsSettledBeforeItsCountersGo(t *testing.T, f fixture) {

@@ -335,8 +335,8 @@
   },
   {
     "code": "no_revocation_lineage",
-    "status": 502,
-    "category": "unavailable",
+    "status": 500,
+    "category": "internal",
     "title": "The revocation upstream names no lineage",
     "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#no_revocation_lineage",
     "permanent": false

@@ -238,7 +238,7 @@ func (i *Issuer) Issue(ctx context.Context, req IssueRequest) (IssueResult, erro
 // record's, so under the same key the token is the one Issue returned. It
 // refuses an id not on record (ErrNotFound), a capability expired
 // (ErrExpired) or revoked (ErrRevoked), and an issuer whose store reads no
-// record (a RecordReader, as every Store is) with ErrInvalidRequest. A
+// record (a RecordReader, as every Store is) with ErrInvalidConfig. A
 // revocation lookup that fails is ErrRevocationUnavailable.
 func (i *Issuer) Reissue(ctx context.Context, id uuid.UUID) (IssueResult, error) {
 	start := time.Now()
@@ -255,7 +255,7 @@ func (i *Issuer) Reissue(ctx context.Context, id uuid.UUID) (IssueResult, error)
 func (i *Issuer) reissue(ctx context.Context, id uuid.UUID) (IssueResult, error) {
 	records, ok := i.store.(RecordReader)
 	if !ok {
-		return IssueResult{}, refuseRequest("IssuerConfig.Store reads no record back (RecordReader), so nothing can be reissued")
+		return IssueResult{}, invalidConfig("limes: IssuerConfig.Store %T reads no record back (RecordReader), so nothing can be reissued", i.store)
 	}
 	rec, err := records.GetRecord(ctx, id)
 	if err != nil {

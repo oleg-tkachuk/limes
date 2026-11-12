@@ -315,15 +315,17 @@ dependency that failed and may answer next time.
 - `cursor_repeated`: a store whose pages handed back a cursor already
   fetched; a walk begun again gets past it once whatever moved the
   listing settles.
-- `no_revocation_lineage`: a revocation upstream that names no lineage.
-  `NewRevocationCache` refuses it at startup when the cache requires
-  lineage, and a verifier requiring a record answers it when its lookup
-  wraps a cache over such an upstream.
 - `outcome_unknown`: a store whose answer to a commit was lost; a keyed
   call sent again settles it.
 - `store_unavailable`, `store_timeout`: a store that could not serve a
   call which wrote nothing, or cancelled its statement past its own
   limit; a call sent again may be served.
+
+`no_revocation_lineage` is `internal`: a revocation upstream that names
+no lineage is the deployment's to fix, and asking again answers the same.
+`NewRevocationCache` refuses it at startup when the cache requires
+lineage, and a verifier requiring a record answers it when its lookup
+wraps a cache over such an upstream.
 
 Every `unauthenticated` code is a credential no longer good or never
 proven — expired, revoked, a bad proof — which another credential may
@@ -381,7 +383,7 @@ maps them to its unauthenticated code, not its permission-denied one.
 | `tenant_gone` | 410 | `limes.ErrTenantGone` |  |  | The tenant is erased | `not_found` |
 | `scope_mismatch` | 500 | `limes.ErrScopeMismatch` |  |  | The call is scoped to another tenant than its request names | `internal` |
 | `proof_unsupported` | 500 | `limes.ErrProofUnsupported` |  |  | The capability is bound to a key and no proof is checked | `internal` |
-| `no_revocation_lineage` | 502 | `limes.ErrNoRevocationLineage` |  |  | The revocation upstream names no lineage | `unavailable` |
+| `no_revocation_lineage` | 500 | `limes.ErrNoRevocationLineage` |  |  | The revocation upstream names no lineage | `internal` |
 | `copy_counters_not_metered` | 500 | `limes.ErrCopyCountersNotMetered` |  |  | Copy limits need a verifier that meters copies | `internal` |
 | `cursor_repeated` | 502 | `limes.ErrCursorRepeated` |  |  | The store returned a cursor already fetched | `unavailable` |
 | `store_unavailable` | 503 | `limes.ErrStoreUnavailable` |  |  | The store is unavailable | `unavailable` |
@@ -532,7 +534,7 @@ means the same for the whole of v1.
 | <a id="tenant_gone"></a>`tenant_gone` | 410 | [limes's codes](#limess-codes) |
 | <a id="scope_mismatch"></a>`scope_mismatch` | 500 | [limes's codes](#limess-codes) |
 | <a id="proof_unsupported"></a>`proof_unsupported` | 500 | [limes's codes](#limess-codes) |
-| <a id="no_revocation_lineage"></a>`no_revocation_lineage` | 502 | [limes's codes](#limess-codes) |
+| <a id="no_revocation_lineage"></a>`no_revocation_lineage` | 500 | [limes's codes](#limess-codes) |
 | <a id="copy_counters_not_metered"></a>`copy_counters_not_metered` | 500 | [limes's codes](#limess-codes) |
 | <a id="cursor_repeated"></a>`cursor_repeated` | 502 | [limes's codes](#limess-codes) |
 | <a id="store_unavailable"></a>`store_unavailable` | 503 | [limes's codes](#limess-codes) |

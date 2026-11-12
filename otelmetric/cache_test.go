@@ -38,6 +38,7 @@ const (
 	attrKind              = "limes.revocation_cache.kind"
 	kindCapability        = "capability"
 	kindBiscuit           = "biscuit"
+	kindUnrecorded        = "unrecorded"
 )
 
 // cacheTestUnit is the unit of the capabilities the cache checks are about.
@@ -146,6 +147,34 @@ func TestInstrumentRevocationCacheReportsItsCounts(t *testing.T) {
 	}
 	if ps := got[metricCacheClears]; len(ps) != 1 || ps[0].value != 1 {
 		t.Errorf("%s after ClearRevoked = %+v, want still 1", metricCacheClears, ps)
+	}
+}
+
+// The answers about a capability the upstream has no record of reach the
+// provider as their own kind, their hits apart from capability's.
+func TestInstrumentRevocationCacheReportsUnrecordedAnswers(t *testing.T) {
+	ctx := context.Background()
+	cache, reader, _, _ := instrumentedCache(t)
+	unknown := uuid.New()
+	for range 3 {
+		if _, err := cache.RevocationLineage(ctx, unknown); !errors.Is(err, limes.ErrNotFound) {
+			t.Fatalf("RevocationLineage of an id not on record: %v, want ErrNotFound", err)
+		}
+	}
+	got := collected(t, reader)
+	for _, tc := range []struct {
+		name, kind string
+		want       float64
+	}{
+		{metricCacheHits, kindUnrecorded, 2},
+		{metricCacheEntries, kindUnrecorded, 1},
+		{metricCacheEvictions, kindUnrecorded, 0},
+		{metricCacheHits, kindCapability, 0},
+		{metricCacheMisses, kindCapability, 1},
+	} {
+		if v := valueAt(got[tc.name], attrKind, tc.kind); v != tc.want {
+			t.Errorf("%s{kind=%s} = %v, want %v", tc.name, tc.kind, v, tc.want)
+		}
 	}
 }
 

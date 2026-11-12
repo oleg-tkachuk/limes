@@ -207,6 +207,37 @@ func TestMeteringTenantAttributeIsOptIn(t *testing.T) {
 	}
 }
 
+// A charge's decision and its amount are labelled with the same tenant: the
+// subject's.
+func TestMeteringChargeTenantIsTheSubjects(t *testing.T) {
+	usage, reader, records := meteredStore(t, otelmetric.WithTenantAttribute())
+	ctx := context.Background()
+	tenant := uuid.New()
+	subject := recordedSubject(ctx, t, records, subjectSpec{capID: uuid.New(), tenant: tenant})
+	if _, err := usage.Charge(ctx, meter.ChargeRequest{Subject: subject, Amount: limes.MustParseAmount("3")}, nil); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]float64{metricChargeDecisions: 1, metricChargeAmount: 3} {
+		if got := valueAt(points(t, reader, name), attrTenant, tenant.String()); got != want {
+			t.Errorf("%s for tenant %s = %v, want %v", name, tenant, got, want)
+		}
+	}
+}
+
+// Under WithTenantAttribute every measurement carries the tenant, even a
+// call refused for a subject that names none: its series is the zero
+// tenant's, never one without the attribute beside the tenants'.
+func TestMeteringLabelsEveryMeasurementWithATenant(t *testing.T) {
+	usage, reader, _ := meteredStore(t, otelmetric.WithTenantAttribute())
+	if _, err := usage.Bump(context.Background(), meter.BumpRequest{Subject: limes.MeterSubject{}}); err == nil {
+		t.Fatal("a bump of the zero subject was not refused")
+	}
+	ps := points(t, reader, metricRequestBumps)
+	if got := valueAt(ps, attrTenant, uuid.Nil().String()); got != 1 {
+		t.Errorf("bumps of the zero tenant = %v, want 1; points %+v", got, ps)
+	}
+}
+
 // hiddenCopies is a UsageStore that reads no copy counters: memstore's
 // usage store with CopyUsage out of reach.
 type hiddenCopies struct {

@@ -70,6 +70,26 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## pgstore/v0.77.0
+
+- `Store.Purge`, `UsageStore.ReleaseExpired` and `UsageStore.PurgeOrphans`
+  under a scope that admits no tenant refuse with `limes.ErrScopeMismatch`,
+  where they ran over no rows and reported nothing done, as
+  `Ledger.PurgeCharges` already did. Call them under `WithAllTenants`, or
+  `WithTenant` for one tenant's; a `Config.Scope` of your own must set
+  `SettingAllTenants` or `SettingTenant` for them, as for `PurgeCharges`.
+
+## v0.178.0
+
+- `no_revocation_lineage` (`limes.ErrNoRevocationLineage`) is answered 500
+  and is `internal`, where it was 502 and `unavailable`: an upstream that
+  names no lineage is a configuration to fix, not a failure a retry gets
+  past. A client that retried on `unavailable` no longer retries it.
+- `Issuer.Reissue` with an `IssuerConfig.Store` that is no `RecordReader`
+  refuses with `ErrInvalidConfig` (500), where it refused with
+  `ErrInvalidRequest` (400): the issuer's store, not the request, is what
+  is wrong.
+
 ## pgstore/v0.76.0
 
 - A call whose database failed returns an error wrapping

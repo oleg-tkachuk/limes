@@ -152,8 +152,8 @@ func MarshalAlgorithms(keys map[string]ed25519.PublicKey, algs map[string]string
 // — out of service during a rotation. Two Ed25519 keys naming one kid are
 // both skipped; a kid an entry of another kind also names is not (§4.5).
 // A document that is not JSON at all, names a member twice, or has no
-// "keys" array (RFC 7517 §5) is an error: only `{"keys":[]}` withdraws
-// every key.
+// "keys" array (RFC 7517 §5) is refused as limes.ErrInvalidRequest: only
+// `{"keys":[]}` withdraws every key.
 func Parse(raw []byte) (map[string]ed25519.PublicKey, error) {
 	keys, _, err := parse(raw)
 	return keys, err
@@ -164,7 +164,7 @@ func parse(raw []byte) (map[string]ed25519.PublicKey, int, error) {
 	var doc received
 	// JSON's own rules: names in their exact case, none twice in one object.
 	if err := jsonv2.Unmarshal(raw, &doc); err != nil {
-		return nil, 0, fmt.Errorf("jwks: parse JWKS: %w", err)
+		return nil, 0, errs.Request("jwks: parse JWKS: %w", err)
 	}
 	if doc.Keys == nil {
 		return nil, 0, errs.Request(`jwks: parse JWKS: no "keys" array`)

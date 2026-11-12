@@ -218,13 +218,13 @@ func TestRowSecurityKeepsRefundsApart(t *testing.T) {
 	}
 }
 
-// Housekeeping with no scope removes nothing; scoped to every tenant it
-// removes what is due in each.
+// Housekeeping with no scope is refused and removes nothing; scoped to
+// every tenant it removes what is due in each.
 func TestHousekeepingNeedsEveryTenant(t *testing.T) {
 	f := newTenantFixture(t)
 	f.clock.Advance(rlsTTL + 2*limes.MinPurgeRetention)
-	if got, err := f.records.Purge(t.Context(), limes.PurgeRequest{}); err != nil || got.Purged != 0 {
-		t.Errorf("Purge with no scope = %+v, %v; want nothing purged", got, err)
+	if got, err := f.records.Purge(t.Context(), limes.PurgeRequest{}); !errors.Is(err, limes.ErrScopeMismatch) || got.Purged != 0 {
+		t.Errorf("Purge with no scope = %+v, %v; want nothing purged, ErrScopeMismatch", got, err)
 	}
 	if got, err := f.records.Purge(WithAllTenants(t.Context()), limes.PurgeRequest{}); err != nil || got.Purged != 2 {
 		t.Errorf("Purge across every tenant = %+v, %v; want both records", got, err)

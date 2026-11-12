@@ -65,8 +65,11 @@ func TestLeaseRefusedWhileLeasingIsDisabled(t *testing.T) {
 	}
 }
 
+// unknownFeature is a feature package meter does not define.
+const unknownFeature meter.Feature = "no_such_feature"
+
 // The store says leases are off exactly when Config.DisableLeases is set,
-// and every other feature on.
+// every other feature of meter on, and one meter does not define off.
 func TestFeatureEnabledFollowsDisableLeases(t *testing.T) {
 	for _, leases := range []bool{true, false} {
 		s := &UsageStore{conn{leases: leases}}
@@ -75,6 +78,9 @@ func TestFeatureEnabledFollowsDisableLeases(t *testing.T) {
 			if got := s.FeatureEnabled(f); got != want {
 				t.Errorf("leases %v: FeatureEnabled(%s) = %v, want %v", leases, f, got, want)
 			}
+		}
+		if s.FeatureEnabled(unknownFeature) {
+			t.Errorf("leases %v: FeatureEnabled(%s) = true, want false", leases, unknownFeature)
 		}
 	}
 }

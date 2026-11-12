@@ -175,9 +175,9 @@ func newMeteringInstruments(cfg meteringConfig) (*meteringInstruments, error) {
 }
 
 // attrs is the attribute set of one measurement: the tenant when enabled,
-// then kv.
+// then kv. Every measurement names one, as every verified subject does.
 func (in *meteringInstruments) attrs(tenantID uuid.UUID, kv ...attribute.KeyValue) metric.MeasurementOption {
-	if in.tenant && tenantID != uuid.Nil() {
+	if in.tenant {
 		kv = append(kv, attribute.String(attrTenantID, tenantID.String()))
 	}
 	return metric.WithAttributes(kv...)
@@ -211,7 +211,7 @@ func (in *meteringInstruments) recordCharge(ctx context.Context, tenantID uuid.U
 	if err != nil {
 		return
 	}
-	unit := in.attrs(receipt.TenantID, attribute.String(attrUnitCode, receipt.UnitCode))
+	unit := in.attrs(tenantID, attribute.String(attrUnitCode, receipt.UnitCode))
 	in.chargeAmount.Add(ctx, amount.Float64(), unit)
 	in.currentSpend.Record(ctx, receipt.SpentAmount.Float64(), unit)
 }

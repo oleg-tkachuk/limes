@@ -470,7 +470,7 @@ flowchart TB
     ath{"ath = hash of the token as presented"}
     iat{"|now − iat| ≤ Window<br/>(dpop.DefaultWindow, 1 minute)<br/>iat may be fractional"}
     nonce{"Nonces set → Nonces.Valid(nonce)"}
-    jti{"ReplayCache.Seen(ReplayEntry{JKT, JTI, Holder,<br/>ExpiresAt: iat + Window + ReplayClockSkew})"}
+    jti{"ReplayCache.Seen(ReplayEntry{JKT, JTI, Holder,<br/>ExpiresAt: max(iat, now) + Window + ReplayClockSkew})"}
     ok(["proof accepted"])
 
     req["dpop.ErrRequired"]

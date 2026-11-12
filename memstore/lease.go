@@ -233,6 +233,25 @@ func (s *UsageStore) settleLeasesLocked(due func(lease) bool) int64 {
 	return settled
 }
 
+// settleDueLeasesLocked settles at most limit leases past their end at now,
+// soonest ended first, as pgstore's batch does, and says how many. s.mu must
+// be held.
+func (s *UsageStore) settleDueLeasesLocked(now time.Time, limit int) int64 {
+	var due []lease
+	for _, l := range s.leases {
+		if !l.openAt(now) {
+			due = append(due, l)
+		}
+	}
+	slices.SortFunc(due, func(a, b lease) int {
+		return cmp.Or(a.expires.Compare(b.expires), a.capID.Compare(b.capID))
+	})
+	for _, l := range due[:min(len(due), limit)] {
+		s.settleLeaseLocked(l)
+	}
+	return int64(min(len(due), limit))
+}
+
 // leaseFor is the open lease a charge or a bump of capID with ancestors
 // goes under: capID's own, or its nearest ancestor's, and how many of the
 // ancestors are below the leaseholder; none when no capability on the
