@@ -26,9 +26,9 @@ const resetCeiling limes.Nanos = 1000
 // it waited.
 var errResetStuck = errors.New("the reset did not return within resetWait")
 
-// endingCalls are the calls that end what a Reserve or a Charge of subject
-// made, each given what its setup returns: a hold for Settle and Release, a
-// charge for Refund.
+// endingCalls are the calls that end what a Reserve, a Lease or a Charge of
+// subject made, each given what its setup returns: a hold for Settle and
+// Release, a lease for SettleLease, a charge for Refund.
 var endingCalls = map[string]struct {
 	setup func(ctx context.Context, usage *UsageStore, subject limes.MeterSubject) (any, error)
 	call  func(ctx context.Context, usage *UsageStore, subject limes.MeterSubject, made any, onDone func(context.Context) error) error
@@ -54,6 +54,15 @@ var endingCalls = map[string]struct {
 			return usage.Release(ctx, meter.ReleaseRequest{Subject: subject, ReservationID: made.(meter.Reservation).ID})
 		},
 	},
+	"SettleLease": {
+		setup: func(ctx context.Context, usage *UsageStore, subject limes.MeterSubject) (any, error) {
+			return usage.Lease(ctx, meter.LeaseRequest{Subject: subject, Amount: stripedAmount})
+		},
+		call: func(ctx context.Context, usage *UsageStore, subject limes.MeterSubject, _ any, _ func(context.Context) error) error {
+			_, err := usage.SettleLease(ctx, meter.SettleLeaseRequest{Subject: subject})
+			return err
+		},
+	},
 	"Refund": {
 		setup: func(ctx context.Context, usage *UsageStore, subject limes.MeterSubject) (any, error) {
 			return usage.Charge(ctx, meter.ChargeRequest{Subject: subject, Amount: stripedAmount}, nil)
@@ -69,7 +78,7 @@ var endingCalls = map[string]struct {
 	},
 }
 
-// Settle, Release and Refund share their tenant's lock, as a Charge does,
+// Settle, Release, SettleLease and Refund share their tenant's lock, as a Charge does,
 // so a call that holds it alone — SetTenantBudget, an erase — is waited
 // for, and waits for them.
 func TestEndingCallsShareTheTenantLock(t *testing.T) {
