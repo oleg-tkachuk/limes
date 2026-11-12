@@ -5,6 +5,7 @@ import (
 	"crypto"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"slices"
@@ -255,6 +256,29 @@ func TestNarrowRebindsOnlyThroughACheckedProof(t *testing.T) {
 		}
 		if n := f.store.inserts.Load(); n != before {
 			t.Errorf("%s: delegated %d", name, n-before)
+		}
+	}
+}
+
+// A Delegate failure the parent caused — too deep, gone, of a tenant
+// deleted or erased, granted without OpShare — is the subject token's
+// fault, invalid_grant; any other is the server's.
+func TestDelegateError(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err          error
+		subjectFault bool
+	}{
+		"too deep":            {limes.ErrDelegationDepthExceeded, true},
+		"a tenant deleted":    {limes.ErrTenantDeleted, true},
+		"a tenant gone":       {limes.ErrTenantGone, true},
+		"revoked":             {limes.ErrRevoked, true},
+		"no OpShare":          {limes.ErrOpNotAllowed, true},
+		"a store unavailable": {limes.ErrStoreUnavailable, false},
+		"internal":            {limes.ErrInternal, false},
+	} {
+		err := delegateError(fmt.Errorf("delegate: %w", tc.err))
+		if errors.Is(err, ErrInvalidGrant) != tc.subjectFault || !errors.Is(err, tc.err) {
+			t.Errorf("%s: %v, want invalid_grant %v and the cause kept", name, err, tc.subjectFault)
 		}
 	}
 }
