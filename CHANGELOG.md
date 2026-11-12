@@ -2,6 +2,25 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.178.0](https://github.com/oleg-tkachuk/limes/compare/v0.177.1...v0.178.0) (2026-11-12)
+
+### ⚠ BREAKING CHANGES
+
+* answer no_revocation_lineage as internal
+* refuse a reissue through a store that reads no record as a misconfiguration
+
+### Bug Fixes
+
+* answer no_revocation_lineage as internal ([e4f8f09](https://github.com/oleg-tkachuk/limes/commit/e4f8f09f674253d8706702423374b7c5c50a3e72))
+* **dpop:** hold a backdated proof's share for a whole window ([f4fe76d](https://github.com/oleg-tkachuk/limes/commit/f4fe76dc3e5c960ff27331bf13f6b10910a73a1a))
+* **jwks:** refuse a document that is not JSON as ErrInvalidRequest ([ffa321a](https://github.com/oleg-tkachuk/limes/commit/ffa321a3b2a28c41d0f907bb6aacd2e12a7d6490))
+* **memstore:** settle at most a batch of expired leases in ReleaseExpired ([d51d970](https://github.com/oleg-tkachuk/limes/commit/d51d97035292887339e8a7de858bd02fe52ec90c))
+* refuse a reissue through a store that reads no record as a misconfiguration ([2ac787e](https://github.com/oleg-tkachuk/limes/commit/2ac787e1b7c0aabc6481fa53f2ca943ebcc75fa8))
+
+### Codes
+
+* changed: `no_revocation_lineage` — category unavailable → internal, status 502 → 500
+
 ## [0.177.1](https://github.com/oleg-tkachuk/limes/compare/v0.177.0...v0.177.1) (2026-11-12)
 
 ### Bug Fixes

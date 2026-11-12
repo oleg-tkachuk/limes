@@ -2,6 +2,20 @@
 
 Every release of the otelmetric module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.21.0](https://github.com/oleg-tkachuk/limes/compare/otelmetric%2Fv0.20.2...otelmetric%2Fv0.21.0) (2026-11-12)
+
+### Features
+
+* **otelmetric:** report the revocation cache's unrecorded answers ([5a4d5c0](https://github.com/oleg-tkachuk/limes/commit/5a4d5c0a885cefafe07a74efad353b3317d4b9e6))
+
+### Bug Fixes
+
+* **otelmetric:** label every measurement with the subject's tenant ([f1f1c42](https://github.com/oleg-tkachuk/limes/commit/f1f1c422a2c96acf71e90474b7650ed3c493adf4))
+
+### Dependencies
+
+* require limes v0.178.0
+
 ## [0.20.2](https://github.com/oleg-tkachuk/limes/compare/otelmetric%2Fv0.20.1...otelmetric%2Fv0.20.2) (2026-11-12)
 
 ### Dependencies
