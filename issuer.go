@@ -415,7 +415,6 @@ func (i *Issuer) signAndRecord(ctx context.Context, c Capability, issuance Inser
 	if err != nil {
 		return "", err
 	}
-	issuance.Capability = c
 	if err := i.store.Insert(ctx, issuance); err != nil {
 		return "", errs.Errorf("limes: persist %s: %w", what, mintRefusal(err))
 	}
