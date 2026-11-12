@@ -90,6 +90,15 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
   failed as `store_unavailable`: the session may have ended once COMMIT
   had committed. Send such a call again under its key, as for a lost
   connection. An ERROR still aborts the transaction, its outcome known.
+- A deadlock `onCharged` or `onRefunded` returns while the call's
+  transaction is still open — one it met on a connection of its own —
+  fails the call with that error, where the call and its callback ran
+  again. A deadlock of the call's own transaction is still run again.
+- A callback that sets the session's role (`SET ROLE`, not
+  `SET LOCAL ROLE`) has the call refused with
+  `pgstore.ErrChargeTransaction` and rolled back, where it committed and
+  left the role on the pooled connection for the next call. Set a role
+  for the transaction alone with `SET LOCAL ROLE`.
 
 ## exchange/v0.24.2
 

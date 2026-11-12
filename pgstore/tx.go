@@ -53,7 +53,12 @@ var ErrChargeTransaction = fmt.Errorf("%w: pgstore: the transaction a callback r
 // QueuedQuery callback, a sql.Scanner, a driver.Valuer, a
 // pgx.CopyFromSource — which would otherwise wait on itself with the
 // tenant's locks held. Rows and batch results still open when the callback
-// returns are closed then, and read no further.
+// returns are closed then, and read no further. A callback that sets the
+// session's role — SET ROLE, not SET LOCAL ROLE — has the call refused
+// with ErrChargeTransaction and rolled back, the role with it: committed,
+// it would outlast the call on the pooled connection. A deadlock the
+// callback meets on a connection of its own and returns fails the call;
+// only one of the call's own transaction runs it again.
 // Commit and Rollback return ErrChargeTransaction; a savepoint (Begin) is
 // the callback's to end. Conn is nil, as the connection is the store's, and
 // a call whose transaction the callback ended with SQL of its own — COMMIT,
@@ -260,10 +265,29 @@ const txStatusInTransaction = 'T'
 // again with SQL of its own does not carry it.
 const settingCharging = "limes.charging"
 
+// settingCallbackRole holds the session's role setting as the callback
+// found it, for the rest of the transaction.
+const settingCallbackRole = "limes.callback_role"
+
 const (
-	// sqlMarkCharge sets settingCharging to $1, local to the transaction,
-	// with the call's writes.
-	sqlMarkCharge = `SELECT set_config('` + settingCharging + `', $1, true)`
+	// sqlMarkCharge sets settingCharging to $1, and settingCallbackRole to
+	// the session's role, local to the transaction, with the call's writes.
+	sqlMarkCharge = `SELECT set_config('` + settingCharging + `', $1, true),
+       set_config('` + settingCallbackRole + `', current_setting('role'), true)`
+
+	// sqlRoleKept fails, with sqlStateRoleChanged, when the session's role
+	// is not the one sqlMarkCharge found: the callback set one, which,
+	// committed, would outlast the call on the pooled connection. A SET of
+	// the session is undone with the transaction its failure aborts.
+	sqlRoleKept = `DO $$ BEGIN
+  IF current_setting('role') IS DISTINCT FROM current_setting('` + settingCallbackRole + `', true) THEN
+    RAISE EXCEPTION USING ERRCODE = '` + sqlStateRoleChanged + `', MESSAGE = 'the callback set the session''s role';
+  END IF;
+END $$`
+
+	// sqlStateRoleChanged is the SQLSTATE sqlRoleKept fails with: limes's
+	// own class, "LM".
+	sqlStateRoleChanged = "LM001"
 
 	// sqlChargeStillOpen fails, dividing by zero, unless the transaction is
 	// still the one sqlMarkCharge marked $1: one that does not fail lets the
@@ -301,16 +325,37 @@ func (c *counters) writeThenCall(ctx context.Context, tx pgx.Tx, now time.Time, 
 		return call(callbackCtx)
 	}()
 	if err != nil {
-		return err
+		return callbackFailure(tx, err)
 	}
 	return endCallback(ctx, tx, mark, last)
+}
+
+// deadlockOutside is a deadlock a callback returned while the call's
+// transaction stood: one it met on a connection of its own, which
+// retryDeadlock does not run the call again for, since what the callback
+// did there stands. It is the callback's error as it is, and adds no code.
+type deadlockOutside struct{ err error }
+
+func (d deadlockOutside) Error() string { return d.err.Error() }
+func (d deadlockOutside) Unwrap() error { return d.err }
+
+// callbackFailure is err, a callback's, as deadlockOutside when it is a
+// deadlock and the call's transaction is still open: PostgreSQL aborted
+// another transaction, not this one.
+func callbackFailure(tx pgx.Tx, err error) error {
+	if isDeadlock(err) && tx.Conn().PgConn().TxStatus() == txStatusInTransaction {
+		return deadlockOutside{err}
+	}
+	return err
 }
 
 // endCallback ends a call whose writes were sent, marked mark, before its
 // callback ran: it refuses one whose transaction the callback ended with SQL
 // of its own — COMMIT, ROLLBACK, or either followed by BEGIN in the same
-// statement — rather than through the Tx, which refuses, and otherwise
-// sends COMMIT when last, in one batch with the check (sqlChargeStillOpen).
+// statement — rather than through the Tx, which refuses, and one whose
+// callback set the session's role (sqlRoleKept), rolled back so the role
+// goes with it; otherwise it sends COMMIT when last, in one batch with the
+// checks (sqlChargeStillOpen).
 //
 // The call's writes went before the callback, so its COMMIT committed them
 // and its ROLLBACK undid them, under locks it no longer held: which one ran
@@ -327,12 +372,20 @@ func endCallback(ctx context.Context, tx pgx.Tx, mark string, last bool) error {
 	}
 	b := &pgx.Batch{}
 	b.Queue(sqlChargeStillOpen, mark)
+	b.Queue(sqlRoleKept)
 	committing := last && queueCommit(tx, b)
 	br := tx.SendBatch(ctx, b)
 	_, err := br.Exec()
 	if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == sqlStateDivisionByZero {
 		_ = br.Close() // its error is the check's, answered: COMMIT did not run
 		return errs.Errorf("%w: %w: the callback ended it and began another", meter.ErrOutcomeUnknown, ErrChargeTransaction)
+	}
+	if err == nil {
+		_, err = br.Exec()
+		if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == sqlStateRoleChanged {
+			_ = br.Close() // its error is the check's, answered: COMMIT did not run
+			return fmt.Errorf("%w: the callback set the session's role, which would outlast the call", ErrChargeTransaction)
+		}
 	}
 	err = errors.Join(err, br.Close())
 	if committing {
