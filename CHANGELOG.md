@@ -2,6 +2,16 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.179.0](https://github.com/oleg-tkachuk/limes/compare/v0.178.0...v0.179.0) (2026-11-12)
+
+### Features
+
+* **verifier:** add IntrospectFor, scoped to the caller's audiences ([03a77dd](https://github.com/oleg-tkachuk/limes/commit/03a77dd6818c05f37e4276e62b5ce0919d210e97))
+
+### Bug Fixes
+
+* **limes:** clear the revocation cache when a revoking store panics ([bbabab0](https://github.com/oleg-tkachuk/limes/commit/bbabab0098b10fab41201a67b96f8b47f90a2ed6))
+
 ## [0.178.0](https://github.com/oleg-tkachuk/limes/compare/v0.177.1...v0.178.0) (2026-11-12)
 
 ### ⚠ BREAKING CHANGES
