@@ -1,10 +1,10 @@
 # Examples
 
-Small programs that show limes at work, one topic each. Each one tells what
-it does step by step on stdout, in plain words, with the values that matter
-below each step. A step that does not do what the example says stops it with
-a non-zero exit, so each example is also a check (`task verify:examples`,
-`task test:examples:pgstore`).
+Small programs that show limes at work, one topic each. Each prints what it
+does on stdout, step by step, with the values that matter below each step.
+A step that does not do what the example says stops it with a non-zero exit,
+so each example is also a check: `task verify:examples` runs every one but
+`pgstore`, and `task test:examples:pgstore` runs `pgstore`.
 
 Run them from this directory:
 
@@ -17,11 +17,15 @@ Run them from this directory:
 | `go run ./mcp-exchange` | an MCP server behind standard OAuth: its RFC 9728 metadata and 401 challenge, the identity provider's access token exchanged for a capability (RFC 8693) and narrowed for a sub-agent, one capability per subject token however often the server exchanges it, and a token for another server refused |
 | `go run ./pgstore` | the same over PostgreSQL, started in a container: the schema, row-level security per tenant, and a charge committed in one transaction with a write of the caller's own. Needs a running Docker |
 
-All but `pgstore` keep everything in memory (`memstore`); `mcp-exchange` serves over TLS on loopback. This directory is a
-module of its own, so that the limes module never resolves a database driver;
-its `replace` lines build it against the limes, pgstore and exchange beside it. Its tests also run the
-README's walkthrough (`internal/readme`) and check tokens against other JOSE
-libraries (`internal/interop`).
+All but `pgstore` keep everything in memory (`memstore`); `mcp-exchange`
+serves over TLS on loopback.
+
+This directory is a module of its own, so the limes module never resolves a
+database driver. Its `replace` lines build it against the limes, pgstore and
+exchange beside it. Its tests also run the README's walkthrough
+(`internal/readme`), check tokens against other JOSE libraries
+(`internal/interop`), and check the module zip `go get` downloads of limes
+(`internal/modzip`).
 
 Each step is marked `•` when it is done, `✓` for a refusal the example sets
 out to show, and `✗` when something did not go as described:

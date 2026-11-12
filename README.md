@@ -13,13 +13,12 @@ as a Go library.
 A capability is a short-lived signed token that carries its own authority:
 which operations, on which resources, for how much money and how many
 requests, until when, and on whose behalf. An agent can hand a sub-agent a
-strictly narrower copy — through the issuer, or offline as a Biscuit block
-with no call at all — every charge counts
-against the whole delegation chain, and any capability can be revoked
-mid-flight along with everything delegated from it.
+strictly narrower copy, through the issuer or offline as a Biscuit block.
+Every charge counts against the whole delegation chain, and revoking a
+capability mid-flight revokes everything delegated from it.
 
 The module ships the primitive and its contracts; you supply the storage. Its
-resolved dependency graph holds no database driver and no storage SDK, and
+resolved dependency graph holds no database driver and no storage SDK.
 `memstore`, an in-memory implementation, is enough to start.
 
 *Limes* was the fortified frontier of the Roman Empire — a line that marks how
@@ -58,10 +57,10 @@ go get github.com/oleg-tkachuk/limes@latest
 limes needs Go 1.27 or later: its identifiers are the standard library's
 `uuid.UUID`.
 
-`pgstore`, `otelmetric`, `redisreplay`, `exchange` and `biscuit` are modules
-of their own, on tag lines of their own: pin each by its tag, as
-[Versioning](#versioning) says. The Biscuit form is in `biscuit`: a verifier
-or issuer that reads or seals it sets `biscuit.Form()` in its config.
+`pgstore`, `redisreplay`, `otelmetric`, `exchange` and `biscuit` are modules
+of their own; pin each by its own tag ([Versioning](#versioning)). The
+Biscuit form lives in `biscuit`: to read or seal it, set `biscuit.Form()` as
+`VerifierConfig.Biscuit.Form` or `IssuerConfig.Biscuit`.
 
 ## Five minutes
 
@@ -124,39 +123,41 @@ if _, err := usage.Charge(ctx, meter.ChargeRequest{
 }
 ```
 
-`IssueRequest` requires `Subject` with its `TenantID`, `IssuedBy` (a
-`Subject` at least), `ClientID`, `Audience` and `Caveats`; `TTL` defaults to fifteen
-minutes. `issued.Token` is what the agent carries; `issued.Capability` is the
-record you keep for audit. `verifier.ErrorResponse(ctx, err, limes.AuthSchemeBearer)`
-turns a refusal into the HTTP status, `WWW-Authenticate` challenge and problem
-body to answer with.
-`go run ./quickstart` in [examples/](examples) runs issue, authorize, delegate,
-meter and revoke end to end; the other examples there take each step on its
-own, pgstore included, logging what happens.
+`IssueRequest` requires `Subject` with its `TenantID` and `Subject`,
+`IssuedBy.Subject`, `ClientID`, `Audience` and `Caveats`. `TTL` defaults to
+`IssuerConfig.DefaultTTL`, fifteen minutes unless set. `issued.Token` is what
+the agent carries; `issued.Capability` is the record you keep for audit.
+`verifier.ErrorResponse(ctx, err, limes.AuthSchemeBearer)` turns a refusal
+into the HTTP status, `WWW-Authenticate` challenge and problem body to answer
+with.
+
+`go run ./quickstart` in [examples/](examples) runs issue, authorize,
+delegate, meter and revoke end to end. The other examples there take one
+step each, pgstore included.
 
 ## What it does
 
 | Feature | What it does |
 |---|---|
-| **Verify** | Local Ed25519 JWT verification (`alg: Ed25519`, RFC 9864, or the `EdDSA` older JOSE libraries know) against a resolved key — static, or an issuer's JWKS fetched by `jwks.Remote`, which revalidates by ETag and honours `Cache-Control`. Claims are read strictly: no unknown or duplicate member, integers within I-JSON's range. Rejections match sentinel errors (`errors.Is`) in families — `ErrUnauthenticated` over `ErrInvalidToken` and `ErrProofOfPossession` — and kinds that must not tell an attacker which check failed share `ErrInvalidToken`. |
-| **Enforce** | `Authorize` verifies and checks every stateless caveat in one call: allowed ops, resource prefixes matched at `/` boundaries (a `.` or `..` segment never matches), exact URIs (`ResourceURIs`) and string name prefixes (`ResourceNamePrefixes`), idempotency keys for writes, tainted reads, source networks. Request and budget limits are the `Meter`'s. |
-| **Delegate** | `Issuer.Delegate` issues a child that may only be narrower — operations, resources, limits and audience; anything wider is `ErrDelegationTooWide`. Its validity window is fitted inside the parent's: a TTL past the parent's expiry is clipped to it, and a `NotBefore` before the parent's start is raised to it. The child counts in the parent's unit; naming another is `ErrUnitCodeMismatch`, a conflict (`ErrConflict`, 409). The parent must allow `OpShare`, or the delegation is `ErrOpNotAllowed`, and an expired or revoked parent delegates nothing. |
-| **Attenuate offline** | The Biscuit v3 form of a capability can be narrowed by its holder with no key and no network; each copy can get its own limits — as many copies with limits as the quota signed in the token (`Caveats.Copies`) allows across the delegation chain — and be revoked on its own. |
-| **Bind to a key** | RFC 9449 DPoP: `Verify` refuses a key-bound capability without a fresh proof from that key, and, given the scheme it came under, one not presented under `DPoP`; server nonces (`dpop.HMACNonces`) work across replicas without shared state. |
-| **Meter** | Requests count against the capability, every ancestor and each Biscuit copy with limits presented; spend against those and the tenant, atomically with your own side effect. Each copy with limits of its own counts against the copy quota of the capability and of every ancestor. Reserve an estimate, settle the actual cost, refund a charge. Amounts are exact integers of billionths of an ISO 4217 unit. `otelmetric.Instrument`, a module of its own, adds OpenTelemetry instruments. |
-| **Revoke** | One call stops a capability and everything delegated from it, through a `Revoker` that logs each revocation and reports it to `RevokerEvents`; verifiers learn of it within a cache TTL, or at once on `ClearRevoked`, which drops only the answers that revocation outdates and which `pgstore.RevocationWatcher` reaches through a `RevocationSignal` on each revocation it can name, clearing the cache whole otherwise; `otelmetric.InstrumentRevocationCache` exports the cache's counts. `Revoker.RevokeMatching` revokes capabilities by user, client, identity-provider session or agent run, in batches, `meter.MatchingReleaser` frees their holds at once, and the census and the listing preview both. |
-| **Report** | `LedgerReader.SumCharges` sums the charges of one tenant or of every tenant over a period by unit, whole or by UTC hour, day, ISO week or month, grouped by any of tenant, operation, actor and capability and filtered by them, the largest first. `RecordCensus.CountRecords` counts capability records — active, expired, revoked, delegated, expiring soon — for one tenant or all, by tenant and principal type. `RecordLister.ListRecords` lists one tenant's records, or every tenant's in one order, each with its disposition by the census's rules, filtered by principal type, subject or subject prefix and disposition, oldest or newest first; `RecordListingReader.GetRecordListing` reads one record with its disposition by the same rules. |
-| **Exchange** | `exchange` turns an identity provider's access token into a capability (RFC 8693), one per subject token, in process or at a token endpoint; `HasLimesKeyID` tells a capability from the provider's token on a route that takes both. |
-| **Answer errors** | `ErrorResponse` maps a refusal to its status, an RFC 6750 / RFC 9449 `WWW-Authenticate` challenge and an RFC 9457 problem body, without the error's own text. Every error has a stable code (`CodeOf`); `ProblemOf`, the meter's codes among them, and `exchange.ErrorOf` answer it on any other API. |
+| **Verify** | Local Ed25519 JWT verification (`alg: Ed25519`, RFC 9864, or `EdDSA` for older JOSE libraries) against a resolved key: static, or an issuer's JWKS fetched by `jwks.Remote`, which revalidates by ETag and honours `Cache-Control`. Claims are read strictly: no unknown or duplicate member, integers within I-JSON's range. Rejections match sentinel errors (`errors.Is`) in families — `ErrUnauthenticated` over `ErrInvalidToken` and `ErrProofOfPossession` — and failures that must not tell an attacker which check failed share `ErrInvalidToken`. |
+| **Enforce** | `Authorize` verifies and checks every stateless caveat in one call: allowed ops, resource prefixes matched at `/` boundaries (a `.` or `..` segment never matches), exact URIs (`ResourceURIs`), string name prefixes (`ResourceNamePrefixes`), idempotency keys for writes, tainted reads, source networks. Request and budget limits are the `Meter`'s. |
+| **Delegate** | `Issuer.Delegate` issues a child that may only be narrower in operations, resources, limits and audience; anything wider is `ErrDelegationTooWide`. The child's validity fits inside the parent's: a TTL past the parent's expiry is cut to it, and a `NotBefore` before the parent's start is raised to it. The child counts in the parent's unit; another unit is `ErrUnitCodeMismatch`, a conflict (`ErrConflict`, 409). The parent must allow `OpShare`, or the delegation is `ErrOpNotAllowed`. An expired or revoked parent delegates nothing. |
+| **Attenuate offline** | The holder of a capability's Biscuit v3 form can narrow it with no key and no network. Each copy can get its own limits, up to the copy quota signed in the token (`Caveats.Copies`) across the delegation chain, and be revoked on its own. |
+| **Bind to a key** | RFC 9449 DPoP: `Verify` refuses a key-bound capability without a fresh proof from that key, and, given the scheme it came under, one not presented under `DPoP`. Server nonces (`dpop.HMACNonces`) work across replicas without shared state. |
+| **Meter** | Requests count against the capability, every ancestor and each Biscuit copy with limits presented; spend counts against those and the tenant, atomically with your own side effect. Each copy with limits of its own counts against the copy quota of the capability and of every ancestor. Reserve an estimate, settle the actual cost, refund a charge. Amounts are exact integers of billionths of an ISO 4217 unit. `otelmetric.Instrument`, a module of its own, adds OpenTelemetry instruments. |
+| **Revoke** | One call to a `Revoker` stops a capability and everything delegated from it; it logs each revocation and reports it to `RevokerEvents`. Verifiers learn of it within a cache TTL, or at once on `ClearRevoked`, which drops only the answers the revocation outdates. `pgstore.RevocationWatcher` calls it through a `RevocationSignal` for each revocation it can name, and clears the whole cache otherwise; `otelmetric.InstrumentRevocationCache` exports the cache's counts. `Revoker.RevokeMatching` revokes in batches by subject, on-behalf-of user, client, identity-provider session, subject issuer or agent run; `meter.MatchingReleaser` frees their holds at once, and the census and the listing preview both. |
+| **Report** | `LedgerReader.SumCharges` sums the charges of one tenant or of every tenant over a period by unit, whole or by UTC hour, day, ISO week or month, grouped and filtered by any of tenant, operation, actor and capability, largest first. `RecordCensus.CountRecords` counts capability records — active, expired, revoked, delegated, expiring soon — for one tenant or all, by tenant and principal type. `RecordLister.ListRecords` lists one tenant's records, or every tenant's in one order, each with its disposition by the census's rules, filtered by principal type, subject or subject prefix, on-behalf-of user, client, session, subject issuer, agent run and disposition, oldest or newest first. `RecordListingReader.GetRecordListing` reads one record with its disposition. |
+| **Exchange** | `exchange` turns an identity provider's access token into a capability (RFC 8693), one per subject token, in process or at a token endpoint. `HasLimesKeyID` tells a capability from the provider's token on a route that takes both. |
+| **Answer errors** | `ErrorResponse` maps a refusal to its status, an RFC 6750 / RFC 9449 `WWW-Authenticate` challenge and an RFC 9457 problem body, without the error's own text. Every error has a stable code (`CodeOf`). `ProblemOf`, which covers the meter's codes, and `exchange.ErrorOf` answer it on any other API. |
 
-You implement `Store` and a `KeyResolver`, which `jwks.Static` and
-`jwks.Remote` already are, and, to meter, `meter.UsageStore` — or use
-`memstore`, or `pgstore` over PostgreSQL — and check your implementation from
-its own tests with `storetest`, `metertest` and `jwkstest`. Each optional
-contract serves one feature; they are listed in the overviews of
+You implement `Store`, a `KeyResolver` (`jwks.Static` and `jwks.Remote`
+already are one) and, to meter, `meter.UsageStore` — or use `memstore`, or
+`pgstore` over PostgreSQL. Test your implementation with the conformance
+suites `storetest`, `metertest` and `jwkstest`. Each optional
+contract serves one feature; the overviews of
 [limes](docs/api/capabilities.md#package-limes) and
-[meter](docs/api/metering.md#package-meter), and every name is in the
-[API reference](docs/api/README.md).
+[meter](docs/api/metering.md#package-meter) list them, and the
+[API reference](docs/api/README.md) has every name.
 
 ## Guarantees
 
@@ -164,121 +165,121 @@ contract serves one feature; they are listed in the overviews of
   ceiling, leaves every counter and the ledger untouched, so a retry is safe.
 - **Delegation and attenuation never widen.** A fuzz test
   (`FuzzNarrowsNeverWidens`) checks that whatever `Narrows` accepts reaches no
-  resource the parent cannot; an offline Biscuit block that asks for more
+  resource the parent cannot. An offline Biscuit block that asks for more
   invalidates the token.
 - **A bound token needs its key**, and its children stay bound.
 - **Keys never reach a log.** A signing key is held as a `SealedKey`
-  (`SealKey`) and HMAC nonce keys as `dpop.NonceKeys` (`dpop.SealNonceKeys`):
-  under any format verb, in JSON and in slog they print redacted, and both
+  (`SealKey`) and HMAC nonce keys as `dpop.NonceKeys` (`dpop.SealNonceKeys`).
+  Both print redacted under any format verb, in JSON and in slog, and both
   keep a copy, so the caller may clear its own.
-- **The token format is pinned.** Golden fixtures in `testdata/` fail CI on any
-  wire-format drift, because tokens outlive deployments.
+- **The token format is pinned.** Golden tokens in `testdata/` and
+  `biscuit/testdata/` fail CI on any wire-format drift, because tokens
+  outlive deployments.
 - **No hidden dependencies.** `isolation_test.go` fails if a database driver,
-  an object-storage SDK, a Redis client, OpenTelemetry, a JOSE library,
-biscuit-go or protobuf enters the resolved
-  dependency graph.
+  an object-storage SDK, a Redis client, OpenTelemetry, biscuit-go or
+  protobuf enters the root module's resolved dependency graph.
+  `exchange/isolation_test.go` keeps every JOSE library out of package
+  `exchange`; only `exchange/jwtverify` links one.
 - **The root module's tests need nothing**: no database, no network, no
   container. `pgstore`'s run against PostgreSQL in a container, and
   `redisreplay`'s against miniredis and, in CI, a real Redis.
 
 ## Performance
 
-Checking a token is mostly checking its Ed25519 signature: on an Apple M3 Max
-core, `Verify` of a JWT takes about 36µs, of which the signature is 33µs, and
-`Authorize` adds a microsecond or two. A Biscuit takes about 88µs, and each
-attenuation block another signature's worth; a DPoP proof adds some 60µs, its
-signature and its own checks. A cached revocation answer takes about 60ns,
-and the verifier scales with the processors: from four at once, a `Verify`
-comes out every 10µs. With
-`pgstore`, a charge is a transaction of a few statements, 1.4–3ms against
-PostgreSQL on the same host, and one tenant's charges commit one at a time —
-the price of a tenant ceiling that is never crossed — so some 350–700 a
-second for one tenant, while different tenants' run side by side.
+Checking a token is mostly checking its Ed25519 signature. On an Apple M3 Max
+core, `Verify` of a JWT takes about 36µs, of which the signature is 33µs;
+`Authorize` adds a microsecond or two. A Biscuit takes about 88µs, plus one
+signature's worth per attenuation block. A DPoP proof adds some 60µs: its
+signature and its own checks. A cached revocation answer takes about 60ns.
+The verifier scales with the processors: from four at once, a `Verify` comes
+out every 10µs. With `pgstore`, a charge is a transaction of a few
+statements, 1.4–3ms against PostgreSQL on the same host. One tenant's
+charges commit one at a time — the price of a tenant ceiling that is never
+crossed — so some 350–700 a second for one tenant; different tenants'
+charges run side by side.
 
-The benchmarks behind these numbers are `bench_test.go`,
-`biscuit/bench_test.go` and `pgstore/bench_test.go`, beside
-`otelmetric/bench_test.go` for what the instruments add; a weekly workflow
-runs all but the Biscuit's on this commit and on the
-newest release, taking turns on one runner, and soaks `pgstore` under
-concurrent workers ([CONTRIBUTING](.github/CONTRIBUTING.md)).
+The benchmarks are `bench_test.go`, `biscuit/bench_test.go` and
+`pgstore/bench_test.go`, with `otelmetric/bench_test.go` for what the
+instruments add. A weekly workflow runs all but the Biscuit's on the current
+commit and on the newest release, one after the other on one runner, and
+soaks `pgstore` under concurrent workers
+([CONTRIBUTING](.github/CONTRIBUTING.md)).
 
 ## Versioning
 
-Releases are `vX.Y.Z` tags, cut from Conventional Commits on `main` once CI
-has passed: `feat` is a minor; `fix`, `perf` and `security` a patch. The module
-is pre-1.0, so a breaking change is a minor too — **the Go API may change
-between minor versions**; read the release notes, which list breaking changes
-first, before bumping. Each module's `CHANGELOG.md` gathers them —
-[CHANGELOG.md](CHANGELOG.md) for limes, `<module>/CHANGELOG.md` for a nested
-one — written after each release from its notes.
+Each module is released as a tag: `vX.Y.Z` for limes, `<module>/vX.Y.Z` for
+`redisreplay`, `pgstore`, `otelmetric`, `exchange` and `biscuit`. The version
+comes from the Conventional Commits on `main` that touch the module: `feat`
+cuts a minor; `fix`, `perf` and `security` a patch; a nested module's own
+`build` commit, such as `build(pgstore): bump pgx`, a patch of it. A commit
+scoped to a nested module never releases limes, breaking or not.
 
-A release is not cut for every merge. It is cut once enough commits have
-gathered since the last one — three that cut a minor, or five that cut a
-patch — or at once for a breaking change or a `security` fix
-([.github/release/release-policy.json](.github/release/release-policy.json)),
-or whenever the Release workflow is run by hand. Run by hand with the
-`prerelease` channel, it tags a release candidate, `vX.Y.Z-rc.N`, of what the
-next release would be, published with the notes that release would have.
-With `next_major` as well, it tags a candidate of limes's 1.0, `v1.0.0-rc.N`,
-from main as it is; limes stays on 0.x on main until the release that cuts
-1.0, so its API may still break between two such candidates, as a
-pre-release's may. The nested modules have no such candidates: they stay on
-0.x past limes's 1.0.
+Every module is pre-1.0, so a breaking change cuts a minor too: **the Go API
+may change between minor versions**. Read the release notes, which list
+breaking changes first, before bumping. Each module's `CHANGELOG.md` holds
+them: [CHANGELOG.md](CHANGELOG.md) for limes, `<module>/CHANGELOG.md` for a
+nested one.
 
-`redisreplay`, `pgstore`, `otelmetric`, `exchange` and `biscuit` are modules
-of their own, each with a release line of its own — `redisreplay/vX.Y.Z`,
-`pgstore/vX.Y.Z`, `otelmetric/vX.Y.Z`, `exchange/vX.Y.Z`, `biscuit/vX.Y.Z` —
-cut by the same rules from the commits that touch it, plus one: a module's own
-`build` commit, such as `build(pgstore): bump pgx`, is a patch of it, and is
-released at once; so is the release workflow's `build(nested): require limes
-vX.Y.Z in …`, for each module whose `go.mod` it raises. A commit releases, by
-its type, each module whose files it changes; one scoped `pgstore`,
-`redisreplay`, `otelmetric`, `exchange` or `biscuit` never releases limes,
-breaking or not.
+A release is not cut for every merge
+([release-policy.json](.github/release/release-policy.json)). A module is due
+once three commits that cut a minor, or five that cut a patch, have gathered
+since its last release; a breaking change or a `security` fix is due at
+once. The Release workflow can also be run by hand. One release pull request
+carries every module due
+([ADR-0016](docs/adr/0016-one-release-commit.md)): each one's changelog
+entry and, when limes is released, the raised `require` of limes in every
+nested module whose files changed since its last release, which is released
+with it. The Release workflow tags every module at once on that pull
+request's merge commit, so a nested module can require the limes tagged on
+the same commit.
 
-A nested module is tagged after the limes it needs, never with it: its
-`go.mod` must require a limes already released, so a root release's new API
-reaches `pgstore`, `otelmetric`, `redisreplay`, `exchange` or `biscuit` only
-with that module's next tag, cut once the `require limes` change merges. Pin
-each module by its own version — `go get
-github.com/oleg-tkachuk/limes/pgstore@vX.Y.Z`, which brings the limes it
-requires — never a root tag's commit; and to take a new root API into a
-store, wait for the store's tag that requires that release. Name the
-version, not the tag: `@pgstore/vX.Y.Z` is a revision of the repository to
-`go get`, which then resolves every module that could hold the package at
-that commit, the root among them, and downloads the root as a
+Pin each nested module by its own version:
+`go get github.com/oleg-tkachuk/limes/pgstore@vX.Y.Z` brings the limes it
+requires. Name the version, not the tag: `@pgstore/vX.Y.Z` is a revision of
+the repository, which `go get` resolves against every module that could hold
+the package at that commit, the root among them, downloading the root as a
 pseudo-version (`v1.0.0-rc.N.0.…-<commit>`) before it settles.
 
-To pin a candidate of 1.0, read its row in the [table of
-candidates](docs/migration.md#release-candidates-of-10) — the 0.x release
-whose API it carries, and each nested module's release cut with it, which
-CI holds to the tags — and require them together. For `v1.0.0-rc.21`:
+Run by hand on the `prerelease` channel, the Release workflow tags a release
+candidate, `vX.Y.Z-rc.N`, of what the next release would be. With
+`next_major`, it tags a candidate of limes 1.0, `v1.0.0-rc.N`, from `main` as
+it is; while that line is open, a candidate also follows every release of
+limes. limes stays on 0.x on `main` until the release that cuts 1.0, so its
+API may still break between two candidates. Each candidate's
+[GitHub release](https://github.com/oleg-tkachuk/limes/releases?q=v1.0.0-rc&expanded=true)
+names the 0.x release whose API it carries and each nested module's release
+on `main` at that commit; [migration.md](docs/migration.md#release-candidates-of-10)
+tabulates the same up to rc.27. Require them together, for example:
 
 ```bash
 go get github.com/oleg-tkachuk/limes@v1.0.0-rc.21 github.com/oleg-tkachuk/limes/pgstore@v0.50.0 github.com/oleg-tkachuk/limes/exchange@v0.14.0
 ```
 
-Go selects the candidate over the 0.x release a nested module requires,
-since it orders every `v1.0.0-rc.N` above every 0.x, so a nested module's
-release goes only with a candidate at or above the row that lists it.
+Go orders every `v1.0.0-rc.N` above every 0.x release, so it selects the
+candidate over the 0.x a nested module requires. Require a nested module's
+release only with a candidate at or above the one that names it.
+
+When limes reaches v1.0.0, every nested module still on 0.x reaches its own
+v1.0.0 with it; from then on no module breaks its v1 line
+([compatibility.md](docs/compatibility.md)).
 
 The token wire format — claims, `typ: at+jwt` with `limes_v: 7`, the
-Biscuit facts — is a separate promise: a token is a credential that outlives
-the process that issued it, so the format changes only as a deliberate
-change that moves `limes_v`, with the golden fixtures regenerated in the same
-commit. A verifier refuses a token of a format it does not read outright,
-rather than read its claims under the wrong schema; a new format would be
-read beside the old before any issuer mints it, so no token in flight is
-refused during the change. Tokens are signed with Ed25519 throughout 1.x,
-under a kid in limes's namespace (`jwks.KeyIDPrefix`); another algorithm
-would be another format, never a runtime choice.
+Biscuit facts — is a separate promise, because a token outlives the process
+that issued it. The format changes only deliberately, by moving `limes_v`,
+with the golden fixtures regenerated in the same commit. A verifier refuses
+outright a token of a format it does not read, rather than read its claims
+under the wrong schema. A new format is read beside the old before any
+issuer mints it, so no token in flight is refused during the change. Tokens
+are signed with Ed25519 throughout 1.x, under a kid in limes's namespace
+(`jwks.KeyIDPrefix`); another algorithm would be another format, never a
+runtime choice.
 
 The conformance suites — `storetest`, `metertest`, `dpoptest`, `jwkstest`,
-`exchangetest` —
-may gain checks in any release: a check of a promise the contract already
-made is the suite finding a bug in a store, not a break of the API. An `Env`
-written for an earlier release still compiles; a new optional field skips
-its checks while unset.
+`exchangetest` — may gain checks in any release: a check of a promise the
+contract already made is the suite finding a bug in a store, not a break of
+the API. An environment struct written for an earlier release (`Env`,
+`CounterEnv`, `ReplayEnv`, `NoncesEnv`, …) still compiles; a check behind a
+new optional field is skipped while the field is unset.
 
 ## Documentation
 
@@ -287,11 +288,12 @@ its checks while unset.
 | [docs/guide.md](docs/guide.md) | each concern in turn: verification, caveats, delegation, DPoP, Biscuit, metering, revocation, storage contracts, key rotation, token exchange |
 | [docs/api/](docs/api/README.md) | every exported name of every public package, by concern — its declaration and its doc comment, which is its specification — generated from the source |
 | [docs/errors.md](docs/errors.md) | every error's stable code, HTTP status and format (RFC 6750, RFC 9449, RFC 9457, RFC 6749), and when to retry |
-| [docs/standards.md](docs/standards.md) | the RFCs implemented — JWT, DPoP, JWKS, HTTP challenges and problem details — the choices made within them, and the OAuth standards deliberately left out |
+| [docs/defaults.md](docs/defaults.md) | what every `Config` field does at its zero value, and the value of every `Default…` constant |
+| [docs/standards.md](docs/standards.md) | the RFCs implemented — JWT, DPoP, JWKS, HTTP challenges and problem details — the choices made within them, and the OAuth standards left out |
 | [docs/diagrams.md](docs/diagrams.md) | the contract boundary, a capability's lifecycle, the verification gates, error answers, delegation, Biscuit copies, the charge path, revocation, token exchange |
 | [docs/biscuit-profile.md](docs/biscuit-profile.md) | how a capability travels in a Biscuit, and what a holder may append with any Biscuit implementation |
 | [docs/compatibility.md](docs/compatibility.md) | what a release promises — the Go API, the error codes with their status and category, defaults, documented behaviour — what breaks it, and how a break is announced before and after 1.0 |
-| [docs/migration.md](docs/migration.md) | the release candidates of 1.0, and every breaking change from v0.3.0 on, of limes and of each nested module, as what it was and what it is now |
+| [docs/migration.md](docs/migration.md) | the release candidates of 1.0, and every breaking change from v0.3.0 on, of limes and of each nested module: what it was and what it is now |
 | [docs/api-review-v1.md](docs/api-review-v1.md) | the review of the API before 1.0: each finding, the decision taken and whether it is done |
 | [docs/adr/](docs/adr/) | architecture decision records: what was decided about the code behind the API, and why |
 | [CONTRIBUTING.md](.github/CONTRIBUTING.md) | building, testing and how a change lands |
@@ -307,16 +309,17 @@ its checks while unset.
 | [dpop/](dpop) | proof of possession (RFC 9449): signing and checking proofs, replay cache, server nonces |
 | [inspect/](inspect) | reading a token without verifying it, for tooling |
 | [memstore/](memstore) | the in-memory reference implementation of every storage contract |
-| [pgstore/](pgstore) | the reference PostgreSQL store, a module of its own: `Store`, `BiscuitRevocationStore`, `BulkRevoker`, `ExchangeStore`, `meter.UsageStore`, `meter.CopyUsageReader`, a `Ledger`, a `Census`, both tenant erasers and a `dpop.ReplayCache` under row-level security per tenant, with `EraseTenant` and a `RevocationWatcher`; its schema applied by `pgstore/migrate`, or handed to your own migration tool as SQL by `pgstore/migrate/ddl`; held to storetest and metertest; released as `pgstore/vX.Y.Z` |
-| [redisreplay/](redisreplay) | a `dpop.ReplayCache` over Redis, a module of its own, for verifiers behind several replicas; released as `redisreplay/vX.Y.Z` |
-| [otelmetric/](otelmetric) | OpenTelemetry instruments around a `meter.UsageStore` and a `RevocationCache`, a module of its own so limes resolves no OpenTelemetry; released as `otelmetric/vX.Y.Z` |
-| [exchange/](exchange) | OAuth 2.0 Token Exchange (RFC 8693): an identity provider's access token (RFC 9068) exchanged for a capability, in process or at a token endpoint, under a policy of the consumer's, a capability narrowed for a sub-agent, an RFC 7662 introspection endpoint, and the RFC 9728 and RFC 8414 metadata an MCP server and the exchange publish; `exchange/jwtverify` verifies an RFC 9068 subject token, apart so a consumer with its own verifier links no JOSE library; a module of its own; released as `exchange/vX.Y.Z` |
-| [biscuit/](biscuit) | the Biscuit v3 form (`biscuit.Form()`) and offline `Attenuate`, a module of its own so limes resolves neither biscuit-go nor protobuf; released as `biscuit/vX.Y.Z` |
-| [internal/](internal) | the module's own shared packages, not importable from outside it: JOSE pieces (`jose`), HTTP header names (`httpx`), RFC 3986 URI normalisation (`rfc3986`), access to unexported root internals for sibling packages (`link`), the sharded TTL cache behind `RevocationCache` (`ttlcache`), the error families (`errs`) and the check that every error names one (`errguard`), and, for the conformance suites, expectations, field coverage and per-check deadlines (`expect`, `fields`, `watchdog`) |
+| [pgstore/](pgstore) | the reference PostgreSQL store, a module of its own: `Store`, `BiscuitRevocationStore`, `BulkRevoker`, `ExchangeStore`, `meter.UsageStore`, `meter.CopyUsageReader`, a `Ledger`, a `Census`, both tenant erasers and a `dpop.ReplayCache`, under row-level security per tenant, with `EraseTenant` and a `RevocationWatcher`. `pgstore/migrate` applies its schema; `pgstore/migrate/ddl` hands it to your own migration tool as SQL. Held to storetest and metertest. Its `internal/` holds the names `pgstore` and `pgstore/migrate` share (`pgschema`) and its tests' PostgreSQL (`pgtest`, and `pgcontainer`, a module of its own so pgstore never requires testcontainers) |
+| [redisreplay/](redisreplay) | a `dpop.ReplayCache` over Redis, a module of its own, for verifiers behind several replicas |
+| [otelmetric/](otelmetric) | OpenTelemetry instruments around a `meter.UsageStore` and a `RevocationCache`, a module of its own so limes resolves no OpenTelemetry; `internal/optionalgen` generates the wrapper that keeps a store's optional interfaces |
+| [exchange/](exchange) | OAuth 2.0 Token Exchange (RFC 8693), a module of its own: an identity provider's access token (RFC 9068) exchanged for a capability, in process or at a token endpoint, under a policy of the consumer's; a capability narrowed for a sub-agent; an RFC 7662 introspection endpoint; and the RFC 9728 and RFC 8414 metadata an MCP server and the exchange publish. `exchange/jwtverify` verifies an RFC 9068 subject token, apart so a consumer with its own verifier links no JOSE library |
+| [biscuit/](biscuit) | the Biscuit v3 form (`biscuit.Form()`) and offline `Attenuate`, a module of its own so limes resolves neither biscuit-go nor protobuf; `biscuit/testdata/` holds the vocabulary and cases shared with SDKs in other languages |
+| [internal/](internal) | the module's own shared packages: JOSE pieces (`jose`), HTTP header names (`httpx`), the rule for where a key set is fetched from (`httpsurl`), RFC 3986 URI normalisation (`rfc3986`), the text a store can keep (`storable`), the sharded TTL cache behind `RevocationCache` (`ttlcache`), access to unexported root internals for sibling packages (`link`), optional store interfaces for `limes.As` and `meter.As` (`optional`), the error families (`errs`), error codes of packages limes cannot import (`errcode`), the client-safe detail of an error (`detail`), the check that every error names a sentinel (`errguard`), the generator of `docs/api` (`apidoc`), and, for the conformance suites, expectations, field coverage and per-check deadlines (`expect`, `fields`, `watchdog`) |
 | [storetest/](storetest), [metertest/](metertest), [dpop/dpoptest](dpop/dpoptest), [jwks/jwkstest](jwks/jwkstest), [exchange/exchangetest](exchange/exchangetest) | conformance suites to run from your own implementation's tests |
 | [limestest/](limestest) | a consumer's own error mapping held to the codes and categories it was written against |
-| [examples/](examples) | runnable programs: the five-minute walkthrough (`quickstart`), and one topic each, logging every step to stdout — issuing and verifying, delegation, metering, an MCP server behind token exchange, and pgstore over PostgreSQL; a module of its own, never released. Most packages' Go documentation carries `Example` functions for their calls; pgstore's compile without a database and do not run |
-| [testdata/](testdata) | golden tokens, and the Biscuit vocabulary and cases shared with SDKs in other languages |
+| [examples/](examples) | runnable programs, a module of its own, never released: the five-minute walkthrough (`quickstart`) and one topic each, logging every step to stdout — issuing and verifying, delegation, metering, an MCP server behind token exchange, and pgstore over PostgreSQL. Most packages' Go documentation also carries `Example` functions; pgstore's compile without a database and do not run |
+| [testdata/](testdata) | golden JWTs |
+| [scripts/hooks/](scripts/hooks) | the Git hook that tests the Go modules a push changes |
 | [tools/](tools) | the developer tools, pinned in modules of their own and run with `go tool -modfile=tools/go.mod` (yq: `tools/yq/go.mod`, golangci-lint: `tools/golangci-lint/go.mod`) |
 
 ## License
