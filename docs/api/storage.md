@@ -2800,7 +2800,7 @@ EraseTenantUsage implements meter.TenantUsageEraser: it marks the tenant erased 
 func (s *UsageStore) FeatureEnabled(f meter.Feature) bool
 ```
 
-FeatureEnabled implements meter.FeatureGate: every feature the store implements is on, but leases with Config.DisableLeases set.
+FeatureEnabled implements meter.FeatureGate: every feature of package meter is on, as the store implements each, but leases with Config.DisableLeases set; a feature meter does not define is off.
 
 <sub>[pgstore/lease.go](../../pgstore/lease.go)</sub>
 <a id="pgstore.UsageStore.GetCharge"></a>
