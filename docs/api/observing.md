@@ -356,7 +356,7 @@ NewStoreEvents returns the callbacks a usage store reports to (pgstore.Config.Ev
 	events, err := otelmetric.NewStoreEvents(otelmetric.WithMeterProvider(provider))
 	store, err := pgstore.NewUsageStore(pgstore.Config{DB: pool, Events: events})
 
-InstrumentRevocationCache reports a limes.RevocationCache's counts — hits, misses, upstream lookups, evictions, stale answers and entries, each by kind (capability or biscuit), its clears, whole and narrow, and the revocation signal: whether lineage and a signal vouch for it, the signal's connections, losses and notifications — as observable instruments, read only when the provider collects:
+InstrumentRevocationCache reports a limes.RevocationCache's counts — hits, misses, upstream lookups, evictions, stale answers and entries, each by kind (capability, biscuit or unrecorded), its clears, whole and narrow, and the revocation signal: whether lineage and a signal vouch for it, the signal's connections, losses and notifications — as observable instruments, read only when the provider collects:
 
 	reg, err := otelmetric.InstrumentRevocationCache(cache,
 		otelmetric.WithMeterProvider(provider))
