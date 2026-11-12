@@ -309,7 +309,7 @@ ErrRefundConflict — Refund named a RefundID already on record for a refund of 
 var ErrReserveConflict error = &familyError{"limes: reservation id already names a different hold", limes.ErrConflict, CodeReserveConflict}
 ```
 
-ErrReserveConflict — Reserve named a ReservationID already on record for another hold: one of another capability, tenant, Biscuit copies, amount, unit, op or actor, or one already settled. One id names one hold; replaying the first would report the second as held. Matches limes.ErrConflict, as ErrExternalRefConflict does.
+ErrReserveConflict — Reserve named a ReservationID already on record for another hold: one of another capability, tenant, Biscuit copies, amount, unit, op or actor, or one already settled. One id names one hold; replaying the first would report the second as held. A store whose Reserve cannot see another tenant's settled hold answers the Settle of a hold under its id with it instead. Matches limes.ErrConflict, as ErrExternalRefConflict does.
 
 <sub>[meter/errors.go](../../meter/errors.go)</sub>
 <a id="meter.ErrSettleConflict"></a>
@@ -467,7 +467,10 @@ type BudgetMeter interface {
 	// locked transaction — the chain's counters and the tenant's aggregate,
 	// which every other charge of the tenant waits for — so it is short, and
 	// touches only that store's database, through the transaction it is
-	// handed: no network call.
+	// handed: no network call. A store that retries a transaction it lost
+	// to a deadlock runs onCharged again on the retry, the first run having
+	// rolled back with its charge, so a side effect outside that
+	// transaction is no place for it.
 	//
 	// The returned receipt carries the ledger row's ID; Refund takes it.
 	//
@@ -1791,6 +1794,8 @@ type RefundRequest struct {
 	// (Meter.Refund): the caller's own, so a partial refund sent again
 	// after its answer was lost (ErrOutcomeUnknown) returns the first one's
 	// receipt rather than refunding again. The zero id: every call refunds.
+	// An id is one across every tenant, as ReserveRequest.ReservationID is:
+	// one another tenant's refund holds conflicts (ErrRefundConflict).
 	RefundID uuid.UUID
 }
 ```
@@ -2040,7 +2045,10 @@ type ReserveRequest struct {
 	// idempotent on it (Meter.Reserve): the caller's own, so a Reserve sent
 	// again after its answer was lost (ErrOutcomeUnknown) finds the hold
 	// the first one made. The zero id: the store picks one, and every call
-	// holds anew.
+	// holds anew. An id is one across every tenant: one another tenant's
+	// hold holds conflicts (ErrReserveConflict), so it is random, or derived
+	// from the tenant as well as the caller's own key, never from a
+	// per-tenant key alone that another tenant may share.
 	ReservationID uuid.UUID
 }
 ```

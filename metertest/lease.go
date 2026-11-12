@@ -419,6 +419,38 @@ func checkARefusedResetSettlesNoLease(t *testing.T, f fixture) {
 	expect.That(t, f.usageOf(t, f.root).SpentAmount == 0, "the root spent %v after a refused reset, want the lease's charge still on the lease", f.usageOf(t, f.root).SpentAmount)
 }
 
+// heldOutsideTheLease is what the root holds, apart from the child's lease,
+// in the check of a reset refused for its unit.
+const heldOutsideTheLease = 2 * one
+
+// A reset to another unit, refused because a hold outside the lease keeps
+// the tenant's unit counted, settles nothing either: the store checks the
+// request before it settles the leases, or undoes their settle with it.
+func checkAResetRefusedForItsUnitSettlesNoLease(t *testing.T, f fixture) {
+	l := f.leaser(t)
+	child := f.childSubject()
+	f.lease(t, l, child, leased)
+	_, err := f.chargeOf(child, leaseCharge)
+	expect.Must(t, err == nil, "charge: %v", err)
+	_, err = f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.rootSubjectOf(leastRequests), Amount: heldOutsideTheLease})
+	expect.Must(t, err == nil, "a hold outside the lease: %v", err)
+	before, err := l.GetLease(f.Ctx, f.child)
+	expect.Must(t, err == nil, "GetLease: %v", err)
+	b := f.tenantOf(t)
+	_, err = f.Usage.SetTenantBudget(f.Ctx, meter.SetTenantBudgetRequest{
+		TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Max: tenantBudget, UnitCode: otherUnit}, ResetSpend: true, ExpectedVersion: b.ResourceVersion,
+	})
+	expect.Must(t, errors.Is(err, limes.ErrUnitCodeMismatch), "a reset to %s with a hold in %s: err = %v, want ErrUnitCodeMismatch", otherUnit, unit, err)
+	after, err := l.GetLease(f.Ctx, f.child)
+	expect.Must(t, err == nil, "GetLease after a reset refused for its unit: %v, want the lease still open", err)
+	expect.That(t, after.ID == before.ID && after.Amount == before.Amount && after.Spent == before.Spent,
+		"the lease after a reset refused for its unit = %v holding %v, %v spent; want %v holding %v, %v spent", after.ID, after.Amount, after.Spent, before.ID, before.Amount, before.Spent)
+	got := f.tenantOf(t)
+	expect.That(t, got.ResourceVersion == b.ResourceVersion && got.SpentAmount == b.SpentAmount && got.ReservedAmount == b.ReservedAmount && got.Ceiling.UnitCode == unit,
+		"the tenant after a reset refused for its unit = version %d, %v spent, %v held in %s; want version %d, %v spent, %v held in %s",
+		got.ResourceVersion, got.SpentAmount, got.ReservedAmount, got.Ceiling.UnitCode, b.ResourceVersion, b.SpentAmount, b.ReservedAmount, unit)
+}
+
 // A Biscuit copy leases nothing: what it charges and bumps goes through the
 // whole chain, which a lease would hold beyond the copy's own ceilings, so
 // a lease of one is refused, as a Reserve past those ceilings is, and

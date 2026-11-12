@@ -520,3 +520,70 @@ func TestRevokerReportsTheCallsDuration(t *testing.T) {
 		})
 	}
 }
+
+// committedThenPanicked is a store that commits each revocation, then
+// panics before it answers.
+type committedThenPanicked struct{ *fakeRevocations }
+
+// errStorePanicked is what committedThenPanicked panics with.
+var errStorePanicked = errors.New("the store panicked after it committed")
+
+func (c committedThenPanicked) Revoke(ctx context.Context, req RevokeRequest) (RevokeResult, error) {
+	_, _ = c.fakeRevocations.Revoke(ctx, req)
+	panic(errStorePanicked)
+}
+
+func (c committedThenPanicked) RevokeMatching(ctx context.Context, req RevokeMatchingRequest) (RevokeMatchingResult, error) {
+	_, _ = c.fakeRevocations.RevokeMatching(ctx, req)
+	panic(errStorePanicked)
+}
+
+func (c committedThenPanicked) RevokeBiscuit(ctx context.Context, req RevokeBiscuitRequest) (RevokeBiscuitResult, error) {
+	_, _ = c.fakeRevocations.RevokeBiscuit(ctx, req)
+	panic(errStorePanicked)
+}
+
+// A store that panics after it committed still has the cache cleared: the
+// cached "not revoked" answer is not served past a revocation that stands,
+// through each method, and the panic goes on to the caller.
+func TestRevokerClearsTheCacheOnAPanic(t *testing.T) {
+	ctx := context.Background()
+	id := uuid.New()
+	for _, call := range revokerCalls(id, uuid.New()) {
+		t.Run(string(call.op), func(t *testing.T) {
+			fake := newFakeRevocations()
+			fake.matched = id
+			store := committedThenPanicked{fake}
+			cache, err := NewRevocationCache(RevocationCacheConfig{Capabilities: fake, Biscuits: fake, TTL: revokerCacheTTL, Logger: slog.New(slog.DiscardHandler)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := newTestRevoker(t, RevokerConfig{Store: store, Bulk: store, Biscuits: store, Cache: cache, Logger: slog.New(slog.DiscardHandler)})
+			revoked := func() bool {
+				t.Helper()
+				got, err := cache.IsRevoked(ctx, id)
+				if call.op == RevokerOperationRevokeBiscuit {
+					got, err = cache.IsBiscuitRevoked(ctx, [][]byte{testBiscuitCopy(id).revocationID})
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				return got
+			}
+			if revoked() {
+				t.Fatal("revoked before the revocation")
+			}
+			func() {
+				defer func() {
+					if p, _ := recover().(error); !errors.Is(p, errStorePanicked) {
+						t.Errorf("recovered %v, want the store's panic", p)
+					}
+				}()
+				_, _ = call.run(ctx, r)
+			}()
+			if !revoked() {
+				t.Error("the cache served its answer from before a revocation the store committed")
+			}
+		})
+	}
+}

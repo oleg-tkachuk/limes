@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
@@ -366,4 +367,93 @@ func checkConcurrentBudgetWrites(t *testing.T, f fixture) {
 	expect.Must(t, len(winner) == 1, "%d writes at one version accepted (%v), want one", len(winner), winner)
 	got := f.tenantOf(t).Ceiling
 	expect.That(t, got == (limes.BudgetCeiling{Max: winner[0], UnitCode: unit}), "the ceiling after writes at one version = %v, want the accepted %v", got, winner[0])
+}
+
+// endingCallbackPause is how long the callback of
+// checkEndingCallsBesideAReset takes once it has sent a reset: long enough
+// for a reset that does not wait for the call to commit meanwhile.
+const endingCallbackPause = 100 * time.Millisecond
+
+// endingCall makes what it ends, then ends it, running pause inside its
+// callback.
+type endingCall struct {
+	setup func(t *testing.T, f fixture) any
+	end   func(f fixture, made any, pause func()) error
+}
+
+// endingCalls are the calls with a callback that end what a Reserve or a
+// Charge made.
+var endingCalls = map[string]endingCall{
+	"a Settle": {
+		setup: func(t *testing.T, f fixture) any {
+			h, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: cent})
+			expect.Must(t, err == nil, "reserve: %v", err)
+			return h.ID
+		},
+		end: func(f fixture, made any, pause func()) error {
+			_, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: f.childSubject(), ReservationID: made.(uuid.UUID), Amount: cent},
+				func(context.Context, meter.Charged) error { pause(); return nil })
+			return err
+		},
+	},
+	"a Refund": {
+		setup: func(t *testing.T, f fixture) any {
+			c, err := f.chargeOf(f.childSubject(), cent)
+			expect.Must(t, err == nil, "charge: %v", err)
+			return c.ChargeID
+		},
+		end: func(f fixture, made any, pause func()) error {
+			_, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: made.(uuid.UUID), Remaining: true},
+				func(context.Context, meter.Refunded) error { pause(); return nil })
+			return err
+		},
+	},
+}
+
+// A period reset that sets a ceiling on a tenant with none, sent while a
+// Settle's onCharged or a Refund's onRefunded runs, leaves the tenant
+// whole: once both are done, a charge and another reset of the tenant
+// succeed. A store that keeps such a tenant's spend apart from its
+// aggregate — pgstore's stripes — must not let the call land its change in
+// the period the reset closed. The reset may wait for the call, or answer
+// ErrTenantBudgetBusy; the callback does not wait for it.
+func checkEndingCallsBesideAReset(t *testing.T, f fixture) {
+	lift := func(t *testing.T) {
+		t.Helper()
+		b := f.tenantOf(t)
+		_, err := f.Usage.SetTenantBudget(f.Ctx, meter.SetTenantBudgetRequest{TenantID: f.Tenant, Ceiling: unlimitedBudget, ExpectedVersion: b.ResourceVersion})
+		expect.Must(t, err == nil, "the tenant's ceiling lifted: %v", err)
+	}
+	for name, call := range endingCalls {
+		t.Run(name, func(t *testing.T) {
+			lift(t)
+			made := call.setup(t, f)
+			// Set again, the ceiling folds what the setup kept apart, so
+			// the call starts the tenant's spend anew where a store keeps
+			// it apart.
+			lift(t)
+			version := f.tenantOf(t).ResourceVersion
+			reset := make(chan error, 1)
+			pause := func() {
+				go func() {
+					_, err := f.Usage.SetTenantBudget(f.Ctx, meter.SetTenantBudgetRequest{
+						TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Max: tenantBudget, UnitCode: unit}, ResetSpend: true, ExpectedVersion: version,
+					})
+					reset <- err
+				}()
+				time.Sleep(endingCallbackPause)
+			}
+			err := call.end(f, made, pause)
+			expect.Must(t, err == nil, "%s whose callback sent a reset: %v", name, err)
+			err = <-reset
+			expect.Must(t, err == nil || errors.Is(err, meter.ErrTenantBudgetBusy), "the reset sent during %s: %v", name, err)
+			_, err = f.chargeOf(f.childSubject(), cent)
+			expect.That(t, err == nil, "a charge after %s and the reset: %v", name, err)
+			b := f.tenantOf(t)
+			_, err = f.Usage.SetTenantBudget(f.Ctx, meter.SetTenantBudgetRequest{
+				TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Max: tenantBudget, UnitCode: unit}, ResetSpend: true, ExpectedVersion: b.ResourceVersion,
+			})
+			expect.That(t, err == nil, "a reset after %s and the reset: %v", name, err)
+		})
+	}
 }
