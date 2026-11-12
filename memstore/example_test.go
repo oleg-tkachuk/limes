@@ -118,6 +118,49 @@ func ExampleStore_Revoke() {
 	// true
 }
 
+// The identity provider ended a session: every capability exchanged in it
+// is revoked together, a batch at a time, until More is false.
+func ExampleStore_RevokeMatching() {
+	ctx := context.Background()
+	e := newExampleEnv()
+	const session = "idp-session-1"
+	inSession := func(subject, sid string) limes.Capability {
+		c := limes.Capability{
+			ID: uuid.NewV7(), IssuedAt: e.now, ExpiresAt: e.now.Add(exampleTTL),
+			Subject: limes.Principal{Type: limes.PrincipalTypeUser, TenantID: e.tenant, Subject: subject},
+			Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}},
+		}
+		if err := e.records.Insert(ctx, limes.InsertRequest{Capability: c, Session: sid}); err != nil {
+			log.Fatal(err)
+		}
+		return c
+	}
+	first := inSession("user-1", session)
+	inSession("user-1", session)
+	other := inSession("user-1", "idp-session-2")
+
+	req := limes.RevokeMatchingRequest{TenantID: e.tenant, Session: session, Note: "logged out", Actor: "idp-logout"}
+	result, err := e.records.RevokeMatching(ctx, req)
+	fmt.Println(err, result.Revoked, result.More)
+
+	revoked, _ := e.records.IsRevoked(ctx, first.ID)
+	untouched, _ := e.records.IsRevoked(ctx, other.ID)
+	fmt.Println(revoked, untouched)
+
+	// A capability revoked already gets no second entry.
+	result, err = e.records.RevokeMatching(ctx, req)
+	fmt.Println(err, result.Revoked)
+
+	// A request naming no selector would revoke the whole tenant: refused.
+	_, err = e.records.RevokeMatching(ctx, limes.RevokeMatchingRequest{TenantID: e.tenant})
+	fmt.Println(errors.Is(err, limes.ErrInvalidRequest))
+	// Output:
+	// <nil> 2 false
+	// true false
+	// <nil> 0
+	// true
+}
+
 func ExampleStore_ListByPrincipal() {
 	ctx := context.Background()
 	e := newExampleEnv()
