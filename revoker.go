@@ -110,10 +110,9 @@ func (r *Revoker) Revoke(ctx context.Context, req RevokeRequest) (RevokeResult, 
 		slog.String(logKeyNote, req.Note),
 		slog.Bool(logKeyCascade, req.CascadeChildren),
 	}
-	res, err := r.store.Revoke(ctx, req)
-	if r.cache != nil {
-		r.cache.ClearRevoked(req.CapabilityID)
-	}
+	res, err := clearedAfter(r.clearer(func(c *RevocationCache) { c.ClearRevoked(req.CapabilityID) }), func() (RevokeResult, error) {
+		return r.store.Revoke(ctx, req)
+	})
 	if err != nil {
 		r.refused(ctx, start, RevokerErrorEvent{Operation: RevokerOperationRevoke, CapabilityID: req.CapabilityID, Err: err}, r.withCacheCleared(attrs))
 		return res, err
@@ -139,10 +138,9 @@ func (r *Revoker) RevokeMatching(ctx context.Context, req RevokeMatchingRequest)
 		r.refused(ctx, start, RevokerErrorEvent{Operation: RevokerOperationRevokeMatching, TenantID: req.TenantID, Err: errNoRevokerBulk}, attrs)
 		return RevokeMatchingResult{}, errNoRevokerBulk
 	}
-	res, err := r.bulk.RevokeMatching(ctx, req)
-	if r.cache != nil {
-		r.cache.Clear()
-	}
+	res, err := clearedAfter(r.clearer((*RevocationCache).Clear), func() (RevokeMatchingResult, error) {
+		return r.bulk.RevokeMatching(ctx, req)
+	})
 	if err != nil {
 		r.refused(ctx, start, RevokerErrorEvent{Operation: RevokerOperationRevokeMatching, TenantID: req.TenantID, Err: err}, r.withCacheCleared(attrs))
 		return res, err
@@ -178,10 +176,9 @@ func (r *Revoker) RevokeBiscuit(ctx context.Context, req RevokeBiscuitRequest) (
 		r.refused(ctx, start, RevokerErrorEvent{Operation: RevokerOperationRevokeBiscuit, CapabilityID: id, Err: errNoRevokerBiscuits}, attrs)
 		return RevokeBiscuitResult{}, errNoRevokerBiscuits
 	}
-	res, err := r.biscuits.RevokeBiscuit(ctx, req)
-	if r.cache != nil {
-		r.cache.Clear()
-	}
+	res, err := clearedAfter(r.clearer((*RevocationCache).Clear), func() (RevokeBiscuitResult, error) {
+		return r.biscuits.RevokeBiscuit(ctx, req)
+	})
 	if err != nil {
 		r.refused(ctx, start, RevokerErrorEvent{Operation: RevokerOperationRevokeBiscuit, CapabilityID: id, Err: err}, r.withCacheCleared(attrs))
 		return res, err
@@ -192,6 +189,23 @@ func (r *Revoker) RevokeBiscuit(ctx context.Context, req RevokeBiscuitRequest) (
 		Actor: req.Actor, Note: req.Note, AlreadyRevoked: res.AlreadyRevoked,
 	}, attrs)
 	return res, nil
+}
+
+// clearedAfter is call's answer, clear run once call ends, however it ends:
+// a store that panics after committing a revocation leaves no cached "not
+// revoked" answer behind it.
+func clearedAfter[T any](clear func(), call func() (T, error)) (T, error) {
+	defer clear()
+	return call()
+}
+
+// clearer is clear applied to the revoker's cache, nothing without one.
+func (r *Revoker) clearer(clear func(*RevocationCache)) func() {
+	return func() {
+		if r.cache != nil {
+			clear(r.cache)
+		}
+	}
 }
 
 // withCacheCleared is attrs, saying that a store call that returned an
