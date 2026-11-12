@@ -50,7 +50,10 @@ var ErrChargeTransaction = fmt.Errorf("%w: pgstore: the transaction a callback r
 // open when the callback returns are closed then, and read no further. A
 // batch's QueuedQuery callbacks run while its Close holds the transaction:
 // a call they make on it, or one from another goroutine meanwhile, is
-// refused with ErrChargeTransaction.
+// refused with ErrChargeTransaction. A sql.Scanner, driver.Valuer or
+// pgx.CopyFromSource runs inside the call that reads or sends it, holding
+// the transaction: one that calls the transaction waits on itself for ever,
+// with the tenant's locks held, so none may.
 // Commit and Rollback return ErrChargeTransaction; a savepoint (Begin) is
 // the callback's to end. Conn is nil, as the connection is the store's, and
 // a call whose transaction the callback ended with SQL of its own — COMMIT,
@@ -203,7 +206,11 @@ func (t *callbackTx) SendBatch(ctx context.Context, b *pgx.Batch) pgx.BatchResul
 }
 
 // LargeObjects is the transaction's large objects: the zero LargeObjects,
-// which no call can use, once the callback has returned.
+// which no call can use, once the callback has returned. pgx.LargeObjects
+// is a struct over the transaction it was made on, which this one cannot
+// stand in for, so its calls are not taken through the guard: one kept past
+// the callback would run beside the store's COMMIT, and the callback may not
+// keep it.
 func (t *callbackTx) LargeObjects() pgx.LargeObjects {
 	var lo pgx.LargeObjects
 	_ = t.guard.run(func() error { lo = t.tx.LargeObjects(); return nil })

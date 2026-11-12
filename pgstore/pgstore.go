@@ -186,14 +186,18 @@ const timeResolution = time.Microsecond
 // for all of v1.
 //
 // A DB that is a *pgxpool.Pool or a *pgx.Conn, or implements ConnLender —
-// each found by type assertion — runs each call on a connection of its own
-// and sends BEGIN with the call's first statement, and a meter call's COMMIT
-// with its last batch: no round trip of their own
-// (docs/adr/0018-fewer-round-trips-per-charge.md). Its BeginTx then serves
-// no call. Any other DB has each transaction opened by BeginTx and
-// committed by the transaction's Commit, a round trip each: a type of your
-// own that embeds a *pgxpool.Pool among them, so a BeginTx it overrides is
-// always called.
+// each found by type assertion — sends BEGIN with the call's first
+// statement, and a meter call's COMMIT with its last batch: no round trip of
+// their own (docs/adr/0018-fewer-round-trips-per-charge.md). A pool or a
+// ConnLender runs each call on a connection of its own; a *pgx.Conn runs
+// every call on itself, so it serves one goroutine at a time, and a call its
+// context cuts off closes it, after which every call fails as
+// store_unavailable until the caller connects again: a store shared across
+// goroutines, or one that outlives a cancelled call, takes a pool. Its
+// BeginTx then serves no call. Any other DB has each transaction opened by
+// BeginTx and committed by the transaction's Commit, a round trip each: a
+// type of your own that embeds a *pgxpool.Pool among them, so a BeginTx it
+// overrides is always called.
 type DB interface {
 	BeginTx(ctx context.Context, opts pgx.TxOptions) (pgx.Tx, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
