@@ -865,7 +865,7 @@ func (s *UsageStore) Settle(ctx context.Context, req meter.SettleRequest, onChar
 	var receipt meter.ChargeReceipt
 	err := s.retryDeadlock(ctx, retriedSettle, func() error {
 		return s.inTenantTx(ctx, req.Subject.TenantID(), func(tx pgx.Tx) error {
-			h, dbNow, err := lockHoldAt(ctx, tx, req.ReservationID)
+			h, dbNow, err := lockHoldAt(ctx, tx, req.Subject.TenantID(), req.ReservationID)
 			if errors.Is(err, pgx.ErrNoRows) {
 				receipt, err = settled(ctx, tx, req)
 				return err
@@ -902,15 +902,23 @@ func settled(ctx context.Context, tx pgx.Tx, req meter.SettleRequest) (meter.Cha
 	return replay(ctx, tx, e)
 }
 
-// lockHoldAt locks and reads the hold id, with the database's time
-// (sqlNow), in one batch; pgx.ErrNoRows when there is none.
-func lockHoldAt(ctx context.Context, tx pgx.Tx, id uuid.UUID) (hold, time.Time, error) {
+// lockHoldAt shares tenant's erase lock, then locks and reads the hold id,
+// with the database's time (sqlNow), in one batch; pgx.ErrNoRows when there
+// is none. The lock is shared first, before any row is locked, as a charge
+// shares it (readPrelude): a call that ends a hold writes the tenant's
+// aggregate or its stripe, so SetTenantBudget and an erase, which take the
+// lock alone, wait for it and it for them.
+func lockHoldAt(ctx context.Context, tx pgx.Tx, tenant, id uuid.UUID) (hold, time.Time, error) {
 	b := &pgx.Batch{}
+	b.Queue(sqlShareTenantLock, eraseLockClass, tenant)
 	b.Queue(sqlNow)
 	b.Queue(sqlLockHold, id)
 	br := tx.SendBatch(ctx, b)
 	var dbNow time.Time
 	h, err := func() (hold, error) {
+		if _, err := br.Exec(); err != nil {
+			return hold{}, err
+		}
 		if err := br.QueryRow().Scan(&dbNow); err != nil {
 			return hold{}, err
 		}
@@ -956,7 +964,7 @@ func (s *UsageStore) Release(ctx context.Context, req meter.ReleaseRequest) erro
 	subject := req.Subject
 	return s.retryDeadlock(ctx, retriedRelease, func() error {
 		return s.inTenantTx(ctx, subject.TenantID(), func(tx pgx.Tx) error {
-			h, err := scanHold(tx.QueryRow(ctx, sqlLockHold, req.ReservationID))
+			h, _, err := lockHoldAt(ctx, tx, subject.TenantID(), req.ReservationID)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil
 			}

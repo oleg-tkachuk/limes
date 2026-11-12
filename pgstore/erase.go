@@ -34,7 +34,12 @@ const (
 	// class, as the two-key form takes, made tenants collide from around a
 	// hundred thousand of them, serializing one's revokes and delegations
 	// behind another's.
-	tenantLockKey = `hashtextextended($2::text, $1)`
+	tenantLockKey = tenantLockKeyOpen + `$2` + tenantLockKeyClose
+	// tenantLockKeyOpen and tenantLockKeyClose enclose the SQL expression of
+	// the tenant whose key tenantLockKey is, for a statement that reads the
+	// tenant rather than takes it as $2.
+	tenantLockKeyOpen  = `hashtextextended((`
+	tenantLockKeyClose = `)::text, $1)`
 
 	// sqlTakeTenantLock takes the advisory lock of class $1 on tenant $2 alone,
 	// and sqlShareTenantLock shares it, until the transaction ends.
