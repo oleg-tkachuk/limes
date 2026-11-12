@@ -523,6 +523,12 @@ func (s *UsageStore) settle(ctx context.Context, op meter.StoreOperation, capID,
 	return out, err
 }
 
+// sqlShareLeaseTenantLock shares the erase lock (class $1) of the tenant
+// of capability $2's counter, as sqlShareTenantLock does; it takes none when
+// the capability has no counter.
+const sqlShareLeaseTenantLock = `SELECT pg_advisory_xact_lock_shared(` +
+	tenantLockKeyOpen + `(SELECT tenant_id FROM limes.usage WHERE capability_id = $2)` + tenantLockKeyClose + `)`
+
 // settleLease ends capID's lease in tx: what it spent is charged to its
 // ancestors and its tenant — the tenant's while the lease's period is still
 // the current one — and the requests it made counted on its ancestors; what
@@ -530,12 +536,25 @@ func (s *UsageStore) settle(ctx context.Context, op meter.StoreOperation, capID,
 // share, and counted its requests, as they were made. The lease is read,
 // then its counters locked in the one order every call takes and the
 // tenant's aggregate last, and errLeaseMoved returned should it have moved
-// between.
+// between. The tenant's erase lock is shared first, before any row is
+// locked, as every call that writes the tenant's aggregate or its stripe
+// shares it: a SetTenantBudget or an erase waits for it, and it for them,
+// whatever else either locks.
 func (s *UsageStore) settleLease(ctx context.Context, tx pgx.Tx, capID uuid.UUID, op meter.StoreOperation) (meter.Lease, error) {
 	var tenantID uuid.UUID
 	var unit string
 	var read leaseColumns
-	err := tx.QueryRow(ctx, sqlReadLease, capID).Scan(append([]any{&tenantID, &unit}, read.dest()...)...)
+	b := &pgx.Batch{}
+	b.Queue(sqlShareLeaseTenantLock, eraseLockClass, capID)
+	b.Queue(sqlReadLease, capID)
+	br := tx.SendBatch(ctx, b)
+	err := func() error {
+		if _, err := br.Exec(); err != nil {
+			return err
+		}
+		return br.QueryRow().Scan(append([]any{&tenantID, &unit}, read.dest()...)...)
+	}()
+	err = errors.Join(err, br.Close())
 	if errors.Is(err, pgx.ErrNoRows) {
 		return meter.Lease{}, meter.ErrLeaseNotFound
 	}

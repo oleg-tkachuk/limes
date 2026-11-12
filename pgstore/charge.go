@@ -617,6 +617,12 @@ SELECT EXISTS (SELECT 1 FROM limes.reservations WHERE id = $1)
 	// inserted under the id of another tenant's hold, hidden from the call
 	// by row-level security, violates.
 	constraintHoldKey = "reservations_pkey"
+
+	// constraintSettledHoldKey is limes.charges' unique index of the hold
+	// a charge settled, which the settle of a hold under the id of another
+	// tenant's settled one, hidden from its Reserve by row-level security,
+	// violates (002_meter.sql).
+	constraintSettledHoldKey = "charges_reservation"
 )
 
 // scanHold reads one row of sqlHoldColumns.
@@ -722,8 +728,21 @@ func (h hold) madeFor(req meter.ReserveRequest, unit string) bool {
 // holdKeyConflict is err, the error of a hold's insert, as
 // ErrReserveConflict when the hold's id is another tenant's.
 func holdKeyConflict(err error, id uuid.UUID) error {
+	return keyConflict(err, constraintHoldKey, id)
+}
+
+// settledKeyConflict is err, the error of a settle, as ErrReserveConflict
+// when the hold's id is that of another tenant's settled hold: its Reserve
+// could not see that charge, and held under the id.
+func settledKeyConflict(err error, id uuid.UUID) error {
+	return keyConflict(err, constraintSettledHoldKey, id)
+}
+
+// keyConflict is err as ErrReserveConflict when it is a unique violation of
+// constraint, the key a hold's id is held to.
+func keyConflict(err error, constraint string, id uuid.UUID) error {
 	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == constraintHoldKey {
+	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == constraint {
 		return fmt.Errorf("%w: %s", meter.ErrReserveConflict, id)
 	}
 	return err
@@ -877,7 +896,7 @@ func (s *UsageStore) Settle(ctx context.Context, req meter.SettleRequest, onChar
 				return meter.ErrReservationNotFound
 			}
 			receipt, err = s.settleHold(ctx, tx, req, h, onCharged)
-			return err
+			return settledKeyConflict(err, req.ReservationID)
 		})
 	})
 	return receipt, err
