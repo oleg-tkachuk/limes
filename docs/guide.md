@@ -899,13 +899,14 @@ the lease's balance; the ancestors above and the tenant are not touched.
   and the tenant and releases the rest. So do `ReleaseExpired` once it
   expires (`LeaseRequest.TTL`, `meter.DefaultLeaseTTL` unless set, at most
   the capability's own expiry), `ReleaseMatching` once its capability is
-  revoked, `DeleteUsage` and `PurgeOrphans` before its counters go, and a
+  revoked, `DeleteUsage` and `PurgeOrphans` before its counters go
+  (`DeleteUsage` before an ancestor's too), and a
   `SetTenantBudget` that resets the spend, into the period it closes.
 - **Reads.** Until settled, an ancestor's `GetUsage` and the tenant's
   aggregate show the lease as reserved and its spend not yet; the ledger,
   and `SumCharges`, have every charge at once.
-- **Not under a lease.** A capability whose ancestor holds a lease cannot
-  lease (`meter.ErrLeaseNested`), and a Biscuit copy cannot lease at all
+- **Not under a lease.** A capability whose ancestor holds an open lease
+  cannot lease (`meter.ErrLeaseNested`), and a Biscuit copy cannot lease at all
   (`limes.ErrInvalidRequest`): lease for the capability it was attenuated
   from. A charge that records an overrun, a charge of a Biscuit copy with
   limits of its own, and `Reserve`, `Settle` and `Release` go through the
@@ -919,8 +920,9 @@ and tenant's `SpentAmount`, which budget listings read, lags by at most one
 lease. The new lease holds what the old one had left plus the top-up, for
 the request's `TTL` from now, under a new `ID`. A refund of a charge taken
 before the top-up goes to the chain the settlement charged; one taken
-after, to the new lease. A top-up refused at a ceiling leaves the open
-lease as it was.
+after, to the new lease. A refused top-up leaves the open lease as it
+was. A `Lease` on a capability whose lease has expired unsettled settles
+it first and opens a new one holding the request's alone.
 
 A lease holds requests too, for a sub-agent whose every call is a `Bump`:
 
@@ -969,27 +971,31 @@ wraps and forward it, or a caller checking for it finds it gone.
 
 The issuer, the verifier and the revoker log through `log/slog`
 (`IssuerConfig.Logger`, `VerifierConfig.Logger`, `RevokerConfig.Logger`;
-nil logs to `slog.Default()`). A capability is named by its id, issuer,
-kid, subject and tenant; no line holds a token, a key or a proof.
+nil logs to `slog.Default()`). A minted capability is named by its
+`capability` id, `issuer`, `subject`, `tenant`, `client`, `expires_at` and
+`parent`; a verified one by its id, `issuer`, `kid`, `tenant`, `subject`
+and `parent`. No line holds a token, a key or a proof.
 
 | Event | Level |
 |---|---|
 | `Issue`, `Delegate`, `Reissue`, `Biscuit` minted a token | INFO |
 | The revoker's `Revoke`, `RevokeMatching`, `RevokeBiscuit` carried out, a repeat that wrote nothing among them | INFO |
-| The issuer or the revoker's store refused a request (a `Code` of limes's) | WARN |
+| The issuer or the revoker refused a request: an error whose `Category` is neither `internal` nor `unavailable` | WARN |
 | A token accepted | DEBUG |
 | A token refused after its signature verified: expired, revoked, unrecorded, another audience, no proof, outside its caveats | WARN |
 | A token refused before: absent, malformed, forged, an unknown kid | DEBUG |
-| A store, signer, key set or revocation lookup failed | ERROR |
+| A store, signer, key set or revocation lookup failed: an error of category `internal` or `unavailable`, or of none | ERROR |
 
 Only the holder of a genuine token can cause a refusal after its signature
 verified, so that is worth a warning. Garbage costs nothing to send, so it
 stays at DEBUG, where a flood of it fills no log. Each line carries `op` and
-`duration`, and a refusal its `code`, `reason` and `error`.
+`duration`, and a refusal its `code` and `reason` where the error has them,
+and `error`.
 
 A revocation's line names the capability (a Biscuit copy by its capability
-alone), or a bulk revoke's tenant and selectors, with the request's `actor`
-and `note`, and what the store answered: `already_revoked` and the `prior`
+alone), or a bulk revoke's `tenant` (or `all_tenants`) and selectors, with
+the request's `actor` and `note` (and `Revoke`'s `cascade`), and what the
+store answered: `already_revoked` and the `prior`
 disposition, or how many it `revoked`, in which `tenants`, and whether
 there is `more`. A store call that returned an error may still have
 written, so a `Revoker` given a cache clears it as on success, and its line
@@ -1586,7 +1592,8 @@ token's.
 
 - A call whose request names its tenant — `Insert`, `ListByPrincipal`,
   `Bump`, `RevokeMatching`, `Charge`, `Reserve`, `Settle`, `Release`,
-  `GetTenantBudget`, `SetTenantBudget`, the tenant erasers,
+  `Lease`, `SettleLease`, `GetTenantBudget`, `SetTenantBudget`,
+  `ListTenantReservations`, the tenant erasers,
   `Ledger.SumCharges`, `Census.ListRecords` and `Census.CountRecords` for
   one tenant — under a scope that does not admit that tenant returns
   `ErrScopeMismatch`, never `ErrNotFound` or `ErrInvalidRequest`.
@@ -1611,7 +1618,11 @@ transaction is the store's to end. `Commit` or `Rollback` on it returns
 `ErrChargeTransaction`, and a charge whose transaction the callback ended
 with SQL of its own (`COMMIT`, `ROLLBACK`, or either followed by `BEGIN`) is
 refused with `ErrChargeTransaction` and `meter.ErrOutcomeUnknown`, since
-the charge's writes went with it. A savepoint it begins is its own to end.
+the charge's writes went with it; one it left failed is
+`ErrChargeTransaction` alone, having committed nothing. A savepoint it
+begins is its own to end. A call PostgreSQL aborts to break a deadlock
+runs once more, the callback with it, the first run rolled back whole: a
+callback with an effect outside the transaction may repeat it.
 
 Every time the store writes comes from `Config.Now`. With `Config.Now` nil,
 holds' and leases' expiry is measured by the database's clock, `now()` as
@@ -1802,7 +1813,8 @@ keep the ledger in a warehouse of your own if reports must reach further.
 comes back short of its limit, as it calls `Purge`. `OlderThan` zero is
 `MinChargeRetention`, and shorter is refused. pgstore removes the charges
 its scope reaches — every tenant's under `WithAllTenants`, one tenant's
-under `WithTenant`; a scope that admits no tenant is `ErrScopeMismatch` —
+under `WithTenant`; a read-only scope, or one that admits no tenant, is
+`ErrScopeMismatch` —
 oldest first, and skips a charge a refund holds for the next batch. Run it
 on the primary. A deletion of your own, in SQL, is held to the same floor.
 
@@ -1929,16 +1941,18 @@ A store may implement `TenantRecordEraser` and `meter.TenantUsageEraser`
 `metertest` check them when present).
 
 - **`EraseTenantRecords`** revokes every capability of the tenant and
-  removes only the records `Purge` would remove: an id not on record is not
-  revoked, so erasing a record whose token may still verify would let it
-  through again. `Purge` takes the rest as they expire.
+  removes only the records `Purge` would remove at `MinPurgeRetention`,
+  each with its revocation entry and its Biscuit copies': an id not on
+  record is not revoked, so erasing a record whose token may still verify
+  would let it through again. `Purge` takes the rest as they expire.
 - **`EraseTenantUsage`** drops the tenant's counters, holds, charges and
   aggregate — its billing history, which does not come back — returns how
-  many of each it removed (`meter.EraseTenantUsageResult`), and marks the
-  tenant erased. A request verified before the erase, or a late cost of a
-  record `Purge` has not taken yet, is then refused `ErrTenantErased` (a
-  kind of `ErrRevoked`) by `Bump`, `Charge`, `Reserve` and
-  `SetTenantBudget`, and `Insert` refuses a new record of the tenant, which
+  many counters, copies' counters, holds and charges it removed
+  (`meter.EraseTenantUsageResult`), and marks the tenant erased. A request
+  verified before the erase, or a late cost of a record `Purge` has not
+  taken yet, is then refused `ErrTenantErased` (a kind of `ErrRevoked`) by
+  `Bump`, `Charge`, `Reserve`, `Lease` and `SetTenantBudget`, and `Insert`
+  refuses a new record of the tenant, which
   `Issue` and `Delegate` return as `ErrTenantGone` (410). `PurgeOrphans`
   forgets the mark once none of the tenant's records is left.
 
@@ -2009,8 +2023,9 @@ through any `crypto.Signer` whose key is Ed25519 — an
 `ed25519.PrivateKey`, or a key held in a KMS or an HSM. A key is held
 sealed (`limes.SealedKey`; `SigningKey.Private` is one already, and
 `dpop.NonceKeys` for nonce keys), so no formatting of a value holding it
-prints it. `SealKey` and `dpop.SealNonceKeys` keep copies, so clearing or
-reusing the caller's key afterwards leaves the sealed one whole. A key
+prints it. `SealKey` keeps a copy of an `ed25519.PrivateKey`, and
+`dpop.SealNonceKeys` of each key, so clearing or reusing the caller's key
+afterwards leaves the sealed one whole. A key
 that implements `ContextSigner` signs under the request's context, so a
 slow or cancelled call is bounded by the request that asked for the token.
 
