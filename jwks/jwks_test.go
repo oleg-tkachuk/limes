@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/oleg-tkachuk/limes/internal/errs"
 	"github.com/oleg-tkachuk/limes/internal/jose"
 )
 
@@ -65,12 +66,13 @@ func TestJWKS_SkipsNonEd25519(t *testing.T) {
 	}
 }
 
-// A document with no "keys" array is refused (RFC 7517 §5): only an empty
-// array withdraws every key.
+// A document with no "keys" array is refused (RFC 7517 §5), as one that is
+// not JSON or names a member twice is, each as ErrInvalidRequest: only an
+// empty array withdraws every key.
 func TestParseRequiresAKeysArray(t *testing.T) {
-	for _, raw := range []string{`null`, `{}`, `{"keys":null}`} {
-		if keys, err := Parse([]byte(raw)); err == nil || keys != nil {
-			t.Errorf("Parse(%s) = %v, %v; want an error", raw, keys, err)
+	for _, raw := range []string{`null`, `{}`, `{"keys":null}`, `not json`, `{"keys":[],"keys":[]}`} {
+		if keys, err := Parse([]byte(raw)); !errors.Is(err, errs.ErrInvalidRequest) || keys != nil {
+			t.Errorf("Parse(%s) = %v, %v; want ErrInvalidRequest", raw, keys, err)
 		}
 	}
 	if keys, err := Parse([]byte(`{"keys":[]}`)); err != nil || keys == nil || len(keys) != 0 {
