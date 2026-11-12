@@ -185,8 +185,9 @@ type ChargeFilter struct {
 	Capabilities []uuid.UUID
 }
 
-// Validate refuses a list longer than MaxChargeFilterValues, and a value
-// that names nothing: the nil uuid, an empty operation or actor.
+// Validate refuses a list longer than MaxChargeFilterValues, a value that
+// names nothing — the nil uuid, an empty operation or actor — and an
+// operation or actor that is not valid UTF-8 or holds a NUL.
 func (f ChargeFilter) Validate() error {
 	for name, n := range map[string]int{"tenants": len(f.Tenants), "ops": len(f.Ops), "actors": len(f.Actors), "capabilities": len(f.Capabilities)} {
 		if n > MaxChargeFilterValues {
@@ -340,7 +341,7 @@ type PurgeChargesRequest struct {
 }
 
 // Validate refuses a retention shorter than MinChargeRetention, other than
-// zero, and a negative Limit, as ErrInvalidRequest.
+// zero, and a negative Limit, as limes.ErrInvalidRequest.
 func (r PurgeChargesRequest) Validate() error {
 	if r.OlderThan != 0 && r.OlderThan < MinChargeRetention {
 		return refuseRequestf("purge charges: the retention is shorter than the least one", "purge charges: retention %s is shorter than %s", r.OlderThan, MinChargeRetention)

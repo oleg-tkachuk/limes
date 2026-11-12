@@ -98,7 +98,9 @@ func Features(s UsageStore) []Feature {
 // it does not implement is limes.ErrInvalidConfig, one its configuration
 // turned off ErrFeatureDisabled (which is limes.ErrInvalidConfig too), so a
 // caller tells a build that dropped a feature from a deployment that turned
-// it off. A consumer calls it once at startup with the features it uses.
+// it off. A feature this package does not define is
+// limes.ErrInvalidRequest. A consumer calls it once at startup with the
+// features it uses.
 func Require(s UsageStore, want ...Feature) error {
 	for _, w := range want {
 		if !slices.ContainsFunc(featureChecks, func(c featureCheck) bool { return c.feature == w }) {
@@ -123,7 +125,8 @@ func Require(s UsageStore, want ...Feature) error {
 // As is s as the optional interface T — meter.As[meter.Leaser](store) — or,
 // as Require refuses, limes.ErrInvalidConfig naming T when s is not one and
 // ErrFeatureDisabled when its configuration turned T's feature off: Require
-// and the type assertion after it, in one call.
+// and the type assertion after it, in one call. A T that is no interface
+// is limes.ErrInvalidRequest.
 //
 // ErrFeatureDisabled matches limes.ErrInvalidConfig too, so a caller that
 // stops its start on a build without the interface but runs on without a

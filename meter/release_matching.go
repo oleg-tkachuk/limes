@@ -35,9 +35,10 @@ type ReleaseMatchingRequest struct {
 	Limit int
 }
 
-// Validate refuses, as ErrInvalidRequest, a request with neither a tenant
-// nor AllTenants, or both, no selector, a selector AllTenants does not take,
-// or a negative limit.
+// Validate refuses, as limes.ErrInvalidRequest, a request with neither a
+// tenant nor AllTenants, or both, no selector, a selector AllTenants does
+// not take, a selector that is not valid UTF-8 or holds a NUL, or a
+// negative limit.
 func (r ReleaseMatchingRequest) Validate() error {
 	switch {
 	case r.TenantID == uuid.Nil() && !r.AllTenants:

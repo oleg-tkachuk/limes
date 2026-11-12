@@ -19,15 +19,15 @@
 // union of [Meter], [MeterReader], [TenantBudgets] and [UsageHousekeeping].
 // Every charge and request also counts against each ancestor, and every
 // Biscuit copy with limits of its own against the copy quota of the
-// capability and of each ancestor; see
-// "Transactions" below. More
-// are needed only with the feature they serve: [CopyUsageReader] to show a
-// Biscuit copy's own counters, [LedgerReader] to sum a tenant's charges,
-// [LedgerHousekeeping] to remove charges past [MinChargeRetention],
-// [MatchingReleaser] to free at once the holds of capabilities a bulk
-// revocation stopped, [Leaser] to lease a capability its budget, and
-// [TenantUsageEraser] to remove a tenant. memstore ships them in memory,
-// pgstore over PostgreSQL, and metertest checks any implementation.
+// capability and of each ancestor; see [Meter]. More are needed only with
+// the feature they serve: [CopyUsageReader] to show a Biscuit copy's own
+// counters, [LedgerReader] to sum the charges, [LedgerHousekeeping] to
+// remove charges past [MinChargeRetention], [MatchingReleaser] to free at
+// once the holds of capabilities a bulk revocation stopped,
+// [TenantReservationLister] to list a tenant's holds, [Leaser] to lease a
+// capability its budget, and [TenantUsageEraser] to remove a tenant.
+// memstore ships them in memory, pgstore over PostgreSQL, and metertest
+// checks any implementation.
 // [Features] names the optional ones a store implements and has on — a
 // [FeatureGate] says which its configuration turned off — and [Require]
 // refuses at startup a store, or a decorator over one, that lacks one the

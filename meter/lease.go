@@ -23,12 +23,12 @@ type LeaseRequest struct {
 	Amount limes.Nanos
 	// Requests to lease; a top-up's new lease holds what the open one had
 	// left and these. A lease of none covers no Bump. Negative is
-	// ErrInvalidRequest, and so is a request of no amount and no requests.
+	// limes.ErrInvalidRequest, and so is a request of no amount and no requests.
 	Requests int64
 	// TTL is how long the lease lasts unless settled, at most until its
 	// capability expires, as a hold's (Meter.Reserve); a top-up's new lease
 	// lasts this long from the top-up. 0 = DefaultLeaseTTL; negative is
-	// ErrInvalidRequest.
+	// limes.ErrInvalidRequest.
 	TTL time.Duration
 }
 
@@ -138,7 +138,7 @@ func (l Lease) RequestsRemaining() int64 {
 //     (ErrLeaseNested): a lease is drawn from the whole chain. A later
 //     minor may let a request opt in to a lease drawn from the ancestor's
 //     instead; without that, this refusal holds for all of v1.
-//   - A Biscuit copy cannot lease (ErrInvalidRequest): none of its calls
+//   - A Biscuit copy cannot lease (limes.ErrInvalidRequest): none of its calls
 //     go under a lease, which would hold its chain's budget past the
 //     copy's own ceilings.
 //

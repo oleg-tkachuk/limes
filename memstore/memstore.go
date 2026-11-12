@@ -580,7 +580,7 @@ func (s *Store) forgetErased() {
 
 // RevocationLineage implements limes.RevocationLineageLookup: IsRevoked's
 // answer, and the ancestors still on record it read, nearest first; an id
-// not on record is ErrNotFound.
+// not on record is limes.ErrNotFound.
 func (s *Store) RevocationLineage(_ context.Context, id uuid.UUID) (limes.RevocationAnswer, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -902,9 +902,9 @@ func (s *UsageStore) lineage(capID uuid.UUID) ([]limes.Capability, error) {
 	return s.records.lineageOf(capID)
 }
 
-// Bump returns ErrRequestLimitExceeded WITHOUT mutating when the
-// increment would cross the capability's ceiling or any ancestor's. A
-// rejected call must be safe to retry.
+// Bump returns limes.ErrRequestLimitExceeded WITHOUT mutating when the
+// increment would cross a copy's ceiling, the capability's or any
+// ancestor's. A rejected call must be safe to retry.
 func (s *UsageStore) Bump(_ context.Context, req meter.BumpRequest) (meter.BumpReceipt, error) {
 	if err := req.Validate(); err != nil {
 		return meter.BumpReceipt{}, err
@@ -1834,7 +1834,9 @@ func (s *UsageStore) Release(_ context.Context, req meter.ReleaseRequest) error 
 	return nil
 }
 
-// ReleaseExpired releases every hold past its expiry.
+// ReleaseExpired releases the holds past their expiry, soonest expired
+// first, at most a batch (meter.HousekeepingLimit), then settles every
+// lease past its expiry.
 func (s *UsageStore) ReleaseExpired(_ context.Context, req meter.ReleaseExpiredRequest) (meter.ReleaseExpiredResult, error) {
 	if err := req.Validate(); err != nil {
 		return meter.ReleaseExpiredResult{}, err
@@ -2239,9 +2241,10 @@ func (s *UsageStore) releaseHoldsLocked(gone func(capID uuid.UUID) bool) {
 	}
 }
 
-// DeleteUsage drops the capability's counters and releases its holds first:
-// nothing could settle or release them once it is gone, and they would keep
-// counting against its ancestors and its tenant.
+// DeleteUsage drops the capability's counters and its copies' counters,
+// first releasing its holds and settling the leases of it and of those
+// below it: nothing could settle or release them once it is gone, and they
+// would keep counting against its ancestors and its tenant.
 func (s *UsageStore) DeleteUsage(_ context.Context, req meter.DeleteUsageRequest) error {
 	if err := req.Validate(); err != nil {
 		return err
@@ -2279,8 +2282,9 @@ func (s *UsageStore) forgetAncestorLocked(gone func(uuid.UUID) bool) {
 }
 
 // EraseTenantUsage implements meter.TenantUsageEraser: it drops the
-// tenant's holds, counters, copies' counters, ledger entries and aggregate,
-// and counts what it dropped.
+// tenant's holds, leases, counters, copies' counters, ledger entries and
+// aggregate, counts what it dropped, and marks the tenant erased on the
+// Records store.
 func (s *UsageStore) EraseTenantUsage(_ context.Context, req meter.EraseTenantUsageRequest) (meter.EraseTenantUsageResult, error) {
 	if err := req.Validate(); err != nil {
 		return meter.EraseTenantUsageResult{}, err
@@ -2327,7 +2331,8 @@ func (s *UsageStore) notErasedLocked(tenant uuid.UUID) error {
 }
 
 // PurgeOrphans drops the counters of capabilities no longer on record, a
-// batch at a time, releasing their holds first.
+// batch at a time, releasing their holds and settling their leases first,
+// then forgets the erased mark of each tenant with no record left.
 func (s *UsageStore) PurgeOrphans(_ context.Context, req meter.PurgeOrphansRequest) (meter.PurgeOrphansResult, error) {
 	if err := req.Validate(); err != nil {
 		return meter.PurgeOrphansResult{}, err
