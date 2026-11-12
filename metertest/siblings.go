@@ -34,8 +34,8 @@ const (
 	// its siblings over.
 	siblingRoots = 2
 	// branches is how many children the grandchildren's race runs under,
-	// branchCeiling the ceiling of each: tighter than the root's share of
-	// one, looser than the root's whole.
+	// branchCeiling the ceiling of each: looser than an even share of the
+	// root's, tighter than its whole.
 	branches      = 2
 	branchCeiling = 2 * siblingCharge
 )

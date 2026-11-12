@@ -127,9 +127,10 @@ func asItsCategory[T comparable](code limes.Code, got T, codes []limes.Code, pin
 // the answers its mapping was written to give: a code answer maps otherwise
 // than pinned, a code not pinned — unless AcceptNewByCategory passes it —
 // and a code pinned that is not checked: which limes no longer answers, or
-// opts left out. Each failure names the entry to pin, so the first failing
-// run writes the table; failures come in the order of their codes' names,
-// which no release changes.
+// opts left out. Each failure of a code checked names the entry to pin, so
+// the first failing run writes the table; failures come in the order of
+// their codes' names, which no release changes: those of the codes checked
+// first, then those of the codes pinned and not checked.
 func CheckMapping[T comparable](t testing.TB, pinned map[limes.Code]T, answer func(limes.Code) T, opts ...Option) {
 	t.Helper()
 	c := settings(opts)

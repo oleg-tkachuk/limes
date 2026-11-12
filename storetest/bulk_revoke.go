@@ -35,7 +35,8 @@ func (f fixture) requireBulkRevoker(t *testing.T) {
 	}
 }
 
-// insertWith records c, changed by change, under session.
+// insertWith records a live root capability of subject, changed by change,
+// under session.
 func (f fixture) insertWith(t *testing.T, subject string, session string, change func(*limes.Capability)) limes.Capability {
 	t.Helper()
 	c := f.newCapability(subject, uuid.Nil(), f.now.Add(ttl))
@@ -277,10 +278,10 @@ func sortedTenants(tenants ...uuid.UUID) []uuid.UUID {
 
 // A client's capabilities in two tenants are revoked by one call across
 // tenants, and so are a session's and an identity provider's; another
-// client's, another session's and another provider's stay live in both,
-// a provider's that shares the client or the session among them when the
-// call names the subject issuer. Each selector is a fresh name, as a store's other
-// tenants may hold capabilities under the fixed ones.
+// client's, another session's and another provider's stay live in both, a
+// provider's that shares the client or the session among them when the call
+// names the subject issuer. Each selector is a fresh name, as a store's
+// other tenants may hold capabilities under the fixed ones.
 func checkRevokeMatchingAllTenants(t *testing.T, f fixture) {
 	f.requireBulkRevoker(t)
 	all := f.writeAllTenantsCtx(t)
@@ -453,9 +454,11 @@ func checkRevokeMatchingAllTenantsScope(t *testing.T, f fixture) {
 }
 
 // The census and the listing filter by the selectors RevokeMatching takes,
-// so they preview it: a count and a listing by client, session, on-behalf-of
-// or subject name the capabilities RevokeMatching then revokes, and a count
-// across tenants by client names each tenant's. Each selector is a fresh
+// so they preview it: a count and a listing by client, session,
+// on-behalf-of, subject, agent run or subject issuer, alone or together,
+// name the capabilities RevokeMatching would revoke, a revocation by client
+// revokes as many as the count named, and a count across tenants by client
+// names each tenant's. Each selector is a fresh
 // name, as a store's other tenants may hold capabilities under the fixed
 // ones.
 func checkRevokeMatchingPreview(t *testing.T, f fixture) {

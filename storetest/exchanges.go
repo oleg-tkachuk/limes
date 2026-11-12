@@ -86,8 +86,8 @@ func checkExchangeClaims(t *testing.T, f fixture) {
 	expect.That(t, len(results) == 1 && winners == 1, "racing claims returned %v with %d claimed; want one capability, claimed once", results, winners)
 }
 
-// A claim names a capability on record in the key's tenant, and a key
-// names a tenant, an issuer and a token.
+// A claim names a capability on record in the key's tenant and the token's
+// expiry, and a key names a tenant, an issuer and a token.
 func checkExchangeRefusals(t *testing.T, f fixture) {
 	f.requireExchanges(t)
 	live := f.live(t, "agent:claimed", uuid.Nil())

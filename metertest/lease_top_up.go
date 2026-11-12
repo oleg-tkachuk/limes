@@ -85,7 +85,8 @@ func checkLeaseTopUpRoutesRefunds(t *testing.T, f fixture) {
 
 // A capability delegated from the leaseholder goes on charging under its
 // lease once topped up: the lease is found by the leaseholder, not by id,
-// and what the descendant charged before the top-up was settled with it.
+// and what the descendant charged before the top-up was settled with it. A
+// lease of the descendant is still ErrLeaseNested.
 func checkLeaseTopUpKeepsCoveringDescendants(t *testing.T, f fixture) {
 	l := f.leaser(t)
 	f.lease(t, l, f.childSubject(), leased)
