@@ -224,6 +224,37 @@ func TestMemoryReplayCacheBoundsTheWhole(t *testing.T) {
 	}
 }
 
+// A proof dated early in its window holds its holder's share as long as a
+// fresh one does, from the check: backdating proofs does not raise the rate
+// a share caps.
+func TestVerifyHoldsABackdatedProofsShareForTheWholeWindow(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	clock := func() time.Time { return now }
+	key := dpopKeys(t)["Ed25519"]
+	v := newVerifier(t, VerifierConfig{
+		Replay: newReplay(t, MemoryReplayCacheConfig{EntriesPerHolder: 1, Now: clock}),
+		Now:    clock,
+	})
+	verify := func(jti string, iat time.Time) error {
+		proof := craftProof(t, key, iat, func(_ *proofHeader, c *proofClaims) { c.JTI = jti }, nil)
+		return v.Verify(context.Background(), Request{
+			Proof: Proof{JWT: proof, Method: "POST", URL: dpopURL}, Token: "the-token", JKT: boundJKT(t, key), Holder: testHolder,
+		})
+	}
+	backdated := func() time.Time { return now.Add(-DefaultWindow + time.Second) }
+	if err := verify("first", backdated()); err != nil {
+		t.Fatalf("the first backdated proof: %v", err)
+	}
+	now = now.Add(DefaultWindow) // past iat+window+ReplayClockSkew, short of the check's
+	if err := verify("second", backdated()); !errors.Is(err, ErrReplayQuota) {
+		t.Fatalf("a second backdated proof within the window of the first check: err = %v, want ErrReplayQuota", err)
+	}
+	now = now.Add(ReplayClockSkew)
+	if err := verify("third", backdated()); err != nil {
+		t.Errorf("a proof once the first check's window and skew passed: %v", err)
+	}
+}
+
 // A holder past its share of the replay cache is refused with
 // ErrReplayQuota, not as a replay, and the cache logs the holder at WARN: a
 // client sending proofs faster than the cache keeps room for them is told so,

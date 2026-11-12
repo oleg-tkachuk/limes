@@ -348,7 +348,7 @@ type Request struct {
 // ReplayEntry is one proof id to record: the id of a proof from the key
 // with thumbprint JKT, counted against Holder's share, remembered until
 // ExpiresAt — ReplayClockSkew past the last instant the verifier accepts the
-// proof.
+// proof, and no less than the window plus ReplayClockSkew past the check.
 type ReplayEntry struct {
 	JKT, JTI  string
 	Holder    string
@@ -537,8 +537,8 @@ func (v *Verifier) check(ctx context.Context, p Proof, holder string, what prese
 	if err := checkForRequest(claims, p, what, v.cfg.MatchPathOnly); err != nil {
 		return CheckedProof{}, err
 	}
-	window := v.cfg.Window
-	iat, err := issuedWithin(claims.IAT, v.cfg.Now(), window)
+	window, now := v.cfg.Window, v.cfg.Now()
+	iat, err := issuedWithin(claims.IAT, now, window)
 	if err != nil {
 		return CheckedProof{}, err
 	}
@@ -548,9 +548,21 @@ func (v *Verifier) check(ctx context.Context, p Proof, holder string, what prese
 	// Remembered past the last instant it is accepted, by more than the
 	// cache's clock can lag the verifier's: at iat+window it is still
 	// accepted, and a cache that dropped it then would let it through again.
+	// And for no less than a whole window from now, however early its iat:
+	// a holder's share counts the id as long as it is kept, so a backdated
+	// proof would otherwise free its share in seconds and lift the rate the
+	// share caps.
 	return CheckedProof{entry: ReplayEntry{
-		JKT: thumb, JTI: claims.JTI, Holder: holder, ExpiresAt: iat.Add(window).Add(ReplayClockSkew),
+		JKT: thumb, JTI: claims.JTI, Holder: holder, ExpiresAt: later(iat, now).Add(window).Add(ReplayClockSkew),
 	}}, nil
+}
+
+// later is whichever of a and b comes last.
+func later(a, b time.Time) time.Time {
+	if a.After(b) {
+		return a
+	}
+	return b
 }
 
 // checkPresented refuses a check by a Verifier NewVerifier did not make,
@@ -777,13 +789,12 @@ func decodeSegment(seg string, v any) error {
 // may back any number of proofs until it expires, so they bound how early a
 // proof is signed, not how many are.
 //
-// A holder's share caps its rate: an id is kept until ReplayClockSkew past
-// the end of its proof's window, which starts at the proof's iat, so one
-// holder sending fresh proofs passes at most EntriesPerHolder of them over
+// A holder's share caps its rate: an id is kept until its ExpiresAt, at
+// least the window plus ReplayClockSkew past its check however early the
+// proof is dated, so one holder passes at most EntriesPerHolder proofs over
 // the window plus ReplayClockSkew — with the defaults 1,000 per 65 s, about
-// 15 a second. A proof dated earlier within the window is kept for less,
-// down to ReplayClockSkew. Past the share Seen returns ErrReplayQuota and
-// logs the holder at WARN.
+// 15 a second. Past the share Seen returns ErrReplayQuota and logs the
+// holder at WARN.
 //
 // It keys a proof id by the key that signed it (jkt, jti) across holders,
 // where redisreplay keys it within its holder: the same id under one key for

@@ -401,7 +401,7 @@ MemoryReplayCache is a bounded in-process ReplayCache. A deployment with several
 
 Every holder gets a share of the cache of its own (EntriesPerHolder), so one capability cannot fill it with proofs and lock every other one out — not even a Biscuit whose copies are bound to as many keys as their holder likes, since they are one capability: past its share, only its proofs are refused. It does not stop one tenant holding many capabilities — Delegate mints them freely — from filling the cache with its proofs; past MaxEntries the cache refuses every new id rather than forget one, since a forgotten id could be replayed. Size MaxEntries for the busiest window. Server nonces (VerifierConfig.Nonces) do not bound it: an HMACNonces nonce may back any number of proofs until it expires, so they bound how early a proof is signed, not how many are.
 
-A holder's share caps its rate: an id is kept until ReplayClockSkew past the end of its proof's window, which starts at the proof's iat, so one holder sending fresh proofs passes at most EntriesPerHolder of them over the window plus ReplayClockSkew — with the defaults 1,000 per 65 s, about 15 a second. A proof dated earlier within the window is kept for less, down to ReplayClockSkew. Past the share Seen returns ErrReplayQuota and logs the holder at WARN.
+A holder's share caps its rate: an id is kept until its ExpiresAt, at least the window plus ReplayClockSkew past its check however early the proof is dated, so one holder passes at most EntriesPerHolder proofs over the window plus ReplayClockSkew — with the defaults 1,000 per 65 s, about 15 a second. Past the share Seen returns ErrReplayQuota and logs the holder at WARN.
 
 It keys a proof id by the key that signed it (jkt, jti) across holders, where redisreplay keys it within its holder: the same id under one key for two capabilities is refused here and accepted there. Neither is a replay — ath binds a proof to one token, and so to one holder.
 
@@ -598,7 +598,7 @@ type ReplayEntry struct {
 }
 ```
 
-ReplayEntry is one proof id to record: the id of a proof from the key with thumbprint JKT, counted against Holder's share, remembered until ExpiresAt — ReplayClockSkew past the last instant the verifier accepts the proof.
+ReplayEntry is one proof id to record: the id of a proof from the key with thumbprint JKT, counted against Holder's share, remembered until ExpiresAt — ReplayClockSkew past the last instant the verifier accepts the proof, and no less than the window plus ReplayClockSkew past the check.
 
 <sub>[dpop/dpop.go](../../dpop/dpop.go)</sub>
 <a id="dpop.Request"></a>

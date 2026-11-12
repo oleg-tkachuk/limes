@@ -461,8 +461,9 @@ server nonces across the switch.
 ### The replay cache's share caps a holder's rate
 
 Every replay cache gives each holder the same share of live ids,
-`EntriesPerHolder`, and keeps an id for `Window` plus
-`dpop.ReplayClockSkew` (5s). So one holder passes at most
+`EntriesPerHolder`, and keeps an id for at least `Window` plus
+`dpop.ReplayClockSkew` (5s) from its check, however early the proof is
+dated. So one holder passes at most
 
 ```text
 proofs per second ≤ EntriesPerHolder / (Window + ReplayClockSkew)
