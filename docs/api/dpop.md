@@ -802,7 +802,7 @@ The verifiers' clocks must agree to within dpop.ReplayClockSkew. An id is kept u
 
 #### Memory
 
-EntriesPerHolder bounds each holder, and so its rate: an id is kept until dpop.ReplayClockSkew past the end of its proof's window, which starts at the proof's iat, so one holder sending fresh proofs passes at most EntriesPerHolder of them over the window plus dpop.ReplayClockSkew — with the defaults 1,000 per 65 s, about 15 a second. A proof dated earlier within the window is kept for less, down to dpop.ReplayClockSkew. Past the bound Seen returns dpop.ErrReplayQuota and logs the holder at WARN. Nothing bounds the holders. Bound the whole cache with Redis's maxmemory and the noeviction policy: past it a write fails, Seen returns the error and the proof is refused. An eviction policy would forget live ids, and a forgotten id can be replayed.
+EntriesPerHolder bounds each holder, and so its rate: an id is kept until its dpop.ReplayEntry.ExpiresAt, at least the window plus dpop.ReplayClockSkew past its check however early the proof is dated, so one holder passes at most EntriesPerHolder proofs over the window plus dpop.ReplayClockSkew — with the defaults 1,000 per 65 s, about 15 a second. Past the bound Seen returns dpop.ErrReplayQuota and logs the holder at WARN. Nothing bounds the holders. Bound the whole cache with Redis's maxmemory and the noeviction policy: past it a write fails, Seen returns the error and the proof is refused. An eviction policy would forget live ids, and a forgotten id can be replayed.
 
 #### Failover
 
