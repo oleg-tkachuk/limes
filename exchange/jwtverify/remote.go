@@ -149,8 +149,13 @@ type remote struct {
 	lastRefetch time.Time
 }
 
-// transform reads a fetched JWK Set document, recording when it was read.
+// transform reads a fetched JWK Set document, no larger than
+// jwks.DefaultMaxDocumentBytes, as jwks.Remote caps the issuer's own,
+// recording when it was read. The cap is limes's: jwx's own read limit is
+// one setting of the whole process, which any jwk.Configure in the binary
+// moves.
 func (r *remote) transform(ctx context.Context, res *http.Response) (jwk.Set, error) {
+	res.Body = http.MaxBytesReader(nil, res.Body, jwks.DefaultMaxDocumentBytes)
 	set, err := (&jwk.Transformer{}).Transform(ctx, res)
 	if err != nil {
 		return nil, err
@@ -251,12 +256,16 @@ func (r *remote) refetch(ctx context.Context, reason string) (jwk.Set, error) {
 		}
 		return set, nil
 	}
+	previous := r.lastRefetch
 	r.lastRefetch = now
 	r.log.InfoContext(ctx, "jwtverify: fetching the identity provider's keys", slog.String("reason", reason))
 	if err := r.ctrl.Refresh(ctx, r.url); err != nil {
 		if ctx.Err() == nil {
 			// A caller giving up is no failure of the endpoint's.
 			r.failed(err)
+		} else {
+			// Nor a fetch: the next token's starts at once.
+			r.lastRefetch = previous
 		}
 		r.log.WarnContext(ctx, "jwtverify: fetching the identity provider's keys failed", slog.String("reason", reason), slog.Any("error", err))
 		return nil, errs.Errorf("%w: jwtverify: fetch the identity provider's keys at %s: %w", jwks.ErrUnavailable, r.endpoint, err)

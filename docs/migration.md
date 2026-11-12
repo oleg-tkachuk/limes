@@ -108,6 +108,10 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
   `ErrInvalidScope` (`invalid_scope`, 400), where any whitespace split
   tokens and the rest were kept as sent. Send scopes separated by single
   spaces.
+- `jwtverify.RemoteKeys` refuses a key set document past
+  `jwks.DefaultMaxDocumentBytes` (1 MiB), as `jwks.Remote` does, where
+  jwx read up to its own process-wide limit: the fetch fails, and the
+  keys are `jwks.ErrUnavailable` until a smaller document is served.
 - The introspection handler asks the verifier about a token only for the
   audiences the client serves (`limes.Verifier.IntrospectFor`, since
   #1041), so a token of another audience answers `active: false` before
