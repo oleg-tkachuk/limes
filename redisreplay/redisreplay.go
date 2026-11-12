@@ -33,14 +33,17 @@
 //
 // # Memory
 //
-// EntriesPerHolder bounds each holder, and so its rate: an id is kept for the
-// verifier's window plus dpop.ReplayClockSkew, so one holder passes at most
-// EntriesPerHolder proofs over that span — with the defaults 1,000 per 65 s,
-// about 15 a second. Past it Seen returns dpop.ErrReplayQuota and logs the
-// holder at WARN. Nothing bounds the holders. Bound the
-// whole cache with Redis's maxmemory and the noeviction policy: past it a
-// write fails, Seen returns the error and the proof is refused. An eviction
-// policy would forget live ids, and a forgotten id can be replayed.
+// EntriesPerHolder bounds each holder, and so its rate: an id is kept until
+// dpop.ReplayClockSkew past the end of its proof's window, which starts at
+// the proof's iat, so one holder sending fresh proofs passes at most
+// EntriesPerHolder of them over the window plus dpop.ReplayClockSkew — with
+// the defaults 1,000 per 65 s, about 15 a second. A proof dated earlier
+// within the window is kept for less, down to dpop.ReplayClockSkew. Past the
+// bound Seen returns dpop.ErrReplayQuota and logs the holder at WARN.
+// Nothing bounds the holders. Bound the whole cache with Redis's maxmemory
+// and the noeviction policy: past it a write fails, Seen returns the error
+// and the proof is refused. An eviction policy would forget live ids, and a
+// forgotten id can be replayed.
 //
 // # Failover
 //
@@ -83,7 +86,8 @@ type Config struct {
 	// Now is the clock. Nil: time.Now.
 	Now func() time.Time
 	// Logger logs each id refused because its holder's share is full, at
-	// WARN. Nil: slog.Default().
+	// WARN, and a script answer the cache does not know, at ERROR. Nil:
+	// slog.Default().
 	Logger *slog.Logger
 }
 
