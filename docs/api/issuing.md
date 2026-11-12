@@ -265,7 +265,7 @@ Issue mints a top-level capability. A tenant the store cannot mint for is its re
 func (i *Issuer) Reissue(ctx context.Context, id uuid.UUID) (IssueResult, error)
 ```
 
-Reissue signs the capability on record under id again, and records nothing: an exchange that issues one capability per subject token hands it out again without keeping its token (ExchangeStore). The claims are the record's, so under the same key the token is the one Issue returned. It refuses an id not on record (ErrNotFound), a capability expired (ErrExpired) or revoked (ErrRevoked), and an issuer whose store reads no record (a RecordReader, as every Store is) with ErrInvalidRequest. A revocation lookup that fails is ErrRevocationUnavailable.
+Reissue signs the capability on record under id again, and records nothing: an exchange that issues one capability per subject token hands it out again without keeping its token (ExchangeStore). The claims are the record's, so under the same key the token is the one Issue returned. It refuses an id not on record (ErrNotFound), a capability expired (ErrExpired) or revoked (ErrRevoked), and an issuer whose store reads no record (a RecordReader, as every Store is) with ErrInvalidConfig. A revocation lookup that fails is ErrRevocationUnavailable.
 
 <sub>[issuer.go](../../issuer.go)</sub>
 <a id="limes.IssuerConfig"></a>

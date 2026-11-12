@@ -76,6 +76,10 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
   and is `internal`, where it was 502 and `unavailable`: an upstream that
   names no lineage is a configuration to fix, not a failure a retry gets
   past. A client that retried on `unavailable` no longer retries it.
+- `Issuer.Reissue` with an `IssuerConfig.Store` that is no `RecordReader`
+  refuses with `ErrInvalidConfig` (500), where it refused with
+  `ErrInvalidRequest` (400): the issuer's store, not the request, is what
+  is wrong.
 
 ## pgstore/v0.76.0
 

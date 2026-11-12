@@ -109,7 +109,7 @@ func TestReissueNeedsAStoreThatReadsRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := issuer.Reissue(context.Background(), issued.ID); !errors.Is(err, limes.ErrInvalidRequest) {
-		t.Errorf("Reissue through a store that reads no record: err = %v, want ErrInvalidRequest", err)
+	if _, err := issuer.Reissue(context.Background(), issued.ID); !errors.Is(err, limes.ErrInvalidConfig) || errors.Is(err, limes.ErrInvalidRequest) {
+		t.Errorf("Reissue through a store that reads no record: err = %v, want ErrInvalidConfig alone", err)
 	}
 }
