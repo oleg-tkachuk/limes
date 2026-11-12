@@ -30,7 +30,9 @@ const detailType = "type"
 
 // IntrospectionConfig configures an IntrospectionHandler.
 type IntrospectionConfig struct {
-	// Verifier introspects the tokens (limes.Verifier.Introspect). Required.
+	// Verifier introspects the tokens: limes.Verifier.IntrospectFor with
+	// the client's Audiences, limes.Verifier.Introspect under AnyAudience.
+	// Required.
 	Verifier *limes.Verifier
 	// Authenticate authenticates the resource server or gateway asking, as
 	// RFC 7662 §2.1 requires, so the endpoint is no oracle for whoever holds
@@ -160,7 +162,13 @@ func (h *IntrospectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	log = log.With(slog.String("client", client.ID))
-	got, err := h.cfg.Verifier.Introspect(r.Context(), token)
+	served := h.served(client)
+	if !h.cfg.AnyAudience && len(served) == 0 {
+		log.WarnContext(r.Context(), "introspection: the client serves no audience; answered inactive")
+		writeJSON(w, http.StatusOK, introspection{Active: false}, log)
+		return
+	}
+	got, err := h.introspect(r.Context(), token, served)
 	switch {
 	case errors.Is(err, limes.ErrUnauthenticated):
 		log.WarnContext(r.Context(), "introspection: token inactive", slog.Any("reason", err))
@@ -176,23 +184,30 @@ func (h *IntrospectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		// would refuse every request as if every token were revoked.
 		log.ErrorContext(r.Context(), "introspection failed", slog.Any("error", err))
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Code: codeServerError}, log)
-	case !h.mayAsk(client, got.Capability.Audience):
-		log.WarnContext(r.Context(), "introspection: token for an audience the client may not ask about; answered inactive",
-			slog.String("capability", got.Capability.ID.String()))
-		writeJSON(w, http.StatusOK, introspection{Active: false}, log)
 	default:
 		h.answerActive(r.Context(), w, log, got)
 	}
 }
 
-// mayAsk reports whether client may learn about a token of audience: any
-// client, under AnyAudience, or one serving an audience the token names.
-func (h *IntrospectionHandler) mayAsk(client Client, audience []string) bool {
+// served is the non-empty audiences client serves, none under AnyAudience.
+func (h *IntrospectionHandler) served(client Client) []string {
 	if h.cfg.AnyAudience {
-		return true
+		return nil
 	}
-	served := h.cfg.Audiences(client)
-	return slices.ContainsFunc(audience, func(aud string) bool { return slices.Contains(served, aud) })
+	return slices.DeleteFunc(slices.Clone(h.cfg.Audiences(client)), func(aud string) bool { return aud == "" })
+}
+
+// introspect asks the verifier about token: about a token of any audience
+// under AnyAudience, otherwise only about one naming an audience in served.
+// The verifier refuses any other token as limes.ErrAudienceMismatch before
+// its revocation lookup, so the answer for a foreign token is the same
+// whether the revocation store can answer or not, and whether its signature
+// verified or not.
+func (h *IntrospectionHandler) introspect(ctx context.Context, token string, served []string) (limes.Introspection, error) {
+	if h.cfg.AnyAudience {
+		return h.cfg.Verifier.Introspect(ctx, token)
+	}
+	return h.cfg.Verifier.IntrospectFor(ctx, limes.IntrospectRequest{Token: token, Audiences: served})
 }
 
 // answerActive writes the answer for an active token: its standard

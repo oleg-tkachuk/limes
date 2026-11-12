@@ -576,7 +576,9 @@ HandlerConfig configures a Handler.
 
 ```go
 type IntrospectionConfig struct {
-	// Verifier introspects the tokens (limes.Verifier.Introspect). Required.
+	// Verifier introspects the tokens: limes.Verifier.IntrospectFor with
+	// the client's Audiences, limes.Verifier.Introspect under AnyAudience.
+	// Required.
 	Verifier *limes.Verifier
 	// Authenticate authenticates the resource server or gateway asking, as
 	// RFC 7662 §2.1 requires, so the endpoint is no oracle for whoever holds

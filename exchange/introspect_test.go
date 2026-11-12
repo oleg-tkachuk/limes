@@ -167,6 +167,82 @@ func TestIntrospectionOutage(t *testing.T) {
 	}
 }
 
+// During a revocation store outage, a client asking about a token of an
+// audience it does not serve is answered active: false alike for a genuine
+// token and a forged one, so the answer tells it nothing of which foreign
+// tokens are genuine; a token of an audience it serves still answers the
+// outage as the server's failure.
+func TestIntrospectionOutageTellsNothingOfForeignTokens(t *testing.T) {
+	f := newFixture(t, fixtureConfig{})
+	res, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, typeAccessToken, accessClaims())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys, err := jwks.NewStatic(jwks.StaticConfig{Keys: map[string]ed25519.PublicKey{f.signingKID: f.signingKey}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := limes.NewVerifier(limes.VerifierConfig{Keys: keys, Revocations: failingRevocations{}, AllowUnrecorded: true, TrustedIssuers: []string{limesIssuer}, Now: clock})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := func(audience string) http.Handler {
+		h, err := NewIntrospectionHandler(IntrospectionConfig{
+			Verifier:     v,
+			Authenticate: func(*http.Request) (Client, error) { return client(), nil },
+			Audiences:    func(Client) []string { return []string{audience} },
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return h
+	}
+	dot := strings.LastIndexByte(res.Token, '.') + 1
+	swap := "A"
+	if res.Token[dot:dot+1] == swap {
+		swap = "B"
+	}
+	forged := res.Token[:dot] + swap + res.Token[dot+1:]
+	foreign := handler("https://elsewhere.example.com")
+	answers := map[string]string{}
+	for name, token := range map[string]string{"a genuine token": res.Token, "a forged token": forged} {
+		w := post(t, foreign, url.Values{paramToken: {token}}, nil)
+		if w.Code != http.StatusOK {
+			t.Errorf("%s of another audience: status %d: %s", name, w.Code, w.Body)
+		}
+		answers[name] = w.Body.String()
+	}
+	if answers["a genuine token"] != answers["a forged token"] {
+		t.Errorf("a genuine token answered %s, a forged one %s; want the same", answers["a genuine token"], answers["a forged token"])
+	}
+	if w := post(t, handler(toolResource), url.Values{paramToken: {res.Token}}, nil); w.Code != http.StatusInternalServerError {
+		t.Errorf("a token of the client's audience: status %d, want 500: %s", w.Code, w.Body)
+	}
+}
+
+// A client that serves no audience learns about no token.
+func TestIntrospectionOfAClientServingNoAudience(t *testing.T) {
+	f := newFixture(t, fixtureConfig{})
+	res, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, typeAccessToken, accessClaims())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, served := range map[string][]string{"none": nil, "an empty one": {""}} {
+		h, err := NewIntrospectionHandler(IntrospectionConfig{
+			Verifier:     f.verifier,
+			Authenticate: func(*http.Request) (Client, error) { return client(), nil },
+			Audiences:    func(Client) []string { return served },
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		w, body := introspect(t, h, url.Values{paramToken: {res.Token}})
+		if w.Code != http.StatusOK || len(body) != 1 || body["active"] != false {
+			t.Errorf("%s: status %d, body %v; want {active: false} alone", name, w.Code, body)
+		}
+	}
+}
+
 // A resource server the endpoint authenticated but does not allow to
 // introspect is answered 400 unauthorized_client, wrapped or not, and logged
 // at WARN as a refusal (RFC 7662 §2.3, RFC 6749 §5.2); a server error of
