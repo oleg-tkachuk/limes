@@ -419,14 +419,8 @@ func ProblemOf(err error) (Problem, bool) {
 	}
 	p := problemOfRule(cr)
 	// A refusal is answered as one, unless its code has a status of its
-	// own: a meter sentinel in a refusal's family that is no refusal. An
-	// error naming a refusal's code outside that refusal's family is
-	// answered as the refusal its code names.
-	rr, refused := ruleFor(err)
-	if !refused && cr.status == 0 {
-		rr, refused = ruleFor(cr.sentinel)
-	}
-	if refused && cr.status == 0 {
+	// own: a meter sentinel in a refusal's family that is no refusal.
+	if rr, refused := refusalOf(err); refused && cr.status == 0 {
 		kind := rr.answer.slug
 		if rr.reason != "" {
 			kind = string(rr.reason)
@@ -450,6 +444,19 @@ func DetailCodes() []Code {
 // problemOfRule is the problem of a code with a status of its own.
 func problemOfRule(r codeRule) Problem {
 	return Problem{Type: ProblemTypeURI(string(r.code)), Title: r.title, Status: r.status, Code: r.code, Category: r.category}
+}
+
+// refusalOf is the refusal err is answered as: the family of its code, when
+// that is a refusal's — one with no status of its own — so the answer is the
+// code's, whatever other family err is in, as ProblemOfCode gives it;
+// otherwise the first refusal err is in.
+func refusalOf(err error) (refusalRule, bool) {
+	if cr, ok := codeRuleFor(err); ok && cr.status == 0 {
+		if rr, ok := ruleFor(cr.sentinel); ok {
+			return rr, true
+		}
+	}
+	return ruleFor(err)
 }
 
 // ProblemOfCode is the problem ProblemOf answers an error with code with,

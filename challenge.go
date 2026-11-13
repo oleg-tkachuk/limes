@@ -139,8 +139,9 @@ var internalError = refusal{status: http.StatusInternalServerError, slug: "inter
 // ErrMalformedAuthorization, ErrNotFound, a store's own failure — is
 // answered 500, without its text.
 func (v *Verifier) ErrorResponse(ctx context.Context, err error, scheme AuthScheme) ErrorResponse {
-	// The first rule err matches answers it; none, the server's fault.
-	rule, ok := ruleFor(err)
+	// The refusal of err's code answers it, or the first err matches
+	// (refusalOf); none, the server's fault.
+	rule, ok := refusalOf(err)
 	if !ok {
 		return internalAnswer()
 	}

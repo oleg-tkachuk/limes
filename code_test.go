@@ -534,3 +534,21 @@ func TestACodeNamedOutsideItsFamily(t *testing.T) {
 		}
 	}
 }
+
+// An error naming a refusal's code is answered as that refusal, whatever
+// other refusal's family it is in: ProblemOf and ErrorResponse give its
+// type, reason and status from its code, never the family's beside the
+// code's own name.
+func TestARefusalsCodeIsAnsweredAsItsOwnRefusal(t *testing.T) {
+	v := &Verifier{}
+	err := coded{CodeNoCredentials, ErrBudgetExceeded}
+	want, _ := ProblemOfCode(CodeNoCredentials)
+	p, ok := ProblemOf(err)
+	if !ok || p.Status != want.Status || p.Type != want.Type || p.Reason != want.Reason {
+		t.Errorf("ProblemOf(no_credentials in the budget's family) = %+v, want %+v", p, want)
+	}
+	resp := v.ErrorResponse(t.Context(), err, AuthSchemeBearer)
+	if resp.Status != want.Status || resp.Problem.Type != want.Type || resp.Problem.Code != CodeNoCredentials {
+		t.Errorf("ErrorResponse(no_credentials in the budget's family) = %d %+v, want %d %+v", resp.Status, resp.Problem, want.Status, want)
+	}
+}
