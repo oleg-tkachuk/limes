@@ -10,10 +10,10 @@ import (
 	"time"
 	"uuid"
 
-	"github.com/lestrrat-go/jwx/v3/jwa"
-	"github.com/lestrrat-go/jwx/v3/jwk"
-	"github.com/lestrrat-go/jwx/v3/jws"
-	"github.com/lestrrat-go/jwx/v3/jwt"
+	"github.com/lestrrat-go/jwx/v4/jwa"
+	"github.com/lestrrat-go/jwx/v4/jwk"
+	"github.com/lestrrat-go/jwx/v4/jws"
+	"github.com/lestrrat-go/jwx/v4/jwt"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/jwks"
@@ -175,8 +175,8 @@ func TestJWXReadsWhomACapabilityActsFor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var act map[string]any
-	if err := tok.Get(claimActor, &act); err != nil {
+	act, err := jwt.Get[map[string]any](tok, claimActor)
+	if err != nil {
 		t.Fatalf("jwx reads no act: %v", err)
 	}
 	var chain []string

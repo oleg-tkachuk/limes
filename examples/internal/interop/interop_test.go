@@ -23,10 +23,11 @@ import (
 	"uuid"
 
 	gojwt "github.com/golang-jwt/jwt/v5"
-	"github.com/lestrrat-go/jwx/v3/jwa"
-	"github.com/lestrrat-go/jwx/v3/jwk"
-	"github.com/lestrrat-go/jwx/v3/jws"
-	"github.com/lestrrat-go/jwx/v3/jwt"
+	"github.com/jwx-go/jwkfetch/v4"
+	"github.com/lestrrat-go/jwx/v4/jwa"
+	"github.com/lestrrat-go/jwx/v4/jwk"
+	"github.com/lestrrat-go/jwx/v4/jws"
+	"github.com/lestrrat-go/jwx/v4/jwt"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/dpop"
@@ -167,7 +168,7 @@ func (f *fixture) issue(t *testing.T, jkt string) limes.IssueResult {
 // fetchKeys is the issuer's JWKS as jwx reads it from the endpoint.
 func (f *fixture) fetchKeys(t *testing.T) jwk.Set {
 	t.Helper()
-	set, err := jwk.Fetch(t.Context(), f.jwksURL)
+	set, err := jwkfetch.NewClient().Fetch(t.Context(), f.jwksURL)
 	if err != nil {
 		t.Fatalf("jwx fetching the JWKS: %v", err)
 	}
@@ -270,8 +271,8 @@ func TestJWXReadsTheCapabilityClaims(t *testing.T) {
 // getClaim reads a private claim into dst through its JSON, as a reader that
 // knows nothing of limes's types would.
 func getClaim(tok jwt.Token, name string, dst any) error {
-	var v any
-	if err := tok.Get(name, &v); err != nil {
+	v, err := jwt.Get[any](tok, name)
+	if err != nil {
 		return err
 	}
 	raw, err := json.Marshal(v)
@@ -328,7 +329,7 @@ func TestLimesAcceptsJWXProofs(t *testing.T) {
 	} {
 		t.Run(tc.alg.String(), func(t *testing.T) {
 			f := newFixture(t)
-			pub, err := jwk.Import(tc.key.Public())
+			pub, err := jwk.Import[jwk.Key](tc.key.Public())
 			if err != nil {
 				t.Fatal(err)
 			}
