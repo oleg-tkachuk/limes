@@ -2,6 +2,7 @@ package jwtverify
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -13,44 +14,63 @@ import (
 	"github.com/oleg-tkachuk/limes/jwks"
 )
 
-// cancelledFetchWait is how long the fetch a test cancels runs before its
-// caller gives up on it.
+// cancelledFetchWait is how long a test's caller waits on a fetch before
+// giving up on it.
 const cancelledFetchWait = 50 * time.Millisecond
 
-// A token's fetch its caller gave up on does not count as one: the next
-// token whose kid is unknown fetches at once, rather than wait out
-// remoteMinRefetchInterval with the set it lacks the kid of.
-func TestRemoteKeysACancelledFetchHoldsOffNoFetch(t *testing.T) {
+// givingUpCallers is how many tokens with an unknown kid give up on their
+// fetch in a row in TestRemoteKeysACancelledFetchStillCounts.
+const givingUpCallers = 5
+
+// A token's fetch its caller gave up on still runs, as httprc sends it
+// anyway, and counts: tokens that give up one after another within
+// remoteMinRefetchInterval reach the endpoint once, and the next token
+// waits for that fetch and takes its set rather than start another.
+func TestRemoteKeysACancelledFetchStillCounts(t *testing.T) {
 	p := newIDP(t)
 	srv := newJWKSServer(t, p.keys)
 	keys, _, _ := remoteFixture(t, srv)
-	// The endpoint holds the fetches that arrive while held until let go,
-	// and counts those that arrive after.
-	var held atomic.Bool
-	var after atomic.Int64
+	// The endpoint holds every fetch until let go, counting them.
+	var reached atomic.Int64
 	release := make(chan struct{})
 	serve := srv.Config.Handler
 	srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if held.Load() {
-			<-release
-		} else {
-			after.Add(1)
-		}
+		reached.Add(1)
+		<-release
 		serve.ServeHTTP(w, req)
 	})
-	held.Store(true)
-	ctx, cancel := context.WithTimeout(t.Context(), cancelledFetchWait)
-	defer cancel()
-	if _, err := keys.refetch(ctx); err == nil {
-		t.Fatal("a fetch its caller gave up on returned keys")
+	// A regression leaves fetches held: let them go when the test ends.
+	t.Cleanup(func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	})
+	for range givingUpCallers {
+		ctx, cancel := context.WithTimeout(t.Context(), cancelledFetchWait)
+		_, err := keys.refetch(ctx)
+		cancel()
+		if !errors.Is(err, jwks.ErrUnavailable) || !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("a token that gave up on its fetch: err = %v, want ErrUnavailable wrapping its deadline", err)
+		}
 	}
-	held.Store(false)
+	got := make(chan error, 1)
+	go func() {
+		_, err := keys.refetch(t.Context())
+		got <- err
+	}()
 	close(release)
-	if _, err := keys.refetch(t.Context()); err != nil {
-		t.Fatalf("the next token's fetch: %v", err)
+	select {
+	case err := <-got:
+		if err != nil {
+			t.Fatalf("the token after them: %v", err)
+		}
+	case <-time.After(remoteKeysWait):
+		t.Fatal("the token after them never got the keys")
 	}
-	if after.Load() == 0 {
-		t.Error("the next token's fetch was held off by one its caller gave up on")
+	if n := reached.Load(); n != 1 {
+		t.Errorf("%d fetches reached the endpoint, want 1", n)
 	}
 }
 

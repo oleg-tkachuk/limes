@@ -141,8 +141,9 @@ type remote struct {
 	// identity provider rotated in, so it is not refused as unknown.
 	fetchErr error
 
-	// refetching holds one token while a token's fetch runs, a channel so a
-	// caller waiting behind it gives up when its context does.
+	// refetching holds one token while a token's fetch runs, until the
+	// fetch ends whether or not its caller waits; a channel so a caller
+	// waiting behind it gives up when its context does.
 	refetching chan struct{}
 	// lastRefetch is when a token last started a fetch; held by
 	// refetching.
@@ -236,41 +237,78 @@ func (r *remote) current() (jwk.Set, error) {
 // jwks.ErrUnavailable even when the fetch is skipped, as jwks.Remote is: a
 // token's kid the held set lacks may be one rotated in meanwhile, and
 // refusing the token would blame it for the endpoint's failure.
+//
+// The fetch runs apart from the caller that started it, bounded by
+// jwks.DefaultFetchTimeout rather than by the caller's context, as
+// jwks.Remote's does: httprc sends a fetch it has taken whatever its
+// caller does, so a caller that gives up neither escapes
+// remoteMinRefetchInterval nor makes the endpoint look failed; it leaves a
+// fetch in flight, which the next caller waits for.
 func (r *remote) refetch(ctx context.Context, reason string) (jwk.Set, error) {
 	select {
 	case r.refetching <- struct{}{}:
 	case <-ctx.Done():
-		return nil, errs.Errorf("%w: jwtverify: waiting on the identity provider's keys at %s: %w", jwks.ErrUnavailable, r.endpoint, ctx.Err())
+		return nil, r.gaveUp(ctx)
 	}
-	defer func() { <-r.refetching }()
+	// select picks at random between two ready cases: a caller already
+	// done may have won the slot.
+	if ctx.Err() != nil {
+		<-r.refetching
+		return nil, r.gaveUp(ctx)
+	}
 	now := r.now()
 	if !r.lastRefetch.IsZero() && now.Sub(r.lastRefetch) < remoteMinRefetchInterval {
+		<-r.refetching
 		r.log.DebugContext(ctx, "jwtverify: not fetching the identity provider's keys again so soon", slog.String("reason", reason),
 			slog.Time("last_fetch_started", r.lastRefetch))
-		set, err := r.current()
-		if err != nil {
-			return nil, err
-		}
-		if fetchErr := r.lastFetchErr(); fetchErr != nil {
-			return nil, errs.Errorf("%w: jwtverify: the identity provider's keys at %s could not be fetched again: %w", jwks.ErrUnavailable, r.endpoint, fetchErr)
-		}
-		return set, nil
+		return r.heldAfterRefetch()
 	}
-	previous := r.lastRefetch
 	r.lastRefetch = now
 	r.log.InfoContext(ctx, "jwtverify: fetching the identity provider's keys", slog.String("reason", reason))
-	if err := r.ctrl.Refresh(ctx, r.url); err != nil {
-		if ctx.Err() == nil {
-			// A caller giving up is no failure of the endpoint's.
+	done := make(chan error, 1)
+	go func() {
+		// The token goes back before the result is sent: a caller woken
+		// by it may start the next fetch at once.
+		defer func() { <-r.refetching }()
+		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), jwks.DefaultFetchTimeout)
+		defer cancel()
+		err := r.ctrl.Refresh(fetchCtx, r.url)
+		if err != nil {
 			r.failed(err)
-		} else {
-			// Nor a fetch: the next token's starts at once.
-			r.lastRefetch = previous
+			r.log.WarnContext(fetchCtx, "jwtverify: fetching the identity provider's keys failed", slog.String("reason", reason), slog.Any("error", err))
 		}
-		r.log.WarnContext(ctx, "jwtverify: fetching the identity provider's keys failed", slog.String("reason", reason), slog.Any("error", err))
-		return nil, errs.Errorf("%w: jwtverify: fetch the identity provider's keys at %s: %w", jwks.ErrUnavailable, r.endpoint, err)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			return nil, errs.Errorf("%w: jwtverify: fetch the identity provider's keys at %s: %w", jwks.ErrUnavailable, r.endpoint, err)
+		}
+		return r.current()
+	case <-ctx.Done():
+		r.log.DebugContext(ctx, "jwtverify: gave up waiting on the identity provider's keys; the fetch runs on", slog.String("reason", reason))
+		return nil, r.gaveUp(ctx)
 	}
-	return r.current()
+}
+
+// heldAfterRefetch is the set held for a token whose fetch was skipped:
+// jwks.ErrUnavailable while the last fetch failed, with none succeeding
+// since.
+func (r *remote) heldAfterRefetch() (jwk.Set, error) {
+	set, err := r.current()
+	if err != nil {
+		return nil, err
+	}
+	if fetchErr := r.lastFetchErr(); fetchErr != nil {
+		return nil, errs.Errorf("%w: jwtverify: the identity provider's keys at %s could not be fetched again: %w", jwks.ErrUnavailable, r.endpoint, fetchErr)
+	}
+	return set, nil
+}
+
+// gaveUp is the error of a caller whose context ended before the keys it
+// waited on were there.
+func (r *remote) gaveUp(ctx context.Context) error {
+	return errs.Errorf("%w: jwtverify: waiting on the identity provider's keys at %s: %w", jwks.ErrUnavailable, r.endpoint, ctx.Err())
 }
 
 // userinfoAuth sends the userinfo of a JWKS URL as Basic auth on each
