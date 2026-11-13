@@ -1918,7 +1918,7 @@ ErrSchemaMismatch is CheckSchema finding a schema at another version than the on
 func CheckSchema(ctx context.Context, db DB) error
 ```
 
-CheckSchema is a readiness check for the stores over db. It returns ErrSchemaMismatch when the schema is not at the version this package queries — a store over it would fail on a table or column it expects — and ErrRuntimeRole when db is served by a role row-level security does not hold to its tenant, so a store over it would isolate no tenant.
+CheckSchema is a readiness check for the stores over db. It returns ErrSchemaMismatch when the schema is not at the version this package queries — a store over it would fail on a table or column it expects — and ErrRuntimeRole when db is served by a role row-level security does not hold to its tenant, so a store over it would isolate no tenant. A deployment with one role for migrating and serving is refused so, on purpose and with no option to pass: create a role that owns nothing, grant it with migrate.Options.RuntimeRoles and serve as it (docs/guide.md, "Migrations").
 
 <sub>[pgstore/checkschema.go](../../pgstore/checkschema.go)</sub>
 <a id="pgstore.CheckSchemaScope"></a>
