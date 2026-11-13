@@ -98,8 +98,8 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
   connection it ran on closed rather than given back, where the
   connection went back to the pool under that role for the next call. On
   a `Config.DB` that is a `*pgx.Conn` the store is then `store_unavailable`
-  until you connect again. Leave the transaction to the store, and set a
-  role for it alone with `SET LOCAL ROLE`.
+  until you connect again. Leave the transaction to the store, and set
+  back before returning any role the callback sets for its statements.
 - `Store.EraseTenant` holds `onErased` to the rules of the transaction
   `TxFrom` lends. One that sets the session's role has the erase refused
   with `pgstore.ErrChargeTransaction` and rolled back, where the erase
@@ -133,11 +133,11 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
   transaction is still open — one it met on a connection of its own —
   fails the call with that error, where the call and its callback ran
   again. A deadlock of the call's own transaction is still run again.
-- A callback that sets the session's role (`SET ROLE`, not
-  `SET LOCAL ROLE`) has the call refused with
+- A callback that returns under another role than it found, set with
+  `SET ROLE` or `SET LOCAL ROLE`, has the call refused with
   `pgstore.ErrChargeTransaction` and rolled back, where it committed and
-  left the role on the pooled connection for the next call. Set a role
-  for the transaction alone with `SET LOCAL ROLE`.
+  a `SET ROLE` stayed on the pooled connection for the next call. Set
+  back before returning any role the callback sets for its statements.
 
 ## exchange/v0.25.0
 

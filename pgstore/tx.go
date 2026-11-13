@@ -53,10 +53,13 @@ var ErrChargeTransaction = fmt.Errorf("%w: pgstore: the transaction a callback r
 // QueuedQuery callback, a sql.Scanner, a driver.Valuer, a
 // pgx.CopyFromSource — which would otherwise wait on itself with the
 // tenant's locks held. Rows and batch results still open when the callback
-// returns are closed then, and read no further. A callback that sets the
-// session's role — SET ROLE, not SET LOCAL ROLE — has the call refused
-// with ErrChargeTransaction and rolled back, the role with it: committed,
-// it would outlast the call on the pooled connection. One that sets it
+// returns are closed then, and read no further. A callback that returns
+// under another role than it found has the call refused with
+// ErrChargeTransaction and rolled back, the role with it: the store's
+// statements after it would run under that role, and a SET ROLE,
+// committed, would outlast the call on the pooled connection. That holds
+// for SET LOCAL ROLE as for SET ROLE; a callback that sets a role for its
+// own statements sets it back before it returns. One that sets it
 // where no ROLLBACK reaches — around a COMMIT or ROLLBACK of its own — has
 // the connection closed rather than given back under that role; on a
 // Config.DB that is a *pgx.Conn the store is then store_unavailable until

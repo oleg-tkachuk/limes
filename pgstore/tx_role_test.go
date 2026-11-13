@@ -109,3 +109,42 @@ func TestTxFromKeepsNoRoleSetAroundTheCallbacksOwnEnd(t *testing.T) {
 		}
 	}
 }
+
+// sqlSetLocalRole sets the role for the rest of the transaction, and
+// sqlSetLocalRoleBack sets it back to none for the rest of it.
+const (
+	sqlSetLocalRole     = `SET LOCAL ROLE ` + appUser
+	sqlSetLocalRoleBack = `SET LOCAL ROLE NONE`
+)
+
+// The store's statements after the callback run under the role the
+// callback found: one that returns under another, set for the transaction
+// alone (SET LOCAL ROLE) as much as for the session, is refused; one that
+// sets the role for its own statements and back before it returns is not.
+func TestTxFromRefusesACallbackReturningUnderALocalRole(t *testing.T) {
+	for name, tc := range map[string]struct {
+		sql     []string
+		refused bool
+	}{
+		"left set":         {sql: []string{sqlSetLocalRole}, refused: true},
+		"set back in time": {sql: []string{sqlSetLocalRole, sqlOne, sqlSetLocalRoleBack}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newTenantFixture(t)
+			ctx := WithTenant(t.Context(), f.mine)
+			onCharged := func(ctx context.Context, _ meter.Charged) error {
+				tx, _ := TxFrom(ctx)
+				for _, q := range tc.sql {
+					if _, err := tx.Exec(ctx, q); err != nil {
+						return err
+					}
+				}
+				return nil
+			}
+			_, err := f.usage.Charge(ctx, meter.ChargeRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1}, onCharged)
+			if tc.refused != errors.Is(err, ErrChargeTransaction) || (!tc.refused && err != nil) {
+				t.Errorf("a charge whose onCharged's role was %s: err = %v, want refused %v", name, err, tc.refused)
+			}
+		})
+	}
+}
