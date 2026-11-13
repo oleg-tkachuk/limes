@@ -434,7 +434,14 @@ func checkEndingCallsBesideAReset(t *testing.T, f fixture) {
 			lift(t)
 			version := f.tenantOf(t).ResourceVersion
 			reset := make(chan error, 1)
+			// A store may run the callback again, after a deadlock: the
+			// reset is sent from its first run alone.
+			var sent bool
 			pause := func() {
+				if sent {
+					return
+				}
+				sent = true
 				go func() {
 					_, err := f.Usage.SetTenantBudget(f.Ctx, meter.SetTenantBudgetRequest{
 						TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Max: tenantBudget, UnitCode: unit}, ResetSpend: true, ExpectedVersion: version,
