@@ -6,6 +6,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -94,12 +95,8 @@ func TestEverySentinelHasAnError(t *testing.T) {
 // merged is a and b in one map.
 func merged(a, b map[string]error) map[string]error {
 	out := map[string]error{}
-	for k, v := range a {
-		out[k] = v
-	}
-	for k, v := range b {
-		out[k] = v
-	}
+	maps.Copy(out, a)
+	maps.Copy(out, b)
 	return out
 }
 

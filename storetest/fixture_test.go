@@ -13,7 +13,7 @@ import (
 // The round trip proves a field survives a store only when the fixture sets
 // it: a field the module adds, left zero here, passes a store that drops it.
 func TestFixturesSetEveryField(t *testing.T) {
-	f := fixture{Env: Env{Tenant: uuid.New()}, now: time.Now()}
+	f := fixture{Tenant: uuid.New(), now: time.Now()}
 	unset := []string{
 		// Zero beside a Max; checkRoundTrip sets each in a capability of its own.
 		"Caveats.Requests.Unlimited", "Caveats.Budget.Unlimited", "Caveats.Copies.Unlimited",

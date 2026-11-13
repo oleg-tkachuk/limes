@@ -85,8 +85,8 @@ func walkCollection(v reflect.Value, path string, out *[]string) {
 func Names[T any]() []string {
 	t := reflect.TypeFor[T]()
 	var out []string
-	for i := range t.NumField() {
-		if f := t.Field(i); f.IsExported() {
+	for f := range t.Fields() {
+		if f.IsExported() {
 			out = append(out, f.Name)
 		}
 	}

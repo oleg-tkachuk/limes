@@ -26,8 +26,7 @@ func TestWireStructsMirrorTheExportedTypes(t *testing.T) {
 		if p.exported.NumField() != p.wire.NumField() {
 			t.Errorf("%s has %d fields, %s %d", p.exported.Name(), p.exported.NumField(), p.wire.Name(), p.wire.NumField())
 		}
-		for i := range p.exported.NumField() {
-			f := p.exported.Field(i)
+		for f := range p.exported.Fields() {
 			if _, ok := p.wire.FieldByName(f.Name); !ok {
 				t.Errorf("%s.%s has no counterpart in %s", p.exported.Name(), f.Name, p.wire.Name())
 			}
@@ -43,8 +42,7 @@ func TestWireStructsMirrorTheExportedTypes(t *testing.T) {
 	}
 	caveats, wire := reflect.TypeFor[Caveats](), reflect.TypeFor[wireCaveats]()
 	want := 0
-	for i := range caveats.NumField() {
-		f := caveats.Field(i)
+	for f := range caveats.Fields() {
 		names, isCeiling := ceilings[f.Name]
 		if !isCeiling {
 			names = []string{f.Name}
@@ -60,9 +58,9 @@ func TestWireStructsMirrorTheExportedTypes(t *testing.T) {
 		t.Errorf("wireCaveats has %d fields, want %d", wire.NumField(), want)
 	}
 	for _, typ := range []reflect.Type{reflect.TypeFor[Principal](), reflect.TypeFor[AgentPrincipal](), caveats, reflect.TypeFor[Capability]()} {
-		for i := range typ.NumField() {
-			if tag, ok := typ.Field(i).Tag.Lookup("json"); ok {
-				t.Errorf("%s.%s carries json tag %q; the wire format lives in wire.go", typ.Name(), typ.Field(i).Name, tag)
+		for field := range typ.Fields() {
+			if tag, ok := field.Tag.Lookup("json"); ok {
+				t.Errorf("%s.%s carries json tag %q; the wire format lives in wire.go", typ.Name(), field.Name, tag)
 			}
 		}
 	}

@@ -46,9 +46,9 @@ func TestCheckUnsealed(t *testing.T) {
 // copy only narrows, and a key-bound token stays bound to its key.
 func TestApplyAttenuationRefusesWhatAttenuateWould(t *testing.T) {
 	jkt := strings.Repeat("A", 43)
-	cur := grant{Capability: Capability{Caveats: Caveats{
+	cur := grant{Caveats: Caveats{
 		Ops: []Op{OpGet}, Requests: RequestCeiling{Unlimited: true}, Budget: BudgetCeiling{Unlimited: true, UnitCode: "USD"},
-	}}}
+	}}
 	bound := cur
 	bound.ConfirmationJKT = jkt
 	for name, tc := range map[string]struct {
@@ -75,9 +75,9 @@ func TestApplyAttenuationRefusesWhatAttenuateWould(t *testing.T) {
 // A copy ceiling the form hands back is the verifier's own: changing the
 // form's value after does not change the grant.
 func TestApplyAttenuationCopiesTheCeilings(t *testing.T) {
-	cur := grant{Capability: Capability{Caveats: Caveats{
+	cur := grant{Caveats: Caveats{
 		Ops: []Op{OpGet}, Requests: RequestCeiling{Unlimited: true}, Budget: BudgetCeiling{Unlimited: true, UnitCode: "USD"},
-	}}}
+	}}
 	a := Attenuation{Ops: []Op{OpGet}, Requests: &RequestCeiling{Max: 1}, Budget: &BudgetCeiling{Max: 1}}
 	next, err := applyAttenuation(cur, a, []byte("block"))
 	if err != nil {

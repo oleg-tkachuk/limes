@@ -114,7 +114,7 @@ func (s Step) Statements() []string {
 func splitStatements(sql string) []string {
 	var stmts []string
 	var cur []string
-	for _, line := range strings.Split(sql, "\n") {
+	for line := range strings.SplitSeq(sql, "\n") {
 		cur = append(cur, line)
 		if strings.HasSuffix(strings.TrimSpace(line), ";") {
 			stmts = append(stmts, strings.TrimSpace(strings.Join(cur, "\n")))

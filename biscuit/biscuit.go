@@ -143,8 +143,8 @@ func sameAttenuation(a, b limes.Attenuation) bool {
 // list, and an expiry is blockExpiry's.
 func canonicalAttenuation(a limes.Attenuation) limes.Attenuation {
 	v := reflect.ValueOf(&a).Elem()
-	for i := range v.NumField() {
-		if f := v.Field(i); f.Kind() == reflect.Slice && f.Len() == 0 && f.CanSet() {
+	for _, f := range v.Fields() {
+		if f.Kind() == reflect.Slice && f.Len() == 0 && f.CanSet() {
 			f.SetZero()
 		}
 	}
@@ -500,7 +500,7 @@ func (f blockFacts) attenuation() limes.Attenuation {
 }
 
 func biscuitFact(name string, term biscuitgo.Term) biscuitgo.Fact {
-	return biscuitgo.Fact{Predicate: biscuitgo.Predicate{Name: name, IDs: []biscuitgo.Term{term}}}
+	return biscuitgo.Fact{Name: name, IDs: []biscuitgo.Term{term}}
 }
 
 func parseBiscuit(token string) (*biscuitgo.Biscuit, error) {

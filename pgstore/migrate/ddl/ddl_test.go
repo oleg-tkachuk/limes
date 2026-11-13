@@ -106,7 +106,7 @@ func TestEverySQLEndsWithATerminator(t *testing.T) {
 // trimmed: what PostgreSQL runs.
 func code(sql string) []string {
 	var out []string
-	for _, line := range strings.Split(sql, "\n") {
+	for line := range strings.SplitSeq(sql, "\n") {
 		if l := strings.TrimSpace(line); l != "" && !strings.HasPrefix(l, lineComment) {
 			out = append(out, l)
 		}

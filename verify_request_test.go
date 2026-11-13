@@ -187,8 +187,8 @@ func TestAuthorize(t *testing.T) {
 // a compile break from an additive change.
 func TestAuthorizeRequestEmbedsNothing(t *testing.T) {
 	typ := reflect.TypeFor[AuthorizeRequest]()
-	for i := range typ.NumField() {
-		if f := typ.Field(i); f.Anonymous {
+	for f := range typ.Fields() {
+		if f.Anonymous {
 			t.Errorf("AuthorizeRequest embeds %s", f.Name)
 		}
 	}

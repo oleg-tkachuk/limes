@@ -31,8 +31,7 @@ func reportFailure(ctx context.Context, log *slog.Logger, err error, writes bool
 	}
 	code, _ := limes.CodeOf(classified)
 	attrs := []slog.Attr{slog.String(logKeyCode, string(code)), slog.Any(logKeyError, err)}
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok {
 		attrs = append(attrs, slog.String(logKeySQLState, pgErr.Code))
 	}
 	log.LogAttrs(ctx, slog.LevelWarn, "pgstore: the database could not serve a call; answered with a code to retry", attrs...)
@@ -59,8 +58,7 @@ func storeFailure(ctx context.Context, err error, writes bool) (error, bool) {
 	if _, ok := limes.CodeOf(err); ok {
 		return err, false
 	}
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok {
 		switch {
 		case timedOut(pgErr.Code):
 			return errs.Errorf("%w: %w", limes.ErrStoreTimeout, err), true

@@ -24,7 +24,7 @@ func heldIDs(as []ancestor) []uuid.UUID {
 func TestHeldLineage(t *testing.T) {
 	self, parent, grand, great := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	row := func(id uuid.UUID, depth int) heldAncestor {
-		return heldAncestor{ancestor: ancestor{id: id}, depth: depth}
+		return heldAncestor{id: id, depth: depth}
 	}
 	got, err := heldLineage(self, []heldAncestor{row(grand, 2), row(self, 0), row(great, 3), row(parent, 1)})
 	if err != nil || !slices.Equal(heldIDs(got), []uuid.UUID{parent, grand, great}) {

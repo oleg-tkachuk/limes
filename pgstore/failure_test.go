@@ -62,8 +62,7 @@ func deadPool(t *testing.T) *pgxpool.Pool {
 func connectError(t *testing.T) error {
 	t.Helper()
 	_, err := pgconn.Connect(context.Background(), deadDSN(t))
-	var connectErr *pgconn.ConnectError
-	if !errors.As(err, &connectErr) {
+	if _, ok := errors.AsType[*pgconn.ConnectError](err); !ok {
 		t.Fatalf("a dial to a closed port: %v, want a *pgconn.ConnectError", err)
 	}
 	return err

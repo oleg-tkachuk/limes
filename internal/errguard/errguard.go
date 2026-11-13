@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -112,10 +113,8 @@ func doublingCall(call *ast.CallExpr) bool {
 	if !isCall(call, "fmt", "Errorf") || len(call.Args) == 0 {
 		return false
 	}
-	for _, arg := range call.Args[1:] {
-		if quotesError(arg) {
-			return true
-		}
+	if slices.ContainsFunc(call.Args[1:], quotesError) {
+		return true
 	}
 	lit, ok := leftmostLiteral(call.Args[0])
 	if !ok {
