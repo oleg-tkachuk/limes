@@ -2,6 +2,12 @@
 
 Every release of the otelmetric module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.23.0](https://github.com/oleg-tkachuk/limes/compare/otelmetric%2Fv0.22.0...otelmetric%2Fv0.23.0) (2026-11-13)
+
+### Features
+
+* **otelmetric:** count a request counter's bumps alone with InstrumentRequests ([767d5e1](https://github.com/oleg-tkachuk/limes/commit/767d5e15558de85b6e6ef980788932a55324e673))
+
 ## [0.22.0](https://github.com/oleg-tkachuk/limes/compare/otelmetric%2Fv0.21.0...otelmetric%2Fv0.22.0) (2026-11-13)
 
 ### Features
