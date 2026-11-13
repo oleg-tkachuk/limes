@@ -2,6 +2,16 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.80.1](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.80.0...pgstore%2Fv0.80.1) (2026-11-13)
+
+### Bug Fixes
+
+* **pgstore:** share the tenant lock of the lease settle lease reads ([c987de4](https://github.com/oleg-tkachuk/limes/commit/c987de45083777fce212a8d71d9104233e75e2d7))
+
+### Dependencies
+
+* require limes v0.182.0
+
 ## [0.80.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.79.0...pgstore%2Fv0.80.0) (2026-11-13)
 
 ### ⚠ BREAKING CHANGES
