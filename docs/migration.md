@@ -79,6 +79,14 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
   a `Config.DB` that is a `*pgx.Conn` the store is then `store_unavailable`
   until you connect again. Leave the transaction to the store, and set a
   role for it alone with `SET LOCAL ROLE`.
+- `Store.EraseTenant` holds `onErased` to the rules of the transaction
+  `TxFrom` lends. One that sets the session's role has the erase refused
+  with `pgstore.ErrChargeTransaction` and rolled back, where the erase
+  committed with the role left on the pooled connection. One that ends
+  `Erased.Tx` with SQL of its own (`COMMIT`, `ROLLBACK`, or either followed
+  by `BEGIN`) fails the erase with `pgstore.ErrChargeTransaction` and
+  `meter.ErrOutcomeUnknown`, where `EraseTenant` answered nil, the erase
+  undone by a `ROLLBACK` while reported done. Erase again on that error.
 
 ## v0.180.0
 

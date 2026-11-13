@@ -164,6 +164,12 @@ type Erased struct {
 // its usage, as UsageStore.EraseTenantUsage does, in one transaction, and
 // runs onErased in it last, so a consumer removes its own rows of the tenant
 // with them or not at all. An error from onErased rolls everything back.
+// Erased.Tx is the store's to commit, as the transaction TxFrom lends is:
+// an onErased that ended it with SQL of its own — COMMIT, ROLLBACK, or
+// either followed by BEGIN — has the call fail with ErrChargeTransaction
+// and meter.ErrOutcomeUnknown, the erase committed or undone as that SQL
+// had it; one that set the session's role has the call refused with
+// ErrChargeTransaction and rolled back, the role with it.
 func (s *Store) EraseTenant(ctx context.Context, req limes.EraseTenantRequest, onErased func(ctx context.Context, e Erased) error) (limes.EraseTenantResult, error) {
 	if err := req.Validate(); err != nil {
 		return limes.EraseTenantResult{}, err
@@ -185,10 +191,17 @@ func (s *Store) EraseTenant(ctx context.Context, req limes.EraseTenantRequest, o
 		if _, err := eraseUsage(ctx, tx, meter.EraseTenantUsageRequest{TenantID: req.TenantID}); err != nil {
 			return err
 		}
-		if onErased != nil {
-			return onErased(ctx, Erased{Tx: tx, Result: out})
+		if onErased == nil {
+			return nil
 		}
-		return nil
+		mark := req.TenantID.String()
+		if err := sendWrites(ctx, tx, []heldStmt{markCallback(tx, mark)}, false); err != nil {
+			return err
+		}
+		if err := onErased(ctx, Erased{Tx: tx, Result: out}); err != nil {
+			return err
+		}
+		return endCallback(ctx, tx, mark, false)
 	})
 	return out, err
 }
