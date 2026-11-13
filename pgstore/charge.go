@@ -612,17 +612,23 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
 	sqlHoldTaken = `
 SELECT EXISTS (SELECT 1 FROM limes.reservations WHERE id = $1)
     OR EXISTS (SELECT 1 FROM limes.charges WHERE reservation_id = $1)`
+)
 
-	// constraintHoldKey is limes.reservations' primary key, which a hold
-	// inserted under the id of another tenant's hold, hidden from the call
-	// by row-level security, violates.
-	constraintHoldKey = "reservations_pkey"
+// uniqueKey is a unique constraint of the store's own: the table it is on,
+// in the store's schema, and its name.
+type uniqueKey struct{ table, constraint string }
 
-	// constraintSettledHoldKey is limes.charges' unique index of the hold
-	// a charge settled, which the settle of a hold under the id of another
-	// tenant's settled one, hidden from its Reserve by row-level security,
-	// violates (002_meter.sql).
-	constraintSettledHoldKey = "charges_reservation"
+var (
+	// holdKey is limes.reservations' primary key, which a hold inserted
+	// under the id of another tenant's hold, hidden from the call by
+	// row-level security, violates.
+	holdKey = uniqueKey{table: "reservations", constraint: "reservations_pkey"}
+
+	// settledHoldKey is limes.charges' unique index of the hold a charge
+	// settled, which the settle of a hold under the id of another tenant's
+	// settled one, hidden from its Reserve by row-level security, violates
+	// (002_meter.sql).
+	settledHoldKey = uniqueKey{table: "charges", constraint: "charges_reservation"}
 )
 
 // scanHold reads one row of sqlHoldColumns.
@@ -728,21 +734,24 @@ func (h hold) madeFor(req meter.ReserveRequest, unit string) bool {
 // holdKeyConflict is err, the error of a hold's insert, as
 // ErrReserveConflict when the hold's id is another tenant's.
 func holdKeyConflict(err error, id uuid.UUID) error {
-	return keyConflict(err, constraintHoldKey, id)
+	return keyConflict(err, holdKey, id)
 }
 
 // settledKeyConflict is err, the error of a settle, as ErrReserveConflict
 // when the hold's id is that of another tenant's settled hold: its Reserve
 // could not see that charge, and held under the id.
 func settledKeyConflict(err error, id uuid.UUID) error {
-	return keyConflict(err, constraintSettledHoldKey, id)
+	return keyConflict(err, settledHoldKey, id)
 }
 
 // keyConflict is err as ErrReserveConflict when it is a unique violation of
-// constraint, the key a hold's id is held to.
-func keyConflict(err error, constraint string, id uuid.UUID) error {
+// key, the store's own key a hold's id is held to: a constraint of the same
+// name on a table of the consumer's, which an onCharged writes, is the
+// consumer's error as it is.
+func keyConflict(err error, key uniqueKey, id uuid.UUID) error {
 	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == constraint {
+	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation &&
+		pgErr.SchemaName == schema && pgErr.TableName == key.table && pgErr.ConstraintName == key.constraint {
 		return fmt.Errorf("%w: %s", meter.ErrReserveConflict, id)
 	}
 	return err

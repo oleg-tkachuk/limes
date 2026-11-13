@@ -70,6 +70,14 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## pgstore/v0.80.0
+
+- A unique violation an `onCharged` of `Settle` meets on a table of its
+  own is the callback's error as it is, where one under the name of the
+  store's key of a settled hold (`charges_reservation`) was answered as
+  `meter.ErrReserveConflict`. Only a violation of the store's own key in
+  its schema is a reserve conflict.
+
 ## v0.181.0
 
 - An error that names a refusal's code (`LimesErrorCode`) outside that
