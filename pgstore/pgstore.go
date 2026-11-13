@@ -579,8 +579,10 @@ func (c conn) runTx(ctx context.Context, writes bool, fn func(pgx.Tx) error) err
 	if writes && c.outcomes {
 		commitErr = outcomeOf
 	}
-	return reportFailure(ctx, c.log, beginFunc(ctx, c.txs, func(tx pgx.Tx) error {
-		deferred, ok := tx.(*deferTx)
+	var deferred *deferTx
+	err := beginFunc(ctx, c.txs, func(tx pgx.Tx) error {
+		var ok bool
+		deferred, ok = tx.(*deferTx)
 		if !ok {
 			deferred = &deferTx{Tx: tx}
 		}
@@ -591,7 +593,11 @@ func (c conn) runTx(ctx context.Context, writes bool, fn func(pgx.Tx) error) err
 			return errScope(err)
 		}
 		return fn(deferred)
-	}, commitErr), writes)
+	}, commitErr)
+	if deferred != nil && deferred.discarded {
+		c.log.WarnContext(ctx, "pgstore: a callback left the session under another role than it found; the connection is closed rather than given back")
+	}
+	return reportFailure(ctx, c.log, err, writes)
 }
 
 // inTenantTx is inTx for a call whose request names tenant: it refuses a

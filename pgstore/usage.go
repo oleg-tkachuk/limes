@@ -68,6 +68,12 @@ func (s *UsageStore) Refund(ctx context.Context, req meter.RefundRequest, onRefu
 	return receipt, nil
 }
 
+// sqlShareUsageTenantLocks shares the erase lock (class $1) of the tenant
+// of each counter of capabilities $2, in the order of the tenants' ids, as
+// sqlShareTenantLock does for one.
+const sqlShareUsageTenantLocks = `SELECT pg_advisory_xact_lock_shared(` + tenantLockKeyOpen + `t` + tenantLockKeyClose + `)
+FROM (SELECT DISTINCT tenant_id AS t FROM limes.usage WHERE capability_id = ANY($2) ORDER BY t) tenants`
+
 // sqlShareChargeTenantLock shares the erase lock (class $1) of the tenant
 // of charge $2, as sqlShareTenantLock does; it takes none when there is no
 // such charge.
@@ -1341,6 +1347,16 @@ func (s *UsageStore) dropOrphans(ctx context.Context, tx pgx.Tx, limit int, purg
 // then drops their counters and their copies', and strikes them from the
 // ancestors of the holds that remain.
 func (s *UsageStore) dropUsage(ctx context.Context, tx pgx.Tx, ids []uuid.UUID, leases leasesToSettle) error {
+	if len(leases.holders) > 0 {
+		// Settling a lease writes the tenant's aggregate or stripe, under
+		// the tenant's erase lock shared: shared here, before any row is
+		// locked, as every such call shares it, or a SetTenantBudget or an
+		// erase holding it alone and waiting on these rows deadlocks
+		// with the drop.
+		if _, err := tx.Exec(ctx, sqlShareUsageTenantLocks, eraseLockClass, ids); err != nil {
+			return err
+		}
+	}
 	locked, err := collectHolds(ctx, tx, sqlHoldsNaming, ids)
 	if err != nil {
 		return err

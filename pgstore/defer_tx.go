@@ -42,7 +42,17 @@ type deferTx struct {
 	ended bool
 	// finished is Commit or Rollback done, and lent given back.
 	finished bool
+	// callbackRole is the session's role as a callback found it, once one
+	// ran on the transaction (markCallback): lent goes back to its pool
+	// only under it.
+	callbackRole *string
+	// discarded is lent closed rather than given back as it was: a
+	// callback left the session under another role than it found.
+	discarded bool
 }
+
+// sqlSessionRole reads the session's role setting.
+const sqlSessionRole = `SELECT current_setting('role')`
 
 // heldStmt is one statement a scope executed, not sent yet.
 type heldStmt struct {
@@ -334,13 +344,40 @@ func (t *deferTx) Rollback(ctx context.Context) error {
 
 // rollback sends ROLLBACK when the lent connection is still in a
 // transaction — open, or aborted by a statement that failed — so it goes
-// back clean, then gives the connection back.
+// back clean, then gives the connection back: closed, when a callback ran
+// on the transaction and left the session under another role than it
+// found (keepsCallbackRole).
 func (t *deferTx) rollback(ctx context.Context) error {
 	defer t.finish()
-	if !t.begun() || t.lent.PgConn().TxStatus() == txStatusIdle {
+	if !t.begun() {
 		return nil
 	}
-	return t.Tx.Rollback(ctx)
+	var err error
+	if t.lent.PgConn().TxStatus() != txStatusIdle {
+		err = t.Tx.Rollback(ctx)
+	}
+	if !t.keepsCallbackRole(ctx) {
+		t.discarded = true
+		err = errors.Join(err, t.lent.Close(ctx))
+	}
+	return err
+}
+
+// keepsCallbackRole reports whether the session's role, read once the
+// transaction has ended, is the one the callback that ran on it found,
+// true when none ran. A SET ROLE in the transaction ends with it; one a
+// callback sent after ending the transaction with SQL of its own, or
+// before a COMMIT of its own, does not, and would serve the next call on
+// the connection. A role that cannot be read is not the one.
+func (t *deferTx) keepsCallbackRole(ctx context.Context) bool {
+	if t.callbackRole == nil {
+		return true
+	}
+	var role string
+	if err := t.lent.QueryRow(ctx, sqlSessionRole).Scan(&role); err != nil {
+		return false
+	}
+	return role == *t.callbackRole
 }
 
 // finish ends the transaction for the call and gives the lent connection
