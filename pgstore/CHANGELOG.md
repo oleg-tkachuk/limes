@@ -2,6 +2,23 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.80.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.79.0...pgstore%2Fv0.80.0) (2026-11-13)
+
+### ⚠ BREAKING CHANGES
+
+* **pgstore:** such a violation reaches the caller as the callback's own
+  error.
+* **pgstore:** those rows answer Conn with nil.
+
+### Bug Fixes
+
+* **pgstore:** hold a reserve conflict to the store's own key ([afa2bb1](https://github.com/oleg-tkachuk/limes/commit/afa2bb11f1afedb25d653022521cb7696524f51c))
+* **pgstore:** lend no connection through a batch callback's rows ([940a77d](https://github.com/oleg-tkachuk/limes/commit/940a77d86e6bd59cffc4055d82b17f9d4c0586e0))
+
+### Dependencies
+
+* require limes v0.181.0
+
 ## [0.79.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.78.0...pgstore%2Fv0.79.0) (2026-11-13)
 
 ### ⚠ BREAKING CHANGES
