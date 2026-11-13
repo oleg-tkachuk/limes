@@ -113,9 +113,13 @@ func (l leaser) SettleLease(ctx context.Context, req meter.SettleLeaseRequest) (
 	return l.leases.SettleLease(ctx, req)
 }
 
-// Bump emits limes.request.bumps.
-func (s *meteringStore) Bump(ctx context.Context, req meter.BumpRequest) (meter.BumpReceipt, error) {
-	receipt, err := s.inner.Bump(ctx, req)
+// Bump emits limes.request.bumps. A replay counted nothing, so it counts
+// nothing here either, as a replayed charge does not.
+func (s *meteringStore) Bump(ctx context.Context, req meter.BumpRequest, onBumped func(ctx context.Context, b meter.Bumped) error) (meter.BumpReceipt, error) {
+	receipt, err := s.inner.Bump(ctx, req, onBumped)
+	if err == nil && receipt.Replayed {
+		return receipt, nil
+	}
 	s.in.recordBump(ctx, req.Subject.TenantID(), err)
 	return receipt, err
 }

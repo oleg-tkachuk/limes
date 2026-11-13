@@ -130,6 +130,31 @@ func TestMeteringCountsNoReplay(t *testing.T) {
 	}
 }
 
+// A keyed bump replayed counted nothing, so the decorator counts it once;
+// and the callback reaches the wrapped store, which runs it once.
+func TestMeteringCountsNoReplayedBump(t *testing.T) {
+	usage, reader, records := meteredStore(t)
+	ctx := context.Background()
+	bump := meter.BumpRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: uuid.New(), tenant: uuid.New()}), ExternalRef: "call-1"}
+	var runs int
+	onBumped := func(context.Context, meter.Bumped) error { runs++; return nil }
+	for range 2 {
+		if _, err := usage.Bump(ctx, bump, onBumped); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := valueAt(points(t, reader, metricRequestBumps), attrOutcome, "allowed"); got != 1 {
+		t.Errorf("%v bumps counted, want 1: the replay counted nothing", got)
+	}
+	if runs != 1 {
+		t.Errorf("onBumped ran %d times, want once: the replay runs none", runs)
+	}
+	boom := errors.New("side effect failed")
+	if _, err := usage.Bump(ctx, meter.BumpRequest{Subject: bump.Subject}, func(context.Context, meter.Bumped) error { return boom }); !errors.Is(err, boom) {
+		t.Errorf("a bump whose callback failed: err = %v, want the callback's", err)
+	}
+}
+
 // Every amount carries its unit, the settle's included, though its request
 // names only the reservation; and every refused or failed attempt is
 // counted under its outcome.
@@ -198,7 +223,7 @@ func TestMeteringTenantAttributeIsOptIn(t *testing.T) {
 	usage, reader, records := meteredStore(t, otelmetric.WithTenantAttribute())
 	ctx := context.Background()
 	tenant := uuid.New()
-	if _, err := usage.Bump(ctx, meter.BumpRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: uuid.New(), tenant: tenant, requests: requestsOf(1)})}); err != nil {
+	if _, err := usage.Bump(ctx, meter.BumpRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: uuid.New(), tenant: tenant, requests: requestsOf(1)})}, nil); err != nil {
 		t.Fatal(err)
 	}
 	ps := points(t, reader, metricRequestBumps)
@@ -229,7 +254,7 @@ func TestMeteringChargeTenantIsTheSubjects(t *testing.T) {
 // tenant's, never one without the attribute beside the tenants'.
 func TestMeteringLabelsEveryMeasurementWithATenant(t *testing.T) {
 	usage, reader, _ := meteredStore(t, otelmetric.WithTenantAttribute())
-	if _, err := usage.Bump(context.Background(), meter.BumpRequest{Subject: limes.MeterSubject{}}); err == nil {
+	if _, err := usage.Bump(context.Background(), meter.BumpRequest{Subject: limes.MeterSubject{}}, nil); err == nil {
 		t.Fatal("a bump of the zero subject was not refused")
 	}
 	ps := points(t, reader, metricRequestBumps)
@@ -274,7 +299,7 @@ func TestInstrumentKeepsCopyUsage(t *testing.T) {
 	copyID := []byte("copy-1")
 	copies := []limes.CopyCeiling{{RevocationID: copyID, Requests: &limes.RequestCeiling{Max: 10}}}
 	capID := uuid.New()
-	if _, err := usage.Bump(ctx, meter.BumpRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: uuid.New(), copies: copies})}); err != nil {
+	if _, err := usage.Bump(ctx, meter.BumpRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: uuid.New(), copies: copies})}, nil); err != nil {
 		t.Fatal(err)
 	}
 	res, err := usage.(meter.CopyUsageReader).CopyUsage(ctx, meter.CopyUsageRequest{CapabilityID: capID, RevocationIDs: [][]byte{copyID}})
@@ -324,7 +349,7 @@ func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
 		t.Fatal(err)
 	}
 	measured("Bump", metricRequestBumps, func() error {
-		_, err := usage.Bump(ctx, meter.BumpRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant})})
+		_, err := usage.Bump(ctx, meter.BumpRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant})}, nil)
 		return err
 	})
 	var receipt meter.ChargeReceipt
