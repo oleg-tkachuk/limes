@@ -29,9 +29,15 @@ func FuzzParse(f *testing.F) {
 		if !ok {
 			return
 		}
+		// What the refusal of raw without its password says too came from
+		// elsewhere: the refusal's own words, or the rest of the URL.
+		var without string
+		if _, err := Parse(rest); err != nil {
+			without = err.Error()
+		}
 		for i := 0; i+leakWindow <= len(password); i++ {
 			part := password[i : i+leakWindow]
-			if strings.Contains(err.Error(), part) && !strings.Contains(rest, part) {
+			if strings.Contains(err.Error(), part) && !strings.Contains(rest, part) && !strings.Contains(without, part) {
 				t.Fatalf("refusal of %q repeats %q of its password: %v", raw, part, err)
 			}
 		}
