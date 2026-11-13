@@ -60,7 +60,7 @@ func baseName(name string) string {
 // quote no semicolon elsewhere, so the split is the statements.
 func statements(sql string) []string {
 	var out []string
-	for _, s := range strings.Split(dollarQuoted.ReplaceAllString(lineComment.ReplaceAllString(sql, ""), "$$$$"), ";") {
+	for s := range strings.SplitSeq(dollarQuoted.ReplaceAllString(lineComment.ReplaceAllString(sql, ""), "$$$$"), ";") {
 		if s = strings.Join(strings.Fields(s), " "); s != "" {
 			out = append(out, s)
 		}

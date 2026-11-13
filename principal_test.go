@@ -153,8 +153,7 @@ func snapshot(c Capability) string {
 func TestCloneCoversEverySharedField(t *testing.T) {
 	for _, v := range []any{Caveats{}, Principal{}, Capability{}, CopyCeiling{}} {
 		typ := reflect.TypeOf(v)
-		for i := range typ.NumField() {
-			field := typ.Field(i)
+		for field := range typ.Fields() {
 			switch field.Type.Kind() {
 			case reflect.Slice, reflect.Pointer, reflect.Map:
 				if !clonedFields[typ.Name()+"."+field.Name] {

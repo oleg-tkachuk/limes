@@ -37,9 +37,7 @@ func TestTwoChildrenRaceForTheirRootsLastCopy(t *testing.T) {
 		errs := make([]error, len(children))
 		var wg sync.WaitGroup
 		for i, child := range children {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				subject := link.NewMeterSubject(link.MeterSubjectFields{
 					CapabilityID: child, TenantID: f.mine,
 					Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true, UnitCode: testUnit},
@@ -48,7 +46,7 @@ func TestTwoChildrenRaceForTheirRootsLastCopy(t *testing.T) {
 				}).(limes.MeterSubject)
 				<-start
 				_, errs[i] = f.usage.Bump(ctx, meter.BumpRequest{Subject: subject})
-			}()
+			})
 		}
 		close(start)
 		wg.Wait()

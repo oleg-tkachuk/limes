@@ -79,11 +79,11 @@ func TestFiveMinutesRuns(t *testing.T) {
 		t.Fatalf("README's %q section has no Go block", fiveMinutes)
 	}
 	body := text[at+start+len(goFence):]
-	end := strings.Index(body, endFence)
-	if end < 0 {
+	before, _, ok := strings.Cut(body, endFence)
+	if !ok {
 		t.Fatal("README's Go block is not closed")
 	}
-	src := fmt.Sprintf(program, body[:end], ranToTheEnd)
+	src := fmt.Sprintf(program, before, ranToTheEnd)
 
 	dir := t.TempDir()
 	file := filepath.Join(dir, "main.go")
