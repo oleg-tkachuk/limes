@@ -168,6 +168,12 @@ type Env struct {
 	// tenants. Optional: without it, Ctx, but for a store that scopes
 	// tenants, whose checks of that are then skipped.
 	AllTenantsCtx context.Context
+	// HoldTenantAlone takes what the store's period reset and its erase of
+	// a tenant's usage take on tenant alone — pgstore's erase lock, a
+	// store's own mutex — and holds it until release is called. Optional:
+	// without it, the check that every call ending a hold, a lease or a
+	// charge waits for a tenant held alone is skipped.
+	HoldTenantAlone func(tenant uuid.UUID) (release func())
 }
 
 // CapabilitySpec is a capability Env.NewCapability records: its parent and
@@ -519,6 +525,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{Name: "ChargesRacingEraseTenantUsageLeaveNothing", Run: checkEraseRacingCharges},
 		{Name: "ConcurrentBudgetWritesAtOneVersionApplyOnce", Run: checkConcurrentBudgetWrites},
 		{Name: "AResetDuringAnEndingCallLeavesTheTenantWhole", Run: checkEndingCallsBesideAReset},
+		{Name: "EveryEndingCallWaitsForATenantHeldAlone", Run: checkEndingCallsWaitForATenantHeldAlone},
 		{Name: "SiblingsChargingAtOnceKeepTheirRootsCeiling", Run: checkSiblingCharges},
 		{Name: "SiblingsHoldingAtOnceKeepTheirRootsCeiling", Run: checkSiblingHolds},
 		{Name: "CapabilitiesChargingAtOnceKeepTheTenantCeiling", Run: checkSiblingTenantCharges},
