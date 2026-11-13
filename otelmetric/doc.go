@@ -27,6 +27,17 @@
 //		otelmetric.WithTenantAttribute(),       // opt-in: one series per tenant
 //	)
 //
+// Code that only counts requests wraps its meter.RequestCounter in
+// InstrumentRequests instead: limes.request.bumps alone, with the same
+// attributes and options, so a dashboard reads one series whichever
+// wrapper a binary uses. Instrument wraps every method of the store and
+// each optional interface it forwards; a binary that reflects on methods
+// by name, as text/template does, keeps all of them and what they call,
+// some megabytes, whether it calls them or not.
+//
+//	requests, err := otelmetric.InstrumentRequests(store,
+//		otelmetric.WithMeterProvider(provider))
+//
 // Instruments are created per store, and an error creating them is
 // returned. A replayed charge, settle or bump moved nothing and is not
 // counted.

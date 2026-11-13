@@ -976,6 +976,13 @@ tenant's queue, and so the sign that its calls should lease. The
 instruments, attributes and options are in
 [the package's reference](api/observing.md#package-otelmetric).
 
+Code that only counts requests wraps its `meter.RequestCounter` in
+`otelmetric.InstrumentRequests` instead. It records the same
+`limes.request.bumps`, by the same attributes and options, and nothing
+else: `Instrument` wraps every method of the store, and a binary that
+reflects on methods by name, as `text/template` does, keeps all of them
+and what they call, whether it calls them or not.
+
 `otelmetric.Instrument` keeps every optional `meter` interface the wrapped
 store implements — `CopyUsageReader`, `TenantUsageEraser`,
 `MatchingReleaser`, `TenantReservationLister`, `Leaser` — and forwards

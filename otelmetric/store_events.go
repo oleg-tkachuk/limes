@@ -37,7 +37,7 @@ func NewStoreEvents(opts ...Option) (meter.StoreEvents, error) {
 	for _, o := range opts {
 		o(&cfg)
 	}
-	in := &meteringInstruments{tenant: cfg.tenant}
+	in := labels{tenant: cfg.tenant}
 	wait, err := providerOf(cfg).Meter(instrumentationScope).Float64Histogram(metricTenantWait,
 		metric.WithUnit(unitSeconds),
 		metric.WithDescription("How long a metered call waited for its tenant's aggregate row: not the tenant's advisory lock, nor the counters of the call's chain."),
