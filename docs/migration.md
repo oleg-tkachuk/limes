@@ -70,6 +70,16 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## v0.184.0
+
+- An error that names a refusal's code (`LimesErrorCode`) while in another
+  refusal's family is answered as the refusal its code names, by
+  `ProblemOf`, `ProblemFor` and `Verifier.ErrorResponse` alike: type,
+  reason, status and challenge are the code's, the problem `ProblemOfCode`
+  gives it. They were the family's, beside the code's own name and
+  category — `no_credentials` with the budget's 403, say. Name the code of
+  the refusal the error is.
+
 ## pgstore/v0.80.0
 
 - A unique violation an `onCharged` of `Settle` meets on a table of its
