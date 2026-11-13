@@ -3,6 +3,7 @@ package memstore
 import (
 	"cmp"
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -109,6 +110,46 @@ func TestCounterContract(t *testing.T) {
 					Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: spec.Requests, Budget: spec.Budget, Copies: spec.CopyQuota()},
 				}
 				return c.ID, records.Insert(context.Background(), limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "issuer"}, SubjectIssuer: spec.SubjectIssuer})
+			},
+		}
+	})
+}
+
+// copyBlind is a counter that sees no Biscuit copy: it refuses a subject
+// that carries one, as a store of a consumer that accepts no Biscuit may.
+type copyBlind struct{ meter.RequestCounter }
+
+// errCopiesUnseen is copyBlind's refusal of a subject with copies.
+var errCopiesUnseen = errors.New("this store counts no Biscuit copy")
+
+func (c copyBlind) Bump(ctx context.Context, req meter.BumpRequest) (meter.BumpReceipt, error) {
+	if len(req.Subject.Copies()) > 0 {
+		return meter.BumpReceipt{}, errCopiesUnseen
+	}
+	return c.RequestCounter.Bump(ctx, req)
+}
+
+// A store that sees no Biscuit copy passes RunCounter with NoCopies set: no
+// check hands it a subject with copies.
+func TestCounterContractWithoutCopies(t *testing.T) {
+	metertest.RunCounter(t, func(t *testing.T) metertest.CounterEnv {
+		t.Helper()
+		records := newTestStore()
+		tenant := uuid.New()
+		usage := mustUsage(t, UsageStoreConfig{Records: records})
+		return metertest.CounterEnv{
+			Ctx:              context.Background(),
+			Counter:          copyBlind{usage},
+			Tenant:           tenant,
+			NoCopies:         true,
+			DeleteCapability: removeRecord(records),
+			NewCapability: func(spec metertest.CapabilitySpec) (uuid.UUID, error) {
+				c := limes.Capability{
+					ID: uuid.New(), ParentID: spec.Parent, ExpiresAt: contractExpiry,
+					Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: cmp.Or(spec.Tenant, tenant), Subject: "agent"},
+					Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: spec.Requests, Budget: spec.Budget},
+				}
+				return c.ID, records.Insert(context.Background(), limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "issuer"}})
 			},
 		}
 	})

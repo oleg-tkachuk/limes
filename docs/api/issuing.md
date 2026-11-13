@@ -6,7 +6,7 @@ Minting a capability, narrowing it for a delegate, and the keys and signers behi
 
 | Package | |
 |---|---|
-| [`github.com/oleg-tkachuk/limes`](#limes) | 15 declarations |
+| [`github.com/oleg-tkachuk/limes`](#limes) | 18 declarations |
 
 <a id="limes"></a>
 
@@ -61,6 +61,28 @@ func HasLimesKeyID(token string) bool
 HasLimesKeyID reports whether token is a compact JWT whose header names a kid in limes's namespace (jwks.KeyIDPrefix): the one thing that tells a capability from an identity provider's access token, since both are typed at+jwt (RFC 9068). It reads the header alone, verifies nothing, and is never an authorization decision: a forged token can name any kid. Use it to route a bearer to the verifier that can decide — Verifier.Verify when it answers true, the identity provider's own verifier when it answers false — which then verifies everything. Verifier.Verify refuses a kid outside the namespace before it looks a key up, so an access token routed to it by mistake is refused, never read; a Biscuit, being no JWT, answers false.
 
 <sub>[key_namespace.go](../../key_namespace.go)</sub>
+<a id="limes.WriteKey"></a>
+
+### limes.WriteKey
+
+```go
+func WriteKey(path string, key SigningKey) error
+```
+
+WriteKey writes key's private key to a new file at path, PKCS#8 under PEM type "PRIVATE KEY" as LoadKey reads it, readable by its owner alone (0600). It refuses, as ErrInvalidConfig, an empty path and a key it cannot export — the zero key, or a crypto.Signer over a key held elsewhere, such as a KMS's; a file already at path, or one it cannot create or write, returns that error wrapped, and a file it began is removed. The kid is not written: LoadKey derives it again.
+
+<sub>[keyloader.go](../../keyloader.go)</sub>
+<a id="limes.WritePublicKey"></a>
+
+### limes.WritePublicKey
+
+```go
+func WritePublicKey(path string, pub ed25519.PublicKey) error
+```
+
+WritePublicKey writes pub to a new file at path, PKIX under PEM type "PUBLIC KEY" as LoadPublicKey reads it (0644). It refuses, as ErrInvalidConfig, an empty path and a key that is not an Ed25519 public key; a file already at path, or one it cannot create or write, returns that error wrapped, and a file it began is removed.
+
+<sub>[keyloader.go](../../keyloader.go)</sub>
 <a id="limes.ContextSigner"></a>
 
 ### limes.ContextSigner
@@ -320,6 +342,31 @@ type IssuerConfig struct {
 IssuerConfig is the wiring for NewIssuer.
 
 <sub>[issuer.go](../../issuer.go)</sub>
+<a id="limes.PublicKey"></a>
+
+### limes.PublicKey
+
+```go
+type PublicKey struct {
+	KeyID string
+	Key   ed25519.PublicKey
+}
+```
+
+PublicKey is an Ed25519 public key and the kid it is published under: a key a verifier trusts, such as one retired from signing, kept without its private half.
+
+<sub>[keyloader.go](../../keyloader.go)</sub>
+<a id="limes.LoadPublicKey"></a>
+
+#### limes.LoadPublicKey
+
+```go
+func LoadPublicKey(path string) (PublicKey, error)
+```
+
+LoadPublicKey reads the PKIX PEM public key at path, under the kid jwks.KeyID derives from it, as LoadKey does for a private key: a key a verifier keeps trusting once it no longer signs needs no private half on disk. It refuses, as ErrInvalidConfig, an empty path, a file that is not PEM, a PEM type other than "PUBLIC KEY" and a key that is not Ed25519; a file it cannot read, or PKIX it cannot parse, returns that error wrapped.
+
+<sub>[keyloader.go](../../keyloader.go)</sub>
 <a id="limes.SealedKey"></a>
 
 ### limes.SealedKey

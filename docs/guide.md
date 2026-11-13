@@ -1527,6 +1527,22 @@ migrations nor `tern`.
   these. It checks the session's role and the login role as well as the
   current one, since a session that switched with `SET ROLE` can switch
   back.
+- One role for both is refused on purpose, and no option lets it pass:
+  the policies bind the owner only until it turns them off, which it
+  may, so a store served as the owner keeps tenants apart only as long as
+  no statement the serving process sends — a mistake, an injection —
+  does that. A database that came with one login needs one role more, created by that
+  login (it needs `CREATEROLE`, which a managed database's first login
+  usually has):
+
+  ```sql
+  CREATE ROLE limes_app LOGIN PASSWORD 'from-your-secret-store';
+  ```
+
+  Then migrate as the owner with
+  `migrate.Options{RuntimeRoles: []string{"limes_app"}}` and build the
+  stores over a pool that logs in as `limes_app`. The owner's login stays
+  with the migration job.
 - `migrate.Run` holds the advisory lock every `tern` migration takes,
   which is reentrant per session: a consumer migrating with `tern` calls
   it on the connection its own run holds.
