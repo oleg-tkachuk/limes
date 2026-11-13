@@ -2,6 +2,21 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.82.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.81.0...pgstore%2Fv0.82.0) (2026-11-13)
+
+### ⚠ BREAKING CHANGES
+
+* **pgstore:** UsageStore.Bump takes an onBumped callback, and the
+  schema moves to version 44.
+
+### Features
+
+* **pgstore:** key bumps and run onBumped on the bump's transaction ([3f0a254](https://github.com/oleg-tkachuk/limes/commit/3f0a254e770e0e2e9b168eab0931e2040c864247))
+
+### Dependencies
+
+* require limes v0.185.0
+
 ## [0.81.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.80.2...pgstore%2Fv0.81.0) (2026-11-13)
 
 ### ⚠ BREAKING CHANGES
