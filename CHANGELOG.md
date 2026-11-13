@@ -2,6 +2,16 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.183.0](https://github.com/oleg-tkachuk/limes/compare/v0.182.0...v0.183.0) (2026-11-13)
+
+### Features
+
+* **verifier:** check a proof against the token as it was presented ([271f6bc](https://github.com/oleg-tkachuk/limes/commit/271f6bc603330089454ac5cc8d925b8153a5ac27))
+
+### Bug Fixes
+
+* **verifier:** bound the presented token and say what its check shows ([1a70284](https://github.com/oleg-tkachuk/limes/commit/1a70284a83f5d271603e2ed1e39b4c1ef9eca7fe))
+
 ## [0.182.0](https://github.com/oleg-tkachuk/limes/compare/v0.181.0...v0.182.0) (2026-11-13)
 
 ### Features
