@@ -70,6 +70,13 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## pgstore/v0.81.0
+
+- A `ListTenantReservations` cursor whose time falls outside the years 1
+  to 9999 is refused as `limes.ErrInvalidRequest`, the client's error,
+  where PostgreSQL's `timestamp out of range` failed the call as the
+  store's. Hand back the cursor a page returned.
+
 ## v0.184.0
 
 - An error that names a refusal's code (`LimesErrorCode`) while in another

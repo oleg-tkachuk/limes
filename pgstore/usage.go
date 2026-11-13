@@ -403,6 +403,22 @@ const holdCursorFields = 3
 // microsPerSecond bounds a cursor's microseconds.
 const microsPerSecond = int64(time.Second / time.Microsecond)
 
+// The years a cursor's time may fall in, as a time Go formats and every
+// expiry the store writes do: a cursor past them is refused as the
+// client's, never handed to PostgreSQL, whose timestamptz range it may
+// leave.
+const (
+	cursorFirstYear = 1
+	cursorLastYear  = 9999
+)
+
+// cursorFirstUnix and cursorLastUnix are the seconds of the first and the
+// last instant of those years.
+var (
+	cursorFirstUnix = time.Date(cursorFirstYear, time.January, 1, 0, 0, 0, 0, time.UTC).Unix()
+	cursorLastUnix  = time.Date(cursorLastYear+1, time.January, 1, 0, 0, 0, 0, time.UTC).Unix() - 1
+)
+
 func (p holdPlace) String() string {
 	return strings.Join([]string{
 		strconv.FormatInt(p.expires.Unix(), 10),
@@ -420,7 +436,7 @@ func parseHoldPlace(cursor string) (holdPlace, error) {
 	sec, err1 := strconv.ParseInt(fields[0], 10, 64)
 	usec, err2 := strconv.ParseInt(fields[1], 10, 64)
 	id, err3 := uuid.Parse(fields[2])
-	if err1 != nil || err2 != nil || err3 != nil || usec < 0 || usec >= microsPerSecond {
+	if err1 != nil || err2 != nil || err3 != nil || usec < 0 || usec >= microsPerSecond || sec < cursorFirstUnix || sec > cursorLastUnix {
 		return holdPlace{}, invalid
 	}
 	return holdPlace{expires: time.Unix(sec, usec*int64(time.Microsecond)).UTC(), id: id}, nil
