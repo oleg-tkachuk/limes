@@ -2,6 +2,21 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.79.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.78.0...pgstore%2Fv0.79.0) (2026-11-13)
+
+### ⚠ BREAKING CHANGES
+
+* **pgstore:** EraseTenant refuses an onErased that sets the session's
+  role, and fails as outcome unknown when onErased ends the transaction.
+* **pgstore:** on a Config.DB that is a *pgx.Conn such a callback leaves
+  the store store_unavailable until the caller connects again.
+
+### Bug Fixes
+
+* **pgstore:** close a connection a callback leaves under another role ([a95c83d](https://github.com/oleg-tkachuk/limes/commit/a95c83da8ef805b60e9b49ba9f70d750c172fc8f))
+* **pgstore:** hold onErased to the rules of a charge's callback ([586a540](https://github.com/oleg-tkachuk/limes/commit/586a54052622446cf3272b863fe84e85736c4a10))
+* **pgstore:** share the tenant lock before delete usage locks a row ([7e9d9b3](https://github.com/oleg-tkachuk/limes/commit/7e9d9b3376a73507b1d803b9f3b908b87809d810))
+
 ## [0.78.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.77.1...pgstore%2Fv0.78.0) (2026-11-12)
 
 ### ⚠ BREAKING CHANGES
