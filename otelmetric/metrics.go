@@ -112,7 +112,8 @@ func outcomeAttrs(outcome string, err error) []attribute.KeyValue {
 	return kv
 }
 
-// Option configures Instrument.
+// Option configures Instrument, InstrumentRequests, NewStoreEvents and
+// InstrumentRevocationCache.
 type Option func(*meteringConfig)
 
 type meteringConfig struct {
@@ -132,13 +133,19 @@ func WithTenantAttribute() Option {
 	return func(c *meteringConfig) { c.tenant = true }
 }
 
-// meteringInstruments are one metered store's instruments.
-type meteringInstruments struct {
+// labels is how a measurement is labelled: with the tenant or without.
+type labels struct {
 	tenant bool
+}
+
+// meteringInstruments are one metered store's instruments: its bumps', as
+// InstrumentRequests creates them, and the rest.
+type meteringInstruments struct {
+	labels
+	*bumpInstruments
 
 	chargeAmount    metric.Float64Counter   // total charged, by unit
 	chargeDecisions metric.Int64Counter     // charge attempts, by outcome
-	requestBumps    metric.Int64Counter     // bump attempts, by outcome
 	refundAmount    metric.Float64Counter   // total refunded, by unit
 	reservations    metric.Int64Counter     // reservation attempts, by outcome
 	currentSpend    metric.Float64Histogram // capability spend after each charge
@@ -160,8 +167,7 @@ func newMeteringInstruments(cfg meteringConfig) (*meteringInstruments, error) {
 		metric.WithDescription("Amount charged against capability budgets, by unit_code."))
 	in.chargeDecisions, errs[1] = meter.Int64Counter(metricChargeDecisions,
 		metric.WithDescription("Charge and settle attempts, by outcome."))
-	in.requestBumps, errs[2] = meter.Int64Counter(metricRequestBumps,
-		metric.WithDescription("Request-count bumps, by outcome."))
+	in.bumpInstruments, errs[2] = newBumpInstruments(meter, in.labels)
 	in.refundAmount, errs[3] = meter.Float64Counter(metricRefundAmount,
 		metric.WithDescription("Amount refunded from recorded charges, by unit_code."))
 	in.reservations, errs[4] = meter.Int64Counter(metricReservations,
@@ -176,8 +182,8 @@ func newMeteringInstruments(cfg meteringConfig) (*meteringInstruments, error) {
 
 // attrs is the attribute set of one measurement: the tenant when enabled,
 // then kv. Every measurement names one, as every verified subject does.
-func (in *meteringInstruments) attrs(tenantID uuid.UUID, kv ...attribute.KeyValue) metric.MeasurementOption {
-	if in.tenant {
+func (l labels) attrs(tenantID uuid.UUID, kv ...attribute.KeyValue) metric.MeasurementOption {
+	if l.tenant {
 		kv = append(kv, attribute.String(attrTenantID, tenantID.String()))
 	}
 	return metric.WithAttributes(kv...)
@@ -214,18 +220,6 @@ func (in *meteringInstruments) recordCharge(ctx context.Context, tenantID uuid.U
 	unit := in.attrs(tenantID, attribute.String(attrUnitCode, receipt.UnitCode))
 	in.chargeAmount.Add(ctx, amount.Float64(), unit)
 	in.currentSpend.Record(ctx, receipt.SpentAmount.Float64(), unit)
-}
-
-// recordBump counts one Bump attempt.
-func (in *meteringInstruments) recordBump(ctx context.Context, tenantID uuid.UUID, err error) {
-	outcome := outcomeAllowed
-	switch {
-	case errors.Is(err, limes.ErrRequestLimitExceeded):
-		outcome = outcomeLimitExceeded
-	case err != nil:
-		outcome = outcomeError
-	}
-	in.requestBumps.Add(ctx, 1, in.attrs(tenantID, outcomeAttrs(outcome, err)...))
 }
 
 // recordRefund counts one committed refund, in the charge's unit.

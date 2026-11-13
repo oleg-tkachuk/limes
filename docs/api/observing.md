@@ -7,7 +7,7 @@ Events the issuer, verifier, revoker and stores report, and their OpenTelemetry 
 | Package | |
 |---|---|
 | [`github.com/oleg-tkachuk/limes`](#limes) | 12 declarations |
-| [`github.com/oleg-tkachuk/limes/otelmetric`](#otelmetric) | 4 declarations |
+| [`github.com/oleg-tkachuk/limes/otelmetric`](#otelmetric) | 5 declarations |
 
 <a id="limes"></a>
 
@@ -349,6 +349,11 @@ The instruments: limes.charge.amount and limes.refund.amount, by limes.unit\_cod
 		otelmetric.WithTenantAttribute(),       // opt-in: one series per tenant
 	)
 
+Code that only counts requests wraps its meter.RequestCounter in InstrumentRequests instead: limes.request.bumps alone, with the same attributes and options, so a dashboard reads one series whichever wrapper a binary uses. Instrument wraps every method of the store and each optional interface it forwards; a binary that reflects on methods by name, as text/template does, keeps all of them and what they call, some megabytes, whether it calls them or not.
+
+	requests, err := otelmetric.InstrumentRequests(store,
+		otelmetric.WithMeterProvider(provider))
+
 Instruments are created per store, and an error creating them is returned. A replayed charge, settle or bump moved nothing and is not counted. limes.tenant\_id is off by default, as it multiplies every series by the number of tenants; with WithTenantAttribute every measurement, a refused charge or settle among them, carries the subject's tenant.
 
 NewStoreEvents returns the callbacks a usage store reports to (pgstore.Config.Events): limes.tenant.wait, a histogram in seconds of how long each metered call waited for its tenant's row — the aggregate's, or its stripe's where the store stripes an unlimited tenant — by limes.operation, the store call:
@@ -375,6 +380,19 @@ Instrument wraps a meter.UsageStore in OpenTelemetry instruments. Its instrument
 The result implements every interface of package meter that inner does — the optional meter.CopyUsageReader, meter.TenantUsageEraser, meter.MatchingReleaser, meter.TenantReservationLister and meter.Leaser — and forwards meter.FeatureGate, so wrapping a store never hides what it can do, nor turns on what its configuration turned off. The decorator forwards a fixed list of optional interfaces (internal/optionalgen), and a test fails when the list misses one the store has.
 
 <sub>[otelmetric/store.go](../../otelmetric/store.go)</sub>
+<a id="otelmetric.InstrumentRequests"></a>
+
+### otelmetric.InstrumentRequests
+
+```go
+func InstrumentRequests(inner meter.RequestCounter, opts ...Option) (meter.RequestCounter, error)
+```
+
+InstrumentRequests wraps a meter.RequestCounter in limes.request.bumps alone: the instrument, attributes and options Instrument counts a Bump with, so a dashboard reads one series whichever wrapper a binary uses. Its instruments are created on the global MeterProvider unless WithMeterProvider names another, and carry no tenant unless WithTenantAttribute asks for it.
+
+Use it where the code only counts requests. Instrument wraps every method of a meter.UsageStore and its optional interfaces, and a binary that reflects on methods by name, as text/template does, keeps every one of them and what they call, whether or not the binary calls it; this wrapper has one method. The result is a meter.RequestCounter and nothing more: none of inner's other interfaces reach through it.
+
+<sub>[otelmetric/requests.go](../../otelmetric/requests.go)</sub>
 <a id="otelmetric.InstrumentRevocationCache"></a>
 
 ### otelmetric.InstrumentRevocationCache
@@ -405,7 +423,7 @@ NewStoreEvents returns the callbacks a usage store reports to as it works (pgsto
 type Option func(*meteringConfig)
 ```
 
-Option configures Instrument.
+Option configures Instrument, InstrumentRequests, NewStoreEvents and InstrumentRevocationCache.
 
 <sub>[otelmetric/metrics.go](../../otelmetric/metrics.go)</sub>
 <a id="otelmetric.WithMeterProvider"></a>
