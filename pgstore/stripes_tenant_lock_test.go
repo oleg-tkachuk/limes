@@ -150,7 +150,14 @@ func TestResetDuringAnEndingCallLeavesNoStaleStripe(t *testing.T) {
 			}
 			var resetErr error
 			resetDone := make(chan error, 1)
+			// The store runs the callback again after a deadlock: the
+			// reset is sent from its first run alone.
+			var sent bool
 			onDone := func(context.Context) error {
+				if sent {
+					return nil
+				}
+				sent = true
 				// From a goroutine of its own, as an operator's reset comes:
 				// the call's transaction is left open meanwhile.
 				go func() {
