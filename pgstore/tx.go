@@ -53,10 +53,13 @@ var ErrChargeTransaction = fmt.Errorf("%w: pgstore: the transaction a callback r
 // QueuedQuery callback, a sql.Scanner, a driver.Valuer, a
 // pgx.CopyFromSource — which would otherwise wait on itself with the
 // tenant's locks held. Rows and batch results still open when the callback
-// returns are closed then, and read no further. A callback that sets the
-// session's role — SET ROLE, not SET LOCAL ROLE — has the call refused
-// with ErrChargeTransaction and rolled back, the role with it: committed,
-// it would outlast the call on the pooled connection. One that sets it
+// returns are closed then, and read no further. A callback that returns
+// under another role than it found has the call refused with
+// ErrChargeTransaction and rolled back, the role with it: the store's
+// statements after it would run under that role, and a SET ROLE,
+// committed, would outlast the call on the pooled connection. That holds
+// for SET LOCAL ROLE as for SET ROLE; a callback that sets a role for its
+// own statements sets it back before it returns. One that sets it
 // where no ROLLBACK reaches — around a COMMIT or ROLLBACK of its own — has
 // the connection closed rather than given back under that role; on a
 // Config.DB that is a *pgx.Conn the store is then store_unavailable until
@@ -198,7 +201,15 @@ func (t *callbackTx) CopyFrom(ctx context.Context, table pgx.Identifier, columns
 	return n, err
 }
 
+// SendBatch sends b, its QueuedQuery callbacks handed results whose rows
+// keep the connection, as the transaction's do (heldResults): pgx calls
+// them with its own, from the read that holds the transaction.
 func (t *callbackTx) SendBatch(ctx context.Context, b *pgx.Batch) pgx.BatchResults {
+	for _, qq := range b.QueuedQueries {
+		if fn := qq.Fn; fn != nil {
+			qq.Fn = func(br pgx.BatchResults) error { return fn(heldResults{br}) }
+		}
+	}
 	var results pgx.BatchResults
 	if err := t.guard.run(func() error {
 		results = t.guard.batch(t.tx.SendBatch(ctx, b))

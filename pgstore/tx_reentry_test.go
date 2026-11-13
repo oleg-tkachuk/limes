@@ -182,3 +182,31 @@ func TestTxFromLendsNoLargeObjects(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A batch's QueuedQuery callback reads rows whose Conn is nil, as the
+// transaction's are: the connection is the store's, and through it the
+// callback could run beside the store's own statements.
+func TestTxFromBatchCallbackRowsLendNoConn(t *testing.T) {
+	f := newTenantFixture(t)
+	ctx := WithTenant(t.Context(), f.mine)
+	var called bool
+	var conn *pgx.Conn
+	onCharged := func(ctx context.Context, _ meter.Charged) error {
+		tx, _ := TxFrom(ctx)
+		b := &pgx.Batch{}
+		b.Queue(sqlOne).Query(func(rows pgx.Rows) error {
+			called, conn = true, rows.Conn()
+			return nil
+		})
+		return tx.SendBatch(ctx, b).Close()
+	}
+	if _, err := f.usage.Charge(ctx, meter.ChargeRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1}, onCharged); err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("the QueuedQuery callback did not run")
+	}
+	if conn != nil {
+		t.Error("a QueuedQuery callback's rows lent the store's connection")
+	}
+}

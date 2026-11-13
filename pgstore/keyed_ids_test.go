@@ -1,9 +1,12 @@
 package pgstore
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"uuid"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/meter"
@@ -83,5 +86,39 @@ func TestSettleUnderAnotherTenantsSettledIDConflicts(t *testing.T) {
 	_, err := f.usage.Settle(mine, meter.SettleRequest{Subject: mySubject, ReservationID: id, Amount: amount}, nil)
 	if !errors.Is(err, meter.ErrReserveConflict) || errors.Is(err, limes.ErrInternal) {
 		t.Errorf("Settle under another tenant's settled reservation id: %v, want ErrReserveConflict", err)
+	}
+}
+
+// The SQL of an onCharged that violates a unique constraint of its own
+// table named as the store's key of a settled hold.
+const (
+	sqlCreateLookalikeKey  = `CREATE TEMP TABLE consumer_rows (n int CONSTRAINT charges_reservation UNIQUE) ON COMMIT DROP`
+	sqlViolateLookalikeKey = `INSERT INTO consumer_rows VALUES (1), (1)`
+)
+
+// A unique violation of the consumer's own table that an onCharged hits is
+// the consumer's error, as it is, even under the name of the store's key of
+// a settled hold: only the store's own key is a reserve conflict.
+func TestSettleKeepsACallbacksOwnUniqueViolation(t *testing.T) {
+	f := newTenantFixture(t)
+	ctx := WithTenant(t.Context(), f.mine)
+	subject := meterSubject(f.child.ID, f.mine)
+	const amount = 2
+	id := uuid.New()
+	if _, err := f.usage.Reserve(ctx, meter.ReserveRequest{Subject: subject, Amount: amount, ReservationID: id}); err != nil {
+		t.Fatal(err)
+	}
+	onCharged := func(ctx context.Context, _ meter.Charged) error {
+		tx, _ := TxFrom(ctx)
+		if _, err := tx.Exec(ctx, sqlCreateLookalikeKey); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, sqlViolateLookalikeKey)
+		return err
+	}
+	_, err := f.usage.Settle(ctx, meter.SettleRequest{Subject: subject, ReservationID: id, Amount: amount}, onCharged)
+	var pgErr *pgconn.PgError
+	if errors.Is(err, meter.ErrReserveConflict) || !errors.As(err, &pgErr) || pgErr.Code != uniqueViolation {
+		t.Errorf("a Settle whose onCharged violated its own key: %v, want that violation, no ErrReserveConflict", err)
 	}
 }
