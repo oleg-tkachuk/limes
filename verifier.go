@@ -40,6 +40,12 @@ type KeyResolver interface {
 // larger is refused before any decoding is spent on it.
 const DefaultMaxTokenBytes = 16 << 10
 
+// MaxEnvelopeBytes is how much longer than VerifierConfig.MaxTokenBytes a
+// VerifyRequest.PresentedToken may be: room for what a consumer's envelope
+// puts around the token — a prefix, a tenant, a signature of its own — and
+// a bound on what the proof's ath is computed over.
+const MaxEnvelopeBytes = 1 << 10
+
 // DefaultLeeway is VerifierConfig.Leeway when it is zero.
 const DefaultLeeway = 30 * time.Second
 
@@ -211,7 +217,14 @@ type VerifyRequest struct {
 	// consumer that hands its clients Token inside an envelope of its own:
 	// a key-bound capability's proof names what the client presented
 	// (RFC 9449 §4.2, ath), so it is checked against this. Empty is Token.
-	// Set, it must hold Token, or the request is ErrInvalidRequest.
+	// Set, it is held to MaxTokenBytes plus MaxEnvelopeBytes, as Token is
+	// to MaxTokenBytes, past which the token is refused as ErrInvalidToken;
+	// and it must hold Token, or the request is ErrInvalidRequest. That
+	// check knows no envelope's format, so it shows only that Token is in
+	// PresentedToken, not that the consumer read Token out of it: reading
+	// it out is the consumer's, from the one credential the request
+	// carried, never from another header or field. For a capability bound
+	// to no key there is no proof, and PresentedToken changes nothing else.
 	PresentedToken string
 }
 
@@ -418,6 +431,9 @@ func (v *Verifier) verify(ctx context.Context, req VerifyRequest, accept func(Ca
 	if err := checkVerifyRequest(req); err != nil {
 		return VerifiedCapability{}, nil, err
 	}
+	if err := v.checkPresented(req); err != nil {
+		return VerifiedCapability{}, nil, err
+	}
 	cap, biscuitIDs, err := v.authenticate(ctx, req.Token)
 	if err != nil {
 		return VerifiedCapability{}, cap, err
@@ -457,7 +473,20 @@ func checkVerifyRequest(req VerifyRequest) error {
 	if req.Audience == "" {
 		return refuseRequest("VerifyRequest.Audience is required")
 	}
-	if req.PresentedToken != "" && !strings.Contains(req.PresentedToken, req.Token) {
+	return nil
+}
+
+// checkPresented holds req's PresentedToken, when set, to the bound of a
+// token and its envelope (MaxEnvelopeBytes), before any byte of it is read,
+// and to holding Token.
+func (v *Verifier) checkPresented(req VerifyRequest) error {
+	if req.PresentedToken == "" {
+		return nil
+	}
+	if limit := v.cfg.MaxTokenBytes + MaxEnvelopeBytes; len(req.PresentedToken) > limit {
+		return fmt.Errorf("%w: presented token is %d bytes (limit %d)", ErrInvalidToken, len(req.PresentedToken), limit)
+	}
+	if !strings.Contains(req.PresentedToken, req.Token) {
 		return refuseRequest("VerifyRequest.PresentedToken does not hold Token")
 	}
 	return nil

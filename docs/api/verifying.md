@@ -6,7 +6,7 @@ Checking a presented token and authorizing a call with it. Part of the [API refe
 
 | Package | |
 |---|---|
-| [`github.com/oleg-tkachuk/limes`](#limes) | 18 declarations |
+| [`github.com/oleg-tkachuk/limes`](#limes) | 19 declarations |
 
 <a id="limes"></a>
 
@@ -56,6 +56,17 @@ const DefaultRealm = "limes"
 ```
 
 DefaultRealm is the realm of a verifier whose config names none.
+
+<sub>[verifier.go](../../verifier.go)</sub>
+<a id="limes.MaxEnvelopeBytes"></a>
+
+### limes.MaxEnvelopeBytes
+
+```go
+const MaxEnvelopeBytes = 1 << 10
+```
+
+MaxEnvelopeBytes is how much longer than VerifierConfig.MaxTokenBytes a VerifyRequest.PresentedToken may be: room for what a consumer's envelope puts around the token — a prefix, a tenant, a signature of its own — and a bound on what the proof's ath is computed over.
 
 <sub>[verifier.go](../../verifier.go)</sub>
 <a id="limes.MaxLeeway"></a>
@@ -590,7 +601,14 @@ type VerifyRequest struct {
 	// consumer that hands its clients Token inside an envelope of its own:
 	// a key-bound capability's proof names what the client presented
 	// (RFC 9449 §4.2, ath), so it is checked against this. Empty is Token.
-	// Set, it must hold Token, or the request is ErrInvalidRequest.
+	// Set, it is held to MaxTokenBytes plus MaxEnvelopeBytes, as Token is
+	// to MaxTokenBytes, past which the token is refused as ErrInvalidToken;
+	// and it must hold Token, or the request is ErrInvalidRequest. That
+	// check knows no envelope's format, so it shows only that Token is in
+	// PresentedToken, not that the consumer read Token out of it: reading
+	// it out is the consumer's, from the one credential the request
+	// carried, never from another header or field. For a capability bound
+	// to no key there is no proof, and PresentedToken changes nothing else.
 	PresentedToken string
 }
 ```
