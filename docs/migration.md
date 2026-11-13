@@ -77,6 +77,10 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
   store's key of a settled hold (`charges_reservation`) was answered as
   `meter.ErrReserveConflict`. Only a violation of the store's own key in
   its schema is a reserve conflict.
+- The rows a batch's `QueuedQuery` callback reads on the transaction
+  `TxFrom` lends answer `Conn` with nil, as the transaction's own rows do,
+  where they handed out the store's `*pgx.Conn`. Run what that connection
+  served on the transaction itself.
 
 ## v0.181.0
 

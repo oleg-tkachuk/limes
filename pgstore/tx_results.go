@@ -127,6 +127,23 @@ func (r *guardedRows) TypeMap() *pgtype.Map {
 	return m
 }
 
+// heldResults is a batch's results as pgx hands them to a QueuedQuery
+// callback, from the read of the callback's call that holds the
+// transaction already: the rows they hand out keep the connection
+// (connlessRows), and the read needs no other hold.
+type heldResults struct{ pgx.BatchResults }
+
+func (r heldResults) Query() (pgx.Rows, error) {
+	rows, err := r.BatchResults.Query()
+	return connlessRows{rows}, err
+}
+
+// connlessRows are rows whose Conn is nil, as the transaction's is: the
+// connection is the store's.
+type connlessRows struct{ pgx.Rows }
+
+func (connlessRows) Conn() *pgx.Conn { return nil }
+
 // firstRow is the first of rows, as pgx's QueryRow reads it: no row is
 // pgx.ErrNoRows, and the rows are closed once scanned.
 type firstRow struct{ rows pgx.Rows }

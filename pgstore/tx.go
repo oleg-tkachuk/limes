@@ -198,7 +198,15 @@ func (t *callbackTx) CopyFrom(ctx context.Context, table pgx.Identifier, columns
 	return n, err
 }
 
+// SendBatch sends b, its QueuedQuery callbacks handed results whose rows
+// keep the connection, as the transaction's do (heldResults): pgx calls
+// them with its own, from the read that holds the transaction.
 func (t *callbackTx) SendBatch(ctx context.Context, b *pgx.Batch) pgx.BatchResults {
+	for _, qq := range b.QueuedQueries {
+		if fn := qq.Fn; fn != nil {
+			qq.Fn = func(br pgx.BatchResults) error { return fn(heldResults{br}) }
+		}
+	}
 	var results pgx.BatchResults
 	if err := t.guard.run(func() error {
 		results = t.guard.batch(t.tx.SendBatch(ctx, b))
