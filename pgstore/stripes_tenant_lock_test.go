@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/meter"
@@ -181,6 +182,91 @@ func TestResetDuringAnEndingCallLeavesNoStaleStripe(t *testing.T) {
 			}
 			if _, err := usage.SetTenantBudget(ctx, reset); err != nil {
 				t.Errorf("a reset after %s: %v", name, err)
+			}
+		})
+	}
+}
+
+// advisoryWaitPoll and advisoryWaitLimit pace waitAdvisoryWaiters.
+const (
+	advisoryWaitPoll  = 20 * time.Millisecond
+	advisoryWaitLimit = 10 * time.Second
+)
+
+// sqlAdvisoryWaiters counts the advisory lock requests that wait.
+const sqlAdvisoryWaiters = `SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`
+
+// waitAdvisoryWaiters waits until n advisory lock requests wait.
+func waitAdvisoryWaiters(t *testing.T, n int) {
+	t.Helper()
+	deadline := time.Now().Add(advisoryWaitLimit)
+	for time.Now().Before(deadline) {
+		var waiting int
+		if err := owner.QueryRow(context.Background(), sqlAdvisoryWaiters).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting >= n {
+			return
+		}
+		time.Sleep(advisoryWaitPoll)
+	}
+	t.Fatalf("fewer than %d advisory lock requests waited", n)
+}
+
+// tenantAloneCalls are the calls that hold a tenant's erase lock alone and
+// then lock its rows.
+var tenantAloneCalls = map[string]func(ctx context.Context, usage *UsageStore, tenant uuid.UUID) error{
+	"EraseTenantUsage": func(ctx context.Context, usage *UsageStore, tenant uuid.UUID) error {
+		_, err := usage.EraseTenantUsage(ctx, meter.EraseTenantUsageRequest{TenantID: tenant})
+		return err
+	},
+	"SetTenantBudget": func(ctx context.Context, usage *UsageStore, tenant uuid.UUID) error {
+		_, err := usage.SetTenantBudget(ctx, meter.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: resetCeiling, UnitCode: testUnit}})
+		return err
+	},
+}
+
+// DeleteUsage of a leaseholder shares its tenant's lock before it locks a
+// row, as every call that settles a lease does: queued behind a call that
+// holds the lock alone and then locks the same rows, both finish, and
+// neither is chosen as a deadlock's victim.
+func TestDeleteUsageOfALeaseholderBesideACallHoldingItsTenantAlone(t *testing.T) {
+	for name, alone := range tenantAloneCalls {
+		t.Run(name, func(t *testing.T) {
+			fresh(t)
+			usage := stripedStore(t, Config{})
+			subject := leaseholderOf(t)
+			tenant := subject.TenantID()
+			ctx := WithTenant(t.Context(), tenant)
+			if _, err := usage.Lease(ctx, meter.LeaseRequest{Subject: subject, Amount: stripedAmount}); err != nil {
+				t.Fatal(err)
+			}
+			// A call of the tenant in flight shares its lock, as a Charge
+			// does, so the call holding it alone and the drop queue behind.
+			inFlight, err := owner.Begin(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = inFlight.Rollback(context.Background()) }()
+			if _, err := inFlight.Exec(context.Background(), sqlShareTenantLock, eraseLockClass, tenant); err != nil {
+				t.Fatal(err)
+			}
+			aloneDone := make(chan error, 1)
+			go func() { aloneDone <- alone(ctx, usage, tenant) }()
+			waitAdvisoryWaiters(t, 1)
+			dropDone := make(chan error, 1)
+			go func() {
+				dropDone <- usage.DeleteUsage(ctx, meter.DeleteUsageRequest{CapabilityID: subject.CapabilityID()})
+			}()
+			waitAdvisoryWaiters(t, 2)
+			if err := inFlight.Rollback(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if err := <-aloneDone; err != nil {
+				t.Errorf("%s: %v", name, err)
+			}
+			if err := <-dropDone; err != nil {
+				t.Errorf("DeleteUsage queued behind %s: %v", name, err)
 			}
 		})
 	}
