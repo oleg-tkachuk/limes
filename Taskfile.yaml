@@ -18,7 +18,7 @@ vars:
   # pin fetched is committed under .task/remote, and .taskrc.yml has every run
   # load it from there: a moved tag changes nothing until `task tasklib:bump
   # VERSION=<tag>` moves the pin and the lock together.
-  TASKLIB: 'https://github.com/oleg-tkachuk/taskfiles.git//%s?ref=v14.14.0'
+  TASKLIB: 'https://github.com/oleg-tkachuk/taskfiles.git//%s?ref=v14.18.0'
   # The developer tools' own module; see its go.mod.
   TOOLS_MODFILE: tools/go.mod
   # golangci-lint's module, apart from TOOLS_MODFILE; see its go.mod.
