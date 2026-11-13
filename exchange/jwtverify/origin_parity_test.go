@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lestrrat-go/jwx/v3/jwa"
-	"github.com/lestrrat-go/jwx/v3/jwk"
-	"github.com/lestrrat-go/jwx/v3/jws"
+	"github.com/lestrrat-go/jwx/v4/jwa"
+	"github.com/lestrrat-go/jwx/v4/jwk"
+	"github.com/lestrrat-go/jwx/v4/jws"
 
 	"github.com/oleg-tkachuk/limes/exchange/jwtverify"
 	"github.com/oleg-tkachuk/limes/jwks"
@@ -80,7 +80,7 @@ func newParityKeys(t *testing.T) parityKeys {
 	if err != nil {
 		t.Fatal(err)
 	}
-	k, err := jwk.Import(pub)
+	k, err := jwk.Import[jwk.Key](pub)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -25,9 +25,9 @@ import (
 	"time"
 	"uuid"
 
-	"github.com/lestrrat-go/jwx/v3/jwa"
-	"github.com/lestrrat-go/jwx/v3/jwk"
-	"github.com/lestrrat-go/jwx/v3/jws"
+	"github.com/lestrrat-go/jwx/v4/jwa"
+	"github.com/lestrrat-go/jwx/v4/jwk"
+	"github.com/lestrrat-go/jwx/v4/jws"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/examples/internal/demo"
@@ -79,7 +79,7 @@ func newIDP() (*idp, error) {
 	if err != nil {
 		return nil, err
 	}
-	pub, err := jwk.Import(key.Public())
+	pub, err := jwk.Import[jwk.Key](key.Public())
 	if err != nil {
 		return nil, err
 	}

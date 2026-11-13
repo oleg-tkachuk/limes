@@ -3,6 +3,7 @@ package jwtverify
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -12,7 +13,7 @@ import (
 
 	"github.com/lestrrat-go/httprc/v3"
 	"github.com/lestrrat-go/httprc/v3/errsink"
-	"github.com/lestrrat-go/jwx/v3/jwk"
+	"github.com/lestrrat-go/jwx/v4/jwk"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/internal/errs"
@@ -51,8 +52,8 @@ const (
 // background every few minutes until ctx is done. rawURL must be an https
 // URL with a host: over anything else whoever sits on the path chooses the
 // keys, and so the subject tokens the exchange accepts; any other is
-// limes.ErrInvalidConfig. client fetches it; nil: jwk.DefaultHTTPClient,
-// with a request timeout. Whatever the client's own redirect policy, a
+// limes.ErrInvalidConfig. client fetches it; nil: a client bounded by
+// jwks.DefaultFetchTimeout, as jwks.Remote's. Whatever the client's own redirect policy, a
 // redirect to another scheme or host is refused, on a copy of the client:
 // the caller's is left as it is. It does not wait for the first fetch. A
 // token naming a kid the set does not hold, or arriving while no usable set
@@ -83,7 +84,7 @@ func newRemote(ctx context.Context, rawURL string, client *http.Client, now func
 		return nil, err
 	}
 	if client == nil {
-		client = jwk.DefaultHTTPClient()
+		client = defaultKeysClient()
 	}
 	client = httpsurl.SameOrigin(client)
 	// httprc and jwx quote the URL they fetch in their errors, which are
@@ -113,6 +114,14 @@ func newRemote(ctx context.Context, rawURL string, client *http.Client, now func
 		return nil, errs.Errorf("%w: jwtverify: RemoteKeys %s: %w", limes.ErrInvalidConfig, r.endpoint, err)
 	}
 	return r, nil
+}
+
+// defaultKeysClient is the client RemoteKeys fetches with when given none:
+// jwks.Remote's, bounded by jwks.DefaultFetchTimeout, over the default
+// transport, so a deployment's proxy settings apply as they do to the
+// issuer's own keys.
+func defaultKeysClient() *http.Client {
+	return &http.Client{Timeout: jwks.DefaultFetchTimeout}
 }
 
 // source is the KeySource of r.
@@ -152,14 +161,15 @@ type remote struct {
 
 // transform reads a fetched JWK Set document, no larger than
 // jwks.DefaultMaxDocumentBytes, as jwks.Remote caps the issuer's own,
-// recording when it was read. The cap is limes's: jwx's own read limit is
-// one setting of the whole process, which any jwk.Configure in the binary
-// moves.
-func (r *remote) transform(ctx context.Context, res *http.Response) (jwk.Set, error) {
-	res.Body = http.MaxBytesReader(nil, res.Body, jwks.DefaultMaxDocumentBytes)
-	set, err := (&jwk.Transformer{}).Transform(ctx, res)
+// recording when it was read.
+func (r *remote) transform(_ context.Context, res *http.Response) (jwk.Set, error) {
+	body, err := io.ReadAll(http.MaxBytesReader(nil, res.Body, jwks.DefaultMaxDocumentBytes))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("jwtverify: reading the JWK Set at %s: %w", r.endpoint, err)
+	}
+	set, err := jwk.Parse(body)
+	if err != nil {
+		return nil, fmt.Errorf("jwtverify: parsing the JWK Set at %s: %w", r.endpoint, err)
 	}
 	r.mu.Lock()
 	r.fetchedAt = r.now()

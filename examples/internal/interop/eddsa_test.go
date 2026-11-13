@@ -9,7 +9,7 @@ import (
 	gojose "github.com/go-jose/go-jose/v4"
 	gojosejwt "github.com/go-jose/go-jose/v4/jwt"
 	gojwt "github.com/golang-jwt/jwt/v5"
-	"github.com/lestrrat-go/jwx/v3/jwt"
+	"github.com/lestrrat-go/jwx/v4/jwt"
 
 	"github.com/oleg-tkachuk/limes"
 )
