@@ -220,11 +220,13 @@ func (t *callbackTx) SendBatch(ctx context.Context, b *pgx.Batch) pgx.BatchResul
 	return results
 }
 
-// LargeObjects is the zero LargeObjects, which no call can use: the
-// transaction lends none. pgx.LargeObjects is a struct over the transaction
-// it was made on, which this one cannot stand in for, so its calls would
-// not be taken one at a time, and one kept past the callback would run
-// beside the store's COMMIT.
+// LargeObjects is the zero LargeObjects, which no call can use: every call
+// on it panics, as on any zero pgx.LargeObjects, since it can return no
+// error of its own. The transaction lends none: pgx.LargeObjects is a
+// struct over the transaction it was made on, which this one cannot stand
+// in for, so its calls would not be taken one at a time, and one kept past
+// the callback would run beside the store's COMMIT. A callback keeps its
+// data in tables.
 func (t *callbackTx) LargeObjects() pgx.LargeObjects { return pgx.LargeObjects{} }
 
 func (t *callbackTx) Prepare(ctx context.Context, name, sql string) (*pgconn.StatementDescription, error) {

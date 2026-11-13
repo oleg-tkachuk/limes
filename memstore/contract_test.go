@@ -67,6 +67,10 @@ func contractEnv(t *testing.T) metertest.Env {
 		Tenant:                 tenant,
 		Advance:                func(d time.Duration) { offset.Add(int64(d)) },
 		DeleteCapability:       removeRecord(records),
+		HoldTenantAlone: func(uuid.UUID) func() {
+			usage.mu.Lock()
+			return usage.mu.Unlock
+		},
 		Revoke: func(id uuid.UUID) error {
 			_, err := records.Revoke(context.Background(), limes.RevokeRequest{CapabilityID: id})
 			return err

@@ -336,23 +336,30 @@ func codeRuleFor(err error) (codeRule, bool) {
 }
 
 // namedCodeRule is the rule of the first error in err's tree, depth first
-// as errors.As walks it, that names a code (errcode.Coded) a table holds.
+// as errors.As walks it, that names a code (errcode.Coded) a table holds. A
+// chain of single errors is walked in a loop, as errors.As walks it, not
+// one call deeper per error: a chain that loops back on itself, a
+// consumer's error type's mistake, loops here as it does in errors.As,
+// rather than end the process when the stack runs out.
 func namedCodeRule(err error) (codeRule, bool) {
-	if coded, ok := err.(errcode.Coded); ok { //nolint:errorlint // this node of the tree, which the walk below unwraps
-		if r, ok := codeRuleOf(Code(coded.LimesErrorCode())); ok {
-			return r, true
-		}
-	}
-	switch u := err.(type) { //nolint:errorlint // the walk errors.As makes, which stops at the first match
-	case interface{ Unwrap() error }:
-		if inner := u.Unwrap(); inner != nil {
-			return namedCodeRule(inner)
-		}
-	case interface{ Unwrap() []error }:
-		for _, inner := range u.Unwrap() {
-			if r, ok := namedCodeRule(inner); ok {
+	for err != nil {
+		if coded, ok := err.(errcode.Coded); ok { //nolint:errorlint // this node of the tree, which the walk below unwraps
+			if r, ok := codeRuleOf(Code(coded.LimesErrorCode())); ok {
 				return r, true
 			}
+		}
+		switch u := err.(type) { //nolint:errorlint // the walk errors.As makes, which stops at the first match
+		case interface{ Unwrap() error }:
+			err = u.Unwrap()
+		case interface{ Unwrap() []error }:
+			for _, inner := range u.Unwrap() {
+				if r, ok := namedCodeRule(inner); ok {
+					return r, true
+				}
+			}
+			return codeRule{}, false
+		default:
+			return codeRule{}, false
 		}
 	}
 	return codeRule{}, false

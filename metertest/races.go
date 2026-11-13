@@ -464,3 +464,86 @@ func checkEndingCallsBesideAReset(t *testing.T, f fixture) {
 		})
 	}
 }
+
+// heldAloneWait is how long a call ending a hold, a lease or a charge is
+// given to return while its tenant is held alone: long enough that one that
+// does not wait has returned by then.
+const heldAloneWait = 300 * time.Millisecond
+
+// tenantEndingCalls are the calls that end what a Reserve, a Lease or a
+// Charge made, each given what its setup made; a setup returns false when
+// the store makes no such thing.
+var tenantEndingCalls = map[string]struct {
+	setup func(t *testing.T, f fixture) (any, bool)
+	end   func(f fixture, made any) error
+}{
+	"a Settle": {
+		setup: func(t *testing.T, f fixture) (any, bool) { return endingCalls["a Settle"].setup(t, f), true },
+		end:   func(f fixture, made any) error { return endingCalls["a Settle"].end(f, made, func() {}) },
+	},
+	"a Refund": {
+		setup: func(t *testing.T, f fixture) (any, bool) { return endingCalls["a Refund"].setup(t, f), true },
+		end:   func(f fixture, made any) error { return endingCalls["a Refund"].end(f, made, func() {}) },
+	},
+	"a Release": {
+		setup: func(t *testing.T, f fixture) (any, bool) { return endingCalls["a Settle"].setup(t, f), true },
+		end: func(f fixture, made any) error {
+			return f.Usage.Release(f.Ctx, meter.ReleaseRequest{Subject: f.childSubject(), ReservationID: made.(uuid.UUID)})
+		},
+	},
+	"a SettleLease": {
+		setup: func(t *testing.T, f fixture) (any, bool) {
+			l, ok := f.Usage.(meter.Leaser)
+			if !ok {
+				return nil, false
+			}
+			_, err := l.Lease(f.Ctx, meter.LeaseRequest{Subject: f.childSubject(), Amount: cent})
+			if errors.Is(err, meter.ErrFeatureDisabled) {
+				return nil, false
+			}
+			expect.Must(t, err == nil, "lease: %v", err)
+			return l, true
+		},
+		end: func(f fixture, made any) error {
+			_, err := made.(meter.Leaser).SettleLease(f.Ctx, meter.SettleLeaseRequest{Subject: f.childSubject()})
+			return err
+		},
+	},
+}
+
+// Every call that ends a hold, a lease or a charge — and so writes the
+// tenant's spend — waits while its tenant is held alone, as a period reset
+// or an erase holds it (Env.HoldTenantAlone), and then succeeds: one that
+// did not could land its change in a period the reset closed, or on usage
+// the erase removed.
+func checkEndingCallsWaitForATenantHeldAlone(t *testing.T, f fixture) {
+	if f.HoldTenantAlone == nil {
+		t.Skip("no Env.HoldTenantAlone")
+	}
+	for name, call := range tenantEndingCalls {
+		t.Run(name, func(t *testing.T) {
+			made, ok := call.setup(t, f)
+			if !ok {
+				t.Skip("the store makes no lease")
+			}
+			release := f.HoldTenantAlone(f.Tenant)
+			released := false
+			defer func() {
+				if !released {
+					release()
+				}
+			}()
+			done := make(chan error, 1)
+			go func() { done <- call.end(f, made) }()
+			select {
+			case err := <-done:
+				t.Fatalf("%s returned while its tenant was held alone: %v", name, err)
+			case <-time.After(heldAloneWait):
+			}
+			release()
+			released = true
+			err := <-done
+			expect.Must(t, err == nil, "%s once its tenant was let go: %v", name, err)
+		})
+	}
+}
