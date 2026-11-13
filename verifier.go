@@ -207,6 +207,12 @@ type VerifyRequest struct {
 	// (ParseAuthorization). Set, it must match the binding: DPoP for a
 	// key-bound capability, Bearer for any other.
 	Scheme AuthScheme
+	// PresentedToken is the credential as the request carried it, for a
+	// consumer that hands its clients Token inside an envelope of its own:
+	// a key-bound capability's proof names what the client presented
+	// (RFC 9449 §4.2, ath), so it is checked against this. Empty is Token.
+	// Set, it must hold Token, or the request is ErrInvalidRequest.
+	PresentedToken string
 }
 
 // AuthorizeRequest is a VerifyRequest and the operation it is presented for.
@@ -451,7 +457,19 @@ func checkVerifyRequest(req VerifyRequest) error {
 	if req.Audience == "" {
 		return refuseRequest("VerifyRequest.Audience is required")
 	}
+	if req.PresentedToken != "" && !strings.Contains(req.PresentedToken, req.Token) {
+		return refuseRequest("VerifyRequest.PresentedToken does not hold Token")
+	}
 	return nil
+}
+
+// presented is the credential req's proof names: the presented token, or
+// the token where the request names none.
+func (req VerifyRequest) presented() string {
+	if req.PresentedToken != "" {
+		return req.PresentedToken
+	}
+	return req.Token
 }
 
 // checkPossession holds the request to what cap's binding calls for (6): the
@@ -470,7 +488,7 @@ func (v *Verifier) checkPossession(ctx context.Context, req VerifyRequest, cap *
 	if v.cfg.DPoP == nil {
 		return dpop.CheckedProof{}, ErrProofUnsupported
 	}
-	proof, err := v.cfg.DPoP.Check(ctx, dpop.Request{Proof: req.DPoP, Token: req.Token, JKT: cap.ConfirmationJKT, Holder: cap.ID.String()})
+	proof, err := v.cfg.DPoP.Check(ctx, dpop.Request{Proof: req.DPoP, Token: req.presented(), JKT: cap.ConfirmationJKT, Holder: cap.ID.String()})
 	if err != nil {
 		return dpop.CheckedProof{}, proofError(err)
 	}

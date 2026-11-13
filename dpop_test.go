@@ -19,6 +19,8 @@ import (
 const (
 	dpopURL    = "https://data.example.com/example.data.v1.ObjectService/GetObject"
 	dpopMethod = "POST"
+	// envelopePrefix is what a consumer's envelope puts before the token.
+	envelopePrefix = "consumer_tenant."
 )
 
 // withProof is a VerifyRequest for token carrying a fresh proof from key,
@@ -329,5 +331,44 @@ func TestAProofIsCheckedBeforeRevocation(t *testing.T) {
 	}
 	if _, err := v.Verify(ctx, withProof(ctx, t, boundKey, tok, audienceData, time.Now())); !errors.Is(err, ErrRevoked) {
 		t.Fatalf("revoked token, the bound key's proof: err = %v, want ErrRevoked", err)
+	}
+}
+
+// A consumer that hands its clients the token inside an envelope of its own
+// names the credential as presented: the proof's ath is checked against it,
+// as its client computed it (RFC 9449 §4.2), and the capability inside is
+// the one verified. Without it, the proof names a token the verifier was not
+// given; one that does not hold the token is the server's error.
+func TestAProofNamesThePresentedToken(t *testing.T) {
+	issuer, verifier, _, _ := buildIssuerVerifier(t)
+	ctx := t.Context()
+	key := dpopKeys(t)["Ed25519"]
+	jkt, _ := dpop.Thumbprint(key.Public())
+	_, token, err := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
+		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
+		Audience: []string{audienceData}, Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}}, TTL: time.Hour,
+		ConfirmationJKT: jkt,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	presented := envelopePrefix + token
+
+	req := withProof(ctx, t, key, presented, audienceData, time.Now())
+	req.Token, req.PresentedToken = token, presented
+	if got, err := verifier.Verify(ctx, req); err != nil || got.Capability().ConfirmationJKT != jkt {
+		t.Fatalf("the presented token named: %v", err)
+	}
+
+	unnamed := withProof(ctx, t, key, presented, audienceData, time.Now())
+	unnamed.Token = token
+	if _, err := verifier.Verify(ctx, unnamed); !errors.Is(err, ErrProofOfPossession) {
+		t.Fatalf("a proof of a token not given: %v, want ErrProofOfPossession", err)
+	}
+
+	other := withProof(ctx, t, key, presented, audienceData, time.Now())
+	other.Token, other.PresentedToken = token, envelopePrefix
+	if _, err := verifier.Verify(ctx, other); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("a presented token without the token: %v, want ErrInvalidRequest", err)
 	}
 }

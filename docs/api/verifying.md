@@ -586,6 +586,12 @@ type VerifyRequest struct {
 	// (ParseAuthorization). Set, it must match the binding: DPoP for a
 	// key-bound capability, Bearer for any other.
 	Scheme AuthScheme
+	// PresentedToken is the credential as the request carried it, for a
+	// consumer that hands its clients Token inside an envelope of its own:
+	// a key-bound capability's proof names what the client presented
+	// (RFC 9449 §4.2, ath), so it is checked against this. Empty is Token.
+	// Set, it must hold Token, or the request is ErrInvalidRequest.
+	PresentedToken string
 }
 ```
 
