@@ -56,7 +56,12 @@ var ErrChargeTransaction = fmt.Errorf("%w: pgstore: the transaction a callback r
 // returns are closed then, and read no further. A callback that sets the
 // session's role — SET ROLE, not SET LOCAL ROLE — has the call refused
 // with ErrChargeTransaction and rolled back, the role with it: committed,
-// it would outlast the call on the pooled connection. A deadlock the
+// it would outlast the call on the pooled connection. One that sets it
+// where no ROLLBACK reaches — around a COMMIT or ROLLBACK of its own — has
+// the connection closed rather than given back under that role; on a
+// Config.DB that is a *pgx.Conn the store is then store_unavailable until
+// the caller connects again. A DB of your own that begins transactions
+// itself (DB) gives its connections back as it does. A deadlock the
 // callback meets on a connection of its own and returns fails the call;
 // only one of the call's own transaction runs it again.
 // Commit and Rollback return ErrChargeTransaction; a savepoint (Begin) is
@@ -315,7 +320,7 @@ func (c *counters) writeThenCall(ctx context.Context, tx pgx.Tx, now time.Time, 
 	if call == nil {
 		return c.writeBatch(ctx, tx, now, writeTenant, last, then)
 	}
-	then = append(then, heldStmt{sql: sqlMarkCharge, args: []any{mark}})
+	then = append(then, markCallback(tx, mark))
 	if err := c.writeBatch(ctx, tx, now, writeTenant, false, then); err != nil {
 		return err
 	}
@@ -328,6 +333,22 @@ func (c *counters) writeThenCall(ctx context.Context, tx pgx.Tx, now time.Time, 
 		return callbackFailure(tx, err)
 	}
 	return endCallback(ctx, tx, mark, last)
+}
+
+// markCallback is sqlMarkCharge marking the transaction mark, its result
+// read into tx's callbackRole: the role the connection must be under when
+// it goes back to its pool.
+func markCallback(tx pgx.Tx, mark string) heldStmt {
+	return heldStmt{sql: sqlMarkCharge, args: []any{mark}, into: func(br pgx.BatchResults) error {
+		var marked, role string
+		if err := br.QueryRow().Scan(&marked, &role); err != nil {
+			return err
+		}
+		if d, ok := tx.(*deferTx); ok {
+			d.callbackRole = &role
+		}
+		return nil
+	}}
 }
 
 // deadlockOutside is a deadlock a callback returned while the call's
