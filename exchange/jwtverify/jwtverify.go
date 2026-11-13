@@ -9,14 +9,15 @@ package jwtverify
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
 
-	"github.com/lestrrat-go/jwx/v3/jwa"
-	"github.com/lestrrat-go/jwx/v3/jwk"
-	"github.com/lestrrat-go/jwx/v3/jws"
-	"github.com/lestrrat-go/jwx/v3/jwt"
+	"github.com/lestrrat-go/jwx/v4/jwa"
+	"github.com/lestrrat-go/jwx/v4/jwk"
+	"github.com/lestrrat-go/jwx/v4/jws"
+	"github.com/lestrrat-go/jwx/v4/jwt"
 
 	"github.com/oleg-tkachuk/limes/exchange"
 
@@ -290,10 +291,10 @@ func subjectOf(tok jwt.Token, clientIDClaim string) (exchange.Subject, error) {
 	s.ID, _ = tok.JwtID()
 	s.IssuedAt, _ = tok.IssuedAt()
 	s.ExpiresAt, _ = tok.Expiration()
-	if err := tok.Get(clientIDClaim, &s.ClientID); err != nil || s.ClientID == "" {
+	var err error
+	if s.ClientID, err = jwt.Get[string](tok, clientIDClaim); err != nil || s.ClientID == "" {
 		return exchange.Subject{}, fmt.Errorf("%w: %s is not a non-empty string", exchange.ErrInvalidGrant, clientIDClaim)
 	}
-	var err error
 	if s.Scopes, err = scopesOf(tok); err != nil {
 		return exchange.Subject{}, err
 	}
@@ -312,8 +313,8 @@ func scopesOf(tok jwt.Token) ([]string, error) {
 	if !tok.Has(claimScope) {
 		return nil, nil
 	}
-	var scope string
-	if err := tok.Get(claimScope, &scope); err != nil {
+	scope, err := jwt.Get[string](tok, claimScope)
+	if err != nil {
 		return nil, fmt.Errorf("%w: %s is not a string", exchange.ErrInvalidGrant, claimScope)
 	}
 	return strings.Fields(scope), nil
@@ -324,8 +325,8 @@ func sessionOf(tok jwt.Token) (string, error) {
 	if !tok.Has(claimSessionID) {
 		return "", nil
 	}
-	var sid string
-	if err := tok.Get(claimSessionID, &sid); err != nil || sid == "" {
+	sid, err := jwt.Get[string](tok, claimSessionID)
+	if err != nil || sid == "" {
 		return "", fmt.Errorf("%w: %s is not a non-empty string", exchange.ErrInvalidGrant, claimSessionID)
 	}
 	return sid, nil
@@ -336,8 +337,8 @@ func jktOf(tok jwt.Token) (string, error) {
 	if !tok.Has(claimCnf) {
 		return "", nil
 	}
-	var cnf map[string]any
-	if err := tok.Get(claimCnf, &cnf); err != nil {
+	cnf, err := jwt.Get[map[string]any](tok, claimCnf)
+	if err != nil {
 		return "", fmt.Errorf("%w: %s is not an object", exchange.ErrInvalidGrant, claimCnf)
 	}
 	// A binding this module cannot check, to a certificate (RFC 8705)
@@ -352,13 +353,7 @@ func jktOf(tok jwt.Token) (string, error) {
 
 // claimsOf is every claim of the token the policy may read.
 func claimsOf(tok jwt.Token) map[string]any {
-	claims := map[string]any{}
-	for _, key := range tok.Keys() {
-		var value any
-		if err := tok.Get(key, &value); err == nil {
-			claims[key] = value
-		}
-	}
+	claims := maps.Collect(tok.Claims())
 	return claims
 }
 

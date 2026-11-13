@@ -9,8 +9,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/lestrrat-go/jwx/v3/jwa"
-	"github.com/lestrrat-go/jwx/v3/jwk"
+	"github.com/lestrrat-go/jwx/v4/jwa"
+	"github.com/lestrrat-go/jwx/v4/jwk"
 )
 
 // typJWT is the generic type some identity providers give their access
@@ -134,7 +134,7 @@ func TestVerifierReadsTheBindingAndOtherAlgorithms(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pub, err := jwk.Import(key.Public())
+	pub, err := jwk.Import[jwk.Key](key.Public())
 	if err != nil {
 		t.Fatal(err)
 	}

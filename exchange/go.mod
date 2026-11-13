@@ -14,20 +14,15 @@ replace github.com/oleg-tkachuk/limes => ../
 
 require (
 	github.com/lestrrat-go/httprc/v3 v3.0.6
-	github.com/lestrrat-go/jwx/v3 v3.4.0
+	github.com/lestrrat-go/jwx/v4 v4.6.0
 	github.com/oleg-tkachuk/limes v0.185.0
 )
 
 require (
-	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1 // indirect
-	github.com/goccy/go-json v0.12.0 // indirect
 	github.com/lestrrat-go/blackmagic v1.0.4 // indirect
 	github.com/lestrrat-go/dsig v1.4.0 // indirect
-	github.com/lestrrat-go/dsig-secp256k1 v1.0.0 // indirect
 	github.com/lestrrat-go/httpcc v1.0.1 // indirect
 	github.com/lestrrat-go/option/v2 v2.0.0 // indirect
-	github.com/segmentio/asm v1.2.1 // indirect
-	github.com/valyala/fastjson v1.6.10 // indirect
-	golang.org/x/sys v0.49.0 // indirect
+	github.com/lestrrat-go/option/v3 v3.0.0-alpha1 // indirect
 	golang.org/x/text v0.43.0 // indirect
 )

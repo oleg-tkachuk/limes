@@ -15,8 +15,8 @@ import (
 	"github.com/oleg-tkachuk/limes/exchange"
 	"testing"
 
-	"github.com/lestrrat-go/jwx/v3/jwa"
-	"github.com/lestrrat-go/jwx/v3/jwk"
+	"github.com/lestrrat-go/jwx/v4/jwa"
+	"github.com/lestrrat-go/jwx/v4/jwk"
 )
 
 // The kids of the keys the alg tests put beside the provider's.
@@ -51,7 +51,7 @@ func rawJWS(t *testing.T, header, claims map[string]any, sign func([]byte) []byt
 // addKey adds raw to set under kid, naming alg when it is not empty.
 func addKey(t *testing.T, set jwk.Set, raw any, kid string, alg jwa.KeyAlgorithm) {
 	t.Helper()
-	key, err := jwk.Import(raw)
+	key, err := jwk.Import[jwk.Key](raw)
 	if err != nil {
 		t.Fatal(err)
 	}

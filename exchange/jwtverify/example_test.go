@@ -10,9 +10,9 @@ import (
 	"log"
 	"time"
 
-	"github.com/lestrrat-go/jwx/v3/jwa"
-	"github.com/lestrrat-go/jwx/v3/jwk"
-	"github.com/lestrrat-go/jwx/v3/jws"
+	"github.com/lestrrat-go/jwx/v4/jwa"
+	"github.com/lestrrat-go/jwx/v4/jwk"
+	"github.com/lestrrat-go/jwx/v4/jws"
 
 	"github.com/oleg-tkachuk/limes/exchange"
 	"github.com/oleg-tkachuk/limes/exchange/jwtverify"
@@ -37,7 +37,7 @@ func exampleIDP(claims map[string]any) (jwksDoc []byte, token string) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	pub, err := jwk.Import(key.Public())
+	pub, err := jwk.Import[jwk.Key](key.Public())
 	if err != nil {
 		log.Fatal(err)
 	}

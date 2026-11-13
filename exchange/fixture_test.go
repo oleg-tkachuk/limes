@@ -13,9 +13,9 @@ import (
 	"time"
 	"uuid"
 
-	"github.com/lestrrat-go/jwx/v3/jwa"
-	"github.com/lestrrat-go/jwx/v3/jwk"
-	"github.com/lestrrat-go/jwx/v3/jws"
+	"github.com/lestrrat-go/jwx/v4/jwa"
+	"github.com/lestrrat-go/jwx/v4/jwk"
+	"github.com/lestrrat-go/jwx/v4/jws"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/dpop"
@@ -60,7 +60,7 @@ func newIDP(t testing.TB) *idp {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pub, err := jwk.Import(key.Public())
+	pub, err := jwk.Import[jwk.Key](key.Public())
 	if err != nil {
 		t.Fatal(err)
 	}

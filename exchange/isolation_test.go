@@ -37,8 +37,8 @@ func joseIn(paths []string) []string {
 }
 
 func TestJOSEIn(t *testing.T) {
-	got := joseIn([]string{"fmt", "github.com/lestrrat-go/jwx/v3/jwt", "github.com/lestrrat-go-other", "github.com/go-jose/go-jose/v4"})
-	want := []string{"github.com/lestrrat-go/jwx/v3/jwt", "github.com/go-jose/go-jose/v4"}
+	got := joseIn([]string{"fmt", "github.com/lestrrat-go/jwx/v4/jwt", "github.com/lestrrat-go-other", "github.com/go-jose/go-jose/v4"})
+	want := []string{"github.com/lestrrat-go/jwx/v4/jwt", "github.com/go-jose/go-jose/v4"}
 	if !slices.Equal(got, want) {
 		t.Errorf("joseIn = %q, want %q", got, want)
 	}

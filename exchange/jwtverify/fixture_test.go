@@ -10,9 +10,9 @@ import (
 	"time"
 	"uuid"
 
-	"github.com/lestrrat-go/jwx/v3/jwa"
-	"github.com/lestrrat-go/jwx/v3/jwk"
-	"github.com/lestrrat-go/jwx/v3/jws"
+	"github.com/lestrrat-go/jwx/v4/jwa"
+	"github.com/lestrrat-go/jwx/v4/jwk"
+	"github.com/lestrrat-go/jwx/v4/jws"
 )
 
 const (
@@ -53,7 +53,7 @@ func newIDPKey(t testing.TB, kid string) *idp {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pub, err := jwk.Import(key.Public())
+	pub, err := jwk.Import[jwk.Key](key.Public())
 	if err != nil {
 		t.Fatal(err)
 	}
