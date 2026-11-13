@@ -2,6 +2,17 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.184.0](https://github.com/oleg-tkachuk/limes/compare/v0.183.0...v0.184.0) (2026-11-13)
+
+### ⚠ BREAKING CHANGES
+
+* **limes:** such an error is answered as the refusal its code names,
+  by ProblemOf and ErrorResponse alike.
+
+### Bug Fixes
+
+* **limes:** answer a refusal's code as its own refusal, whatever the family ([17ddd6d](https://github.com/oleg-tkachuk/limes/commit/17ddd6dc9e4f5c6eaa65b626230c1bcd60c16502))
+
 ## [0.183.0](https://github.com/oleg-tkachuk/limes/compare/v0.182.0...v0.183.0) (2026-11-13)
 
 ### Features

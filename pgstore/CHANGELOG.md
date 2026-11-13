@@ -2,6 +2,20 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.81.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.80.2...pgstore%2Fv0.81.0) (2026-11-13)
+
+### ⚠ BREAKING CHANGES
+
+* **pgstore:** such a cursor is limes.ErrInvalidRequest.
+
+### Bug Fixes
+
+* **pgstore:** refuse a hold cursor whose time leaves the years 1 to 9999 ([d129c20](https://github.com/oleg-tkachuk/limes/commit/d129c20d0b58f3cebb2ffc8c3091df42907f0d5e))
+
+### Dependencies
+
+* require limes v0.184.0
+
 ## [0.80.2](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.80.1...pgstore%2Fv0.80.2) (2026-11-13)
 
 ### Dependencies
