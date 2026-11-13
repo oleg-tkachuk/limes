@@ -131,7 +131,7 @@ the agent carries; `issued.Capability` is the record you keep for audit.
 into the HTTP status, `WWW-Authenticate` challenge and problem body to answer
 with.
 
-`go run ./quickstart` in [examples/](examples) runs issue, authorize,
+`go run ./quickstart` in [examples/](https://github.com/oleg-tkachuk/limes/tree/main/examples) runs issue, authorize,
 delegate, meter and revoke end to end. The other examples there take one
 step each, pgstore included.
 
@@ -317,7 +317,7 @@ new optional field is skipped while the field is unset.
 | [internal/](internal) | the module's own shared packages: JOSE pieces (`jose`), HTTP header names (`httpx`), the rule for where a key set is fetched from (`httpsurl`), RFC 3986 URI normalisation (`rfc3986`), the text a store can keep (`storable`), the sharded TTL cache behind `RevocationCache` (`ttlcache`), access to unexported root internals for sibling packages (`link`), optional store interfaces for `limes.As` and `meter.As` (`optional`), the error families (`errs`), error codes of packages limes cannot import (`errcode`), the client-safe detail of an error (`detail`), the check that every error names a sentinel (`errguard`), the generator of `docs/api` (`apidoc`), and, for the conformance suites, expectations, field coverage and per-check deadlines (`expect`, `fields`, `watchdog`) |
 | [storetest/](storetest), [metertest/](metertest), [dpop/dpoptest](dpop/dpoptest), [jwks/jwkstest](jwks/jwkstest), [exchange/exchangetest](exchange/exchangetest) | conformance suites to run from your own implementation's tests |
 | [limestest/](limestest) | a consumer's own error mapping held to the codes and categories it was written against |
-| [examples/](examples) | runnable programs, a module of its own, never released: the five-minute walkthrough (`quickstart`) and one topic each, logging every step to stdout — issuing and verifying, delegation, metering, an MCP server behind token exchange, and pgstore over PostgreSQL. Most packages' Go documentation also carries `Example` functions; pgstore's compile without a database and do not run |
+| [examples/](https://github.com/oleg-tkachuk/limes/tree/main/examples) | runnable programs, a module of its own, never released, so not in the module you download: the five-minute walkthrough (`quickstart`) and one topic each, logging every step to stdout — issuing and verifying, delegation, metering, an MCP server behind token exchange, and pgstore over PostgreSQL. Most packages' Go documentation also carries `Example` functions; pgstore's compile without a database and do not run |
 | [testdata/](testdata) | golden JWTs |
 | [scripts/hooks/](scripts/hooks) | the Git hook that tests the Go modules a push changes |
 | [tools/](tools) | the developer tools, pinned in modules of their own and run with `go tool -modfile=tools/go.mod` (yq: `tools/yq/go.mod`, golangci-lint: `tools/golangci-lint/go.mod`) |
