@@ -68,3 +68,12 @@ links neither still resolves both. `jwtverify`'s API exposed jwx's types until
 [ADR-0020](0020-exchange-before-1-0.md) hid them: `KeySource` is a struct,
 `StaticKeys` takes a JWK Set document and `RemoteKeys` a URL, so the
 exchange module's v1 line does not follow jwx's majors.
+
+## Note, 2026-11-13
+
+The jwx and httprc this record names are now `lestrrat-go/jwx/v4` and
+`lestrrat-go/httprc/v3`: `jwtverify` moved to jwx v4 in
+[#1068](https://github.com/oleg-tkachuk/limes/pull/1068), with no change to
+its API, as the 2026-11-05 amendment intended. The decision stands as
+written; `exchange/isolation_test.go` still refuses any `lestrrat-go`
+import in package `exchange`.
