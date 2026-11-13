@@ -290,9 +290,25 @@ WITH due AS (
 )
 DELETE FROM limes.charges WHERE id = ANY (ARRAY(SELECT id FROM due))`
 
+// sqlPurgeBumps removes the oldest keyed bumps counted before $1, at most $2
+// of them, of the tenants the call's scope reaches, by bumps_bumped_at
+// (migrate/ddl/migrations/044_keyed_bumps.sql). A bump a delivery holds is
+// skipped, for a later batch, rather than waited on.
+const sqlPurgeBumps = `
+WITH due AS (
+    SELECT capability_id, external_ref FROM limes.bumps
+    WHERE bumped_at < $1
+    ORDER BY bumped_at, capability_id, external_ref
+    LIMIT $2
+    FOR UPDATE SKIP LOCKED
+)
+DELETE FROM limes.bumps b USING due
+WHERE b.capability_id = due.capability_id AND b.external_ref = due.external_ref`
+
 // PurgeCharges implements meter.LedgerHousekeeping: the charges taken more
 // than req.Retention() ago by the store's clock, oldest first, at most the
-// batch's limit, in one transaction of the call's scope — every tenant's
+// batch's limit, and then, within what is left of it, the keyed bumps
+// counted as long ago, oldest first, in one transaction of the call's scope — every tenant's
 // under WithAllTenants, one tenant's under WithTenant. A scope that admits no
 // tenant is refused with limes.ErrScopeMismatch, rather than purging nothing
 // on every call while the ledger grows.
@@ -301,9 +317,18 @@ func (l *Ledger) PurgeCharges(ctx context.Context, req meter.PurgeChargesRequest
 		return meter.PurgeChargesResult{}, err
 	}
 	var purged int64
+	cutoff, limit := l.clock().Add(-req.Retention()), int64(meter.HousekeepingLimit(req.Limit))
 	err := l.inHousekeepingTx(ctx, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, sqlPurgeCharges, l.clock().Add(-req.Retention()), meter.HousekeepingLimit(req.Limit))
+		tag, err := tx.Exec(ctx, sqlPurgeCharges, cutoff, limit)
+		if err != nil {
+			return err
+		}
 		purged = tag.RowsAffected()
+		if purged == limit {
+			return nil
+		}
+		tag, err = tx.Exec(ctx, sqlPurgeBumps, cutoff, limit-purged)
+		purged += tag.RowsAffected()
 		return err
 	})
 	if err != nil {

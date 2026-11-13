@@ -94,11 +94,11 @@ func main() {
 	subject := verified.MeterSubject()
 
 	for range requestLimit {
-		r, err := usage.Bump(ctx, meter.BumpRequest{Subject: subject})
+		r, err := usage.Bump(ctx, meter.BumpRequest{Subject: subject}, nil)
 		demo.Must(log, err, "count a request")
 		log.Info("counted a request against the capability's limit", "request", fmt.Sprintf("%d of %d", r.RequestCount, requestLimit))
 	}
-	_, err = usage.Bump(ctx, meter.BumpRequest{Subject: subject})
+	_, err = usage.Bump(ctx, meter.BumpRequest{Subject: subject}, nil)
 	demo.Refused(log, err, limes.ErrRequestLimitExceeded, "a request past the limit")
 
 	receipt, err := usage.Charge(ctx, meter.ChargeRequest{

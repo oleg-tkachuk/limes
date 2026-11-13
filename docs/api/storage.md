@@ -1766,7 +1766,7 @@ Every call runs in READ COMMITTED transactions on one connection, whatever the d
 
 A capability's expiry is another clock's: the issuer's, which wrote it, and whether the token has expired is its verifier's to decide, by its own clock and leeway. The store does not decide it again by its clock. It ends a hold or a lease no later than the capability's expiry plus a grace — limes.MaxLeeway, the widest leeway a verifier gives, and limes.PurgeClockSkew, how far behind the store's its clock may run — and refuses Reserve and Lease with limes.ErrExpired only past that, where no verifier could still accept the token and its record may be purged (limes.MinPurgeRetention).
 
-Charge and Settle hand onCharged the charge's transaction, and Refund hands onRefunded the refund's, which TxFrom reads from its context, so a write of the consumer's commits with the charge or the refund or not at all. The transaction is the store's to end: Commit and Rollback on it return ErrChargeTransaction, a call whose transaction the callback ended with SQL of its own is refused with ErrChargeTransaction, and once the callback returns every call on it fails with pgx.ErrTxClosed.
+Charge and Settle hand onCharged the charge's transaction, Bump hands onBumped the bump's, and Refund hands onRefunded the refund's, which TxFrom reads from its context, so a write of the consumer's commits with the charge, the bump or the refund or not at all. The transaction is the store's to end: Commit and Rollback on it return ErrChargeTransaction, a call whose transaction the callback ended with SQL of its own is refused with ErrChargeTransaction, and once the callback returns every call on it fails with pgx.ErrTxClosed.
 
 #### Tenants
 
@@ -1885,7 +1885,7 @@ Schema is the PostgreSQL schema every table of the store lives in.
 var ErrChargeTransaction = fmt.Errorf("%w: pgstore: the transaction a callback runs on is the store's to commit or roll back", limes.ErrInvalidRequest)
 ```
 
-ErrChargeTransaction is a callback — onCharged, onRefunded — committing or rolling back the transaction it runs on, which is the store's to end: the charge or the refund is committed after the callback returns, on the same transaction.
+ErrChargeTransaction is a callback — onCharged, onBumped, onRefunded — committing or rolling back the transaction it runs on, which is the store's to end: the charge, the bump or the refund is committed after the callback returns, on the same transaction.
 
 <sub>[pgstore/tx.go](../../pgstore/tx.go)</sub>
 <a id="pgstore.ErrRuntimeRole"></a>
@@ -1973,9 +1973,9 @@ ScopedIssuance is s as the limes.IssuanceStore of an Issuer that issues where no
 func TxFrom(ctx context.Context) (pgx.Tx, bool)
 ```
 
-TxFrom returns the transaction a charge or a refund commits on, from the context UsageStore.Charge and UsageStore.Settle hand onCharged, and UsageStore.Refund onRefunded: a write through it commits with the charge or the refund, or with it not at all. Any other context holds none, and TxFrom reports false; no other method of this package reads a transaction from its context.
+TxFrom returns the transaction a charge, a bump or a refund commits on, from the context UsageStore.Charge and UsageStore.Settle hand onCharged, UsageStore.Bump onBumped, and UsageStore.Refund onRefunded: a write through it commits with the charge, the bump or the refund, or with it not at all. Any other context holds none, and TxFrom reports false; no other method of this package reads a transaction from its context.
 
-The call's writes are in it already — a charge's ledger row, a refund's refunded amount on the charge and, under a RefundID, its limes.refunds row — and its locks held: every counter on the chain and the tenant's aggregate, which every other charge of the tenant waits for until the callback returns and the store commits. The callback keeps to statements on this database, and short ones; a network call there holds the tenant's charges for as long.
+The call's writes are in it already — a charge's ledger row, a bump's counters and, under an ExternalRef, its limes.bumps row, a refund's refunded amount on the charge and, under a RefundID, its limes.refunds row — and its locks held: every counter on the chain and, but for a bump, the tenant's aggregate, which every other charge of the tenant waits for until the callback returns and the store commits. The callback keeps to statements on this database, and short ones; a network call there holds the tenant's charges for as long.
 
 The transaction is the callback's while it runs, and no longer: once it returns, every call on it, from any goroutine, fails with pgx.ErrTxClosed, and a call still running then is waited for before the store commits. It takes one call at a time, as a pgx.Tx does, and so it takes the reads of the rows and batch results it hands out: a call made while another runs is refused with ErrChargeTransaction, never waited for, as pgx refuses a busy connection. That holds for a call from another goroutine, and for one from code the running call runs — a batch's QueuedQuery callback, a sql.Scanner, a driver.Valuer, a pgx.CopyFromSource — which would otherwise wait on itself with the tenant's locks held. Rows and batch results still open when the callback returns are closed then, and read no further. A callback that returns under another role than it found has the call refused with ErrChargeTransaction and rolled back, the role with it: the store's statements after it would run under that role, and a SET ROLE, committed, would outlast the call on the pooled connection. That holds for SET LOCAL ROLE as for SET ROLE; a callback that sets a role for its own statements sets it back before it returns. One that sets it where no ROLLBACK reaches — around a COMMIT or ROLLBACK of its own — has the connection closed rather than given back under that role; on a Config.DB that is a \*pgx.Conn the store is then store\_unavailable until the caller connects again. A DB of your own that begins transactions itself (DB) gives its connections back as it does. A deadlock the callback meets on a connection of its own and returns fails the call; only one of the call's own transaction runs it again. Commit and Rollback return ErrChargeTransaction; a savepoint (Begin) is the callback's to end. Conn is nil, as the connection is the store's, and a call whose transaction the callback ended with SQL of its own — COMMIT, ROLLBACK, or either followed by BEGIN — is refused with ErrChargeTransaction and meter.ErrOutcomeUnknown: the call's writes went before the callback, so that COMMIT committed them, and that ROLLBACK undid them.
 
@@ -2278,7 +2278,7 @@ NewLedger returns a ledger reader over cfg.DB, whose schema migrate.Run created.
 func (l *Ledger) PurgeCharges(ctx context.Context, req meter.PurgeChargesRequest) (meter.PurgeChargesResult, error)
 ```
 
-PurgeCharges implements meter.LedgerHousekeeping: the charges taken more than req.Retention() ago by the store's clock, oldest first, at most the batch's limit, in one transaction of the call's scope — every tenant's under WithAllTenants, one tenant's under WithTenant. A scope that admits no tenant is refused with limes.ErrScopeMismatch, rather than purging nothing on every call while the ledger grows.
+PurgeCharges implements meter.LedgerHousekeeping: the charges taken more than req.Retention() ago by the store's clock, oldest first, at most the batch's limit, and then, within what is left of it, the keyed bumps counted as long ago, oldest first, in one transaction of the call's scope — every tenant's under WithAllTenants, one tenant's under WithTenant. A scope that admits no tenant is refused with limes.ErrScopeMismatch, rather than purging nothing on every call while the ledger grows.
 
 <sub>[pgstore/ledger.go](../../pgstore/ledger.go)</sub>
 <a id="pgstore.Ledger.SumCharges"></a>
@@ -2710,9 +2710,9 @@ type UsageStore struct {
 
 UsageStore implements meter.UsageStore, meter.CopyUsageReader, meter.Leaser, meter.MatchingReleaser, meter.TenantReservationLister, meter.TenantUsageEraser and meter.FeatureGate: request and spend counters, holds, the charges ledger and the tenant aggregates. It reads each capability's lineage and ceilings from the records a Store over the same database keeps.
 
-Every call locks what it changes in one order — holds by id, then the capabilities' counters by id, then the copies' by revocation id, then the tenant aggregate, then the ledger — so two calls never wait on each other in a cycle (lock\_order\_test.go; docs/adr/0018-fewer-round-trips-per-charge.md). onCharged runs on the call's own transaction, which TxFrom reads from the context it is handed.
+Every call locks what it changes in one order — holds by id, then the capabilities' counters by id, then the copies' by revocation id, then the tenant aggregate, then the ledger — so two calls never wait on each other in a cycle (lock\_order\_test.go; docs/adr/0018-fewer-round-trips-per-charge.md). onCharged, onBumped and onRefunded run on the call's own transaction, which TxFrom reads from the context each is handed.
 
-A call whose COMMIT left and whose answer did not come back — the connection failed or the context ended first — returns an error matching meter.ErrOutcomeUnknown, wrapping the cause: it may have committed. Bump, Charge, Reserve, Settle, Release, Refund and the leases' calls log it at WARN. One the database answered, or that sent nothing, never does. A keyed id (ChargeRequest.ExternalRef, ReserveRequest.ReservationID, RefundRequest.RefundID) makes the call safe to send again; refunds recorded under one are kept in limes.refunds, removed with their charge.
+A call whose COMMIT left and whose answer did not come back — the connection failed or the context ended first — returns an error matching meter.ErrOutcomeUnknown, wrapping the cause: it may have committed. Bump, Charge, Reserve, Settle, Release, Refund and the leases' calls log it at WARN. One the database answered, or that sent nothing, never does. A keyed id (ChargeRequest.ExternalRef, BumpRequest.ExternalRef, ReserveRequest.ReservationID, RefundRequest.RefundID) makes the call safe to send again; refunds recorded under one are kept in limes.refunds, removed with their charge, and bumps in limes.bumps, removed by PurgeCharges past its retention, by DeleteUsage and by an erase.
 
 <sub>[pgstore/meter.go](../../pgstore/meter.go)</sub>
 <a id="pgstore.NewUsageStore"></a>
@@ -2731,10 +2731,10 @@ NewUsageStore returns a usage store over cfg.DB, whose schema migrate.Run create
 #### pgstore.UsageStore.Bump
 
 ```go
-func (s *UsageStore) Bump(ctx context.Context, req meter.BumpRequest) (meter.BumpReceipt, error)
+func (s *UsageStore) Bump(ctx context.Context, req meter.BumpRequest, onBumped func(ctx context.Context, b meter.Bumped) error) (meter.BumpReceipt, error)
 ```
 
-Bump counts one request against the capability, each ancestor and each copy, or none when a ceiling would be crossed.
+Bump counts one request against the capability, each ancestor and each copy, or none when a ceiling would be crossed, onBumped included, in one transaction; under an ExternalRef already counted it replays that bump.
 
 <sub>[pgstore/charge.go](../../pgstore/charge.go)</sub>
 <a id="pgstore.UsageStore.Charge"></a>
@@ -2778,7 +2778,7 @@ CopyUsage returns the counters of each copy named that has been used.
 func (s *UsageStore) DeleteUsage(ctx context.Context, req meter.DeleteUsageRequest) error
 ```
 
-DeleteUsage drops a capability's counters and its copies', settling its lease and those below it and releasing its holds first: nothing could settle or release them once it is gone.
+DeleteUsage drops a capability's counters, its copies' and its keyed bumps, settling its lease and those below it and releasing its holds first: nothing could settle or release them once it is gone.
 
 <sub>[pgstore/usage.go](../../pgstore/usage.go)</sub>
 <a id="pgstore.UsageStore.EraseTenantUsage"></a>
@@ -2789,7 +2789,7 @@ DeleteUsage drops a capability's counters and its copies', settling its lease an
 func (s *UsageStore) EraseTenantUsage(ctx context.Context, req meter.EraseTenantUsageRequest) (meter.EraseTenantUsageResult, error)
 ```
 
-EraseTenantUsage implements meter.TenantUsageEraser: it marks the tenant erased and removes its holds, aggregate, counters, copies' counters and charges in one transaction scoped to the tenant (Config.CheckScope), counting the holds, counters, copies' counters and charges removed.
+EraseTenantUsage implements meter.TenantUsageEraser: it marks the tenant erased and removes its holds, aggregate, counters, copies' counters, charges and keyed bumps in one transaction scoped to the tenant (Config.CheckScope), counting the holds, counters, copies' counters and charges removed.
 
 <sub>[pgstore/erase.go](../../pgstore/erase.go)</sub>
 <a id="pgstore.UsageStore.FeatureEnabled"></a>

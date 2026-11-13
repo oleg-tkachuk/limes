@@ -155,7 +155,7 @@ func main() {
 	// 6. Count the request and charge against the budget. The capability's ceiling, each ancestor's
 	//    and the tenant's all apply; a rejection by any leaves every counter
 	//    untouched, so a retry is always safe.
-	bumped, err := usage.Bump(ctx, meter.BumpRequest{Subject: verified.MeterSubject()})
+	bumped, err := usage.Bump(ctx, meter.BumpRequest{Subject: verified.MeterSubject()}, nil)
 	must(err, "bump")
 	log.Info("counted a request", "request", fmt.Sprintf("%d of %s", bumped.RequestCount, verified.Capability().Caveats.Requests))
 	receipt, err := usage.Charge(ctx, meter.ChargeRequest{Subject: verified.MeterSubject(), Amount: limes.MustParseAmount("0.35"), Op: "search", Actor: "research-orchestrator"}, nil)

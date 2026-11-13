@@ -296,7 +296,7 @@ func soakWorker(soakCtx, ctx context.Context, usage *UsageStore, chain []uuid.UU
 				}
 			}
 		case opBump:
-			if _, err := usage.Bump(ctx, meter.BumpRequest{Subject: subject}); err != nil {
+			if _, err := usage.Bump(ctx, meter.BumpRequest{Subject: subject}, nil); err != nil {
 				return fmt.Errorf("Bump: %w", err)
 			}
 		}

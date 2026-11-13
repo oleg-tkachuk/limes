@@ -94,7 +94,7 @@ func BenchmarkChainDepth(b *testing.B) {
 		b.Run(fmt.Sprintf("op=Bump/depth=%d", depth), func(b *testing.B) {
 			defer reportRoundTrips(b, sent)()
 			for b.Loop() {
-				if _, err := f.usage.Bump(ctx, meter.BumpRequest{Subject: leaf}); err != nil {
+				if _, err := f.usage.Bump(ctx, meter.BumpRequest{Subject: leaf}, nil); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -122,7 +122,7 @@ func BenchmarkChainDepth(b *testing.B) {
 		b.Run(fmt.Sprintf("op=BumpLeased/depth=%d", depth), func(b *testing.B) {
 			defer reportRoundTrips(b, sent)()
 			for b.Loop() {
-				if _, err := f.usage.Bump(ctx, meter.BumpRequest{Subject: leaf}); err != nil {
+				if _, err := f.usage.Bump(ctx, meter.BumpRequest{Subject: leaf}, nil); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -158,7 +158,7 @@ func BenchmarkOneRoot(b *testing.B) {
 			})
 			b.Run(fmt.Sprintf("op=Bump/leased=%t/rtt=%s", leased, rtt), func(b *testing.B) {
 				concurrently(b, children, func(leaf limes.MeterSubject) error {
-					_, err := f.usage.Bump(WithTenant(b.Context(), f.tenant), meter.BumpRequest{Subject: leaf})
+					_, err := f.usage.Bump(WithTenant(b.Context(), f.tenant), meter.BumpRequest{Subject: leaf}, nil)
 					return err
 				})
 			})

@@ -153,7 +153,7 @@ func TestMeterRefusesACounterRowOfAnotherTenant(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := meterSubject(f.child.ID, f.mine)
-	if _, err := f.usage.Bump(ctx, meter.BumpRequest{Subject: subject}); !errors.Is(err, errCounterHidden) {
+	if _, err := f.usage.Bump(ctx, meter.BumpRequest{Subject: subject}, nil); !errors.Is(err, errCounterHidden) {
 		t.Errorf("Bump over another tenant's row: err = %v, want errCounterHidden", err)
 	}
 	called := false

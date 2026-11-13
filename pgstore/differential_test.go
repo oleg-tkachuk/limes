@@ -343,7 +343,7 @@ func diffApply(side *diffSide, s int, subject limes.MeterSubject, id, tenant uui
 		}
 		return err
 	case diffStepBump:
-		_, err := u.Bump(ctx, meter.BumpRequest{Subject: subject})
+		_, err := u.Bump(ctx, meter.BumpRequest{Subject: subject}, nil)
 		return err
 	case diffStepLease:
 		_, err := u.Lease(ctx, meter.LeaseRequest{Subject: subject, Amount: nanos, TTL: diffTTL})

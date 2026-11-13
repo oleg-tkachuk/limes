@@ -38,6 +38,16 @@ const (
 // transaction open. The locks are held to COMMIT with or without it.
 const chargeWithCallbackRoundTrips = chargeRoundTrips + 1
 
+// A keyed Bump reads its reference beside the lineage and again in the
+// batch that locks its counters, and writes its row with them: no round
+// trip more, under a lease or not. One whose onBumped runs sends COMMIT
+// after it, as a Charge with onCharged does.
+const (
+	keyedBumpRoundTrips        = bumpRoundTrips
+	keyedLeasedBumpRoundTrips  = leasedBumpRoundTrips
+	bumpWithCallbackRoundTrips = bumpRoundTrips + 1
+)
+
 // The calls that end what another made, each with COMMIT in its write
 // batch. Settle locks the hold, then reads the lineage, then locks as a
 // charge does; Release locks the hold, then the counters and the tenant's
@@ -176,7 +186,7 @@ func meterRoundTrips(t *testing.T, db DB, sent *atomic.Int64, extra int64) {
 			return err
 		}, nil},
 		"Bump": {bumpRoundTrips, func() error {
-			_, err := usage.Bump(ctx, meter.BumpRequest{Subject: subject})
+			_, err := usage.Bump(ctx, meter.BumpRequest{Subject: subject}, nil)
 			return err
 		}, nil},
 		"Reserve": {reserveRoundTrips, func() error {
@@ -184,7 +194,23 @@ func meterRoundTrips(t *testing.T, db DB, sent *atomic.Int64, extra int64) {
 			return err
 		}, nil},
 		"Bump under a lease": {leasedBumpRoundTrips, func() error {
-			_, err := usage.Bump(ctx, meter.BumpRequest{Subject: leased})
+			_, err := usage.Bump(ctx, meter.BumpRequest{Subject: leased}, nil)
+			return err
+		}, nil},
+		"keyed Bump": {keyedBumpRoundTrips, func() error {
+			_, err := usage.Bump(ctx, meter.BumpRequest{Subject: subject, ExternalRef: uuid.New().String()}, nil)
+			return err
+		}, nil},
+		"keyed Bump under a lease": {keyedLeasedBumpRoundTrips, func() error {
+			_, err := usage.Bump(ctx, meter.BumpRequest{Subject: leased, ExternalRef: uuid.New().String()}, nil)
+			return err
+		}, nil},
+		"Bump with onBumped": {bumpWithCallbackRoundTrips, func() error {
+			_, err := usage.Bump(ctx, meter.BumpRequest{Subject: subject}, noopBumped)
+			return err
+		}, nil},
+		"keyed Bump with onBumped": {bumpWithCallbackRoundTrips, func() error {
+			_, err := usage.Bump(ctx, meter.BumpRequest{Subject: subject, ExternalRef: uuid.New().String()}, noopBumped)
 			return err
 		}, nil},
 		"keyed Reserve": {keyedReserveRoundTrips, func() error {
@@ -241,8 +267,9 @@ func meterRoundTrips(t *testing.T, db DB, sent *atomic.Int64, extra int64) {
 			t.Errorf("%s made %d round trips, want %d", name, got, want)
 		}
 	}
-	// Warmed and counted, both bumps of the leased leaf went under its lease.
-	const leasedBumps = 2
+	// Warmed and counted, the bumps of the leased leaf, keyed and not, went
+	// under its lease.
+	const leasedBumps = 4
 	if l, err := usage.GetLease(ctx, leased.CapabilityID()); err != nil || l.RequestsSpent != leasedBumps {
 		t.Errorf("the leased leaf's lease = %+v, %v; want %d requests made under it", l, err, leasedBumps)
 	}
@@ -250,6 +277,9 @@ func meterRoundTrips(t *testing.T, db DB, sent *atomic.Int64, extra int64) {
 
 // noopCharged is an onCharged that sends nothing.
 func noopCharged(context.Context, meter.Charged) error { return nil }
+
+// noopBumped is an onBumped that sends nothing.
+func noopBumped(context.Context, meter.Bumped) error { return nil }
 
 // noopRefunded is an onRefunded that sends nothing.
 func noopRefunded(context.Context, meter.Refunded) error { return nil }

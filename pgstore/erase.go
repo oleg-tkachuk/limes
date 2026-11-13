@@ -131,6 +131,7 @@ SELECT revocation_id FROM limes.copy_usage WHERE tenant_id = $1 ORDER BY capabil
 	sqlDeleteTenantUsage   = `DELETE FROM limes.usage WHERE tenant_id = $1`
 	sqlDeleteTenantCopies  = `DELETE FROM limes.copy_usage WHERE tenant_id = $1`
 	sqlDeleteTenantCharges = `DELETE FROM limes.charges WHERE tenant_id = $1`
+	sqlDeleteTenantBumps   = `DELETE FROM limes.bumps WHERE tenant_id = $1`
 )
 
 // EraseTenantRecords implements limes.TenantRecordEraser: it revokes every
@@ -231,8 +232,9 @@ func (s *Store) eraseRecords(ctx context.Context, tx pgx.Tx, req limes.EraseTena
 }
 
 // EraseTenantUsage implements meter.TenantUsageEraser: it marks the tenant
-// erased and removes its holds, aggregate, counters, copies' counters and
-// charges in one transaction scoped to the tenant (Config.CheckScope),
+// erased and removes its holds, aggregate, counters, copies' counters,
+// charges and keyed bumps in one transaction scoped to the tenant
+// (Config.CheckScope),
 // counting the holds, counters, copies' counters and charges removed.
 func (s *UsageStore) EraseTenantUsage(ctx context.Context, req meter.EraseTenantUsageRequest) (meter.EraseTenantUsageResult, error) {
 	if err := req.Validate(); err != nil {
@@ -278,7 +280,8 @@ const (
 )
 
 // eraseUsage locks the tenant's meter rows in the meter's order, then
-// removes them and the ledger, and counts what each delete removed.
+// removes them, the ledger and the keyed bumps, and counts what each delete
+// of the result's removed.
 func eraseUsage(ctx context.Context, tx pgx.Tx, req meter.EraseTenantUsageRequest) (meter.EraseTenantUsageResult, error) {
 	var out meter.EraseTenantUsageResult
 	steps := []struct {
@@ -292,6 +295,7 @@ func eraseUsage(ctx context.Context, tx pgx.Tx, req meter.EraseTenantUsageReques
 		{sql: sqlDeleteTenantUsage, removed: &out.Counters},
 		{sql: sqlDeleteTenantCopies, removed: &out.Copies},
 		{sql: sqlDeleteTenantCharges, removed: &out.Charges},
+		{sql: sqlDeleteTenantBumps},
 	}
 	for _, step := range steps {
 		tag, err := tx.Exec(ctx, step.sql, req.TenantID)

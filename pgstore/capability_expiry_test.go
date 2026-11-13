@@ -79,7 +79,7 @@ func TestCapabilityExpiryIsTheVerifiersDecision(t *testing.T) {
 			if _, err := usage.Settle(ctx, meter.SettleRequest{Subject: held, ReservationID: r.ID, Amount: 1}, nil); err != nil {
 				t.Errorf("Settle of the hold: %v", err)
 			}
-			if _, err := usage.Bump(ctx, meter.BumpRequest{Subject: leased}); err != nil {
+			if _, err := usage.Bump(ctx, meter.BumpRequest{Subject: leased}, nil); err != nil {
 				t.Fatal(err)
 			}
 			if got, err := usage.GetLease(ctx, leased.CapabilityID()); err != nil || got.RequestsSpent != 1 {

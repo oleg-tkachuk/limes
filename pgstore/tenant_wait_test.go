@@ -83,7 +83,7 @@ func TestTenantWaitIsReported(t *testing.T) {
 		t.Fatalf("an uncontended Charge logged %d wait warnings, want none", n)
 	}
 
-	if _, err := usage.Bump(ctx, meter.BumpRequest{Subject: subject}); err != nil {
+	if _, err := usage.Bump(ctx, meter.BumpRequest{Subject: subject}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := waits.take(); len(got) != 0 {
