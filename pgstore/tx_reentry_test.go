@@ -173,8 +173,12 @@ func TestTxFromLendsNoLargeObjects(t *testing.T) {
 	ctx := WithTenant(t.Context(), f.mine)
 	onCharged := func(ctx context.Context, _ meter.Charged) error {
 		tx, _ := TxFrom(ctx)
-		if tx.LargeObjects() != (pgx.LargeObjects{}) {
+		lo := tx.LargeObjects()
+		if lo != (pgx.LargeObjects{}) {
 			t.Error("LargeObjects in onCharged is not the zero LargeObjects")
+		}
+		if !panics(func() { _, _ = lo.Create(ctx, 0) }) {
+			t.Error("a call on the LargeObjects onCharged gets did not panic")
 		}
 		return nil
 	}
@@ -209,4 +213,11 @@ func TestTxFromBatchCallbackRowsLendNoConn(t *testing.T) {
 	if conn != nil {
 		t.Error("a QueuedQuery callback's rows lent the store's connection")
 	}
+}
+
+// panics reports whether f panics.
+func panics(f func()) (panicked bool) {
+	defer func() { panicked = recover() != nil }()
+	f()
+	return false
 }
