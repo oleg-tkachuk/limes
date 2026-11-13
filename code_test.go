@@ -518,3 +518,19 @@ func TestARegisteredCodePastAnUnregisteredOne(t *testing.T) {
 		t.Errorf("CodeOf(an unregistered answer, then %v) = %q, %v; want %q", registered, code, ok, want)
 	}
 }
+
+// An error naming a refusal's code outside that refusal's family is
+// answered as the refusal its code names, never with no status: the problem
+// is the one ProblemOfCode gives the code.
+func TestACodeNamedOutsideItsFamily(t *testing.T) {
+	outside := errors.New("no family of limes's")
+	for _, code := range Codes() {
+		want, _ := ProblemOfCode(code)
+		got, ok := ProblemOf(coded{code, outside})
+		same := got.Type == want.Type && got.Title == want.Title && got.Status == want.Status &&
+			got.Reason == want.Reason && got.Code == want.Code && got.Category == want.Category
+		if !ok || !same || got.Status == 0 {
+			t.Errorf("an error naming %q outside its family: ProblemOf = %+v, %v; want %+v", code, got, ok, want)
+		}
+	}
+}

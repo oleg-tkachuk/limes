@@ -70,6 +70,15 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## v0.181.0
+
+- An error that names a refusal's code (`LimesErrorCode`) outside that
+  refusal's family — wrapping no sentinel of it — is answered by
+  `ProblemOf` and `ProblemFor` as the refusal its code names, the problem
+  `ProblemOfCode` gives that code, where the problem had status 0 and no
+  title. `Verifier.ErrorResponse` still answers it as internal, as it
+  answers any error outside the refusal families.
+
 ## pgstore/v0.79.0
 
 - A callback that sets the session's role around a `COMMIT` or `ROLLBACK`

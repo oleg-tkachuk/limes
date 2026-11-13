@@ -412,8 +412,14 @@ func ProblemOf(err error) (Problem, bool) {
 	}
 	p := problemOfRule(cr)
 	// A refusal is answered as one, unless its code has a status of its
-	// own: a meter sentinel in a refusal's family that is no refusal.
-	if rr, refused := ruleFor(err); refused && cr.status == 0 {
+	// own: a meter sentinel in a refusal's family that is no refusal. An
+	// error naming a refusal's code outside that refusal's family is
+	// answered as the refusal its code names.
+	rr, refused := ruleFor(err)
+	if !refused && cr.status == 0 {
+		rr, refused = ruleFor(cr.sentinel)
+	}
+	if refused && cr.status == 0 {
 		kind := rr.answer.slug
 		if rr.reason != "" {
 			kind = string(rr.reason)
