@@ -302,7 +302,7 @@ Run runs every check as a subtest, each on a fresh Env from setup.
 func RunCounter(t *testing.T, setup func(t *testing.T) CounterEnv)
 ```
 
-RunCounter runs the checks of meter.RequestCounter as subtests, each on a fresh CounterEnv from setup. They read nothing but Bump's receipts and refusals, so a store that counts requests and nothing else passes them: a capability's own ceiling, an ancestor's from its record bounding its whole subtree, a chain at the deepest delegation, a Biscuit copy's ceiling, a refusal that counts nothing, concurrent bumps at a ceiling, siblings' at their root's among them, the zero ceiling and subject, a capability not on record, and, where the CounterEnv enables them, an ancestor removed, another tenant's scope and a read-only one.
+RunCounter runs the checks of meter.RequestCounter as subtests, each on a fresh CounterEnv from setup. They read nothing but Bump's receipts and refusals, so a store that counts requests and nothing else passes them: a capability's own ceiling, an ancestor's from its record bounding its whole subtree, a chain at the deepest delegation, a Biscuit copy's ceiling unless the CounterEnv sets NoCopies, a refusal that counts nothing, concurrent bumps at a ceiling, siblings' at their root's among them, the zero ceiling and subject, a capability not on record, and, where the CounterEnv enables them, an ancestor removed, another tenant's scope and a read-only one.
 
 Run runs these checks too, on its Env's store.
 
@@ -385,6 +385,14 @@ type CounterEnv struct {
 	// which a Bump is refused with limes.ErrScopeMismatch. Optional: without
 	// it, that check is skipped.
 	ReadOnlyCtx context.Context
+	// NoCopies reports that the store counts no Biscuit copy's requests,
+	// for a consumer whose verifier accepts no Biscuit
+	// (limes.VerifierConfig.Biscuit unset), so no subject it hands the
+	// store carries copies. Optional: with it, the check of a copy's
+	// ceiling is skipped, and a refusal that counts nothing is checked
+	// through a capability's own ceiling alone. A store set so must never
+	// be handed a Biscuit's subject: it would count none of its copies.
+	NoCopies bool
 }
 ```
 

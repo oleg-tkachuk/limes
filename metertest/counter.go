@@ -47,6 +47,14 @@ type CounterEnv struct {
 	// which a Bump is refused with limes.ErrScopeMismatch. Optional: without
 	// it, that check is skipped.
 	ReadOnlyCtx context.Context
+	// NoCopies reports that the store counts no Biscuit copy's requests,
+	// for a consumer whose verifier accepts no Biscuit
+	// (limes.VerifierConfig.Biscuit unset), so no subject it hands the
+	// store carries copies. Optional: with it, the check of a copy's
+	// ceiling is skipped, and a refusal that counts nothing is checked
+	// through a capability's own ceiling alone. A store set so must never
+	// be handed a Biscuit's subject: it would count none of its copies.
+	NoCopies bool
 }
 
 // counterEnv is the CounterEnv of e's store.
@@ -63,7 +71,7 @@ func (e Env) counterEnv() CounterEnv {
 // refusals, so a store that counts requests and nothing else passes them:
 // a capability's own ceiling, an ancestor's from its record bounding its
 // whole subtree, a chain at the deepest delegation, a Biscuit copy's
-// ceiling, a refusal that counts nothing, concurrent bumps at a ceiling,
+// ceiling unless the CounterEnv sets NoCopies, a refusal that counts nothing, concurrent bumps at a ceiling,
 // siblings' at their root's among them, the zero ceiling and subject, a
 // capability not on record, and, where the
 // CounterEnv enables them, an ancestor removed, another tenant's scope and a
@@ -172,6 +180,9 @@ func checkCounterDeepChain(t *testing.T, e CounterEnv) {
 }
 
 func checkCounterCopy(t *testing.T, e CounterEnv) {
+	if e.NoCopies {
+		t.Skip("CounterEnv.NoCopies: the store counts no Biscuit copy")
+	}
 	id := e.record(t, uuid.Nil(), unlimitedRequests)
 	copyOf := func(name string) []limes.CopyCeiling {
 		return []limes.CopyCeiling{{RevocationID: []byte(name), Requests: &limes.RequestCeiling{Max: 1}}}
@@ -187,10 +198,15 @@ func checkCounterCopy(t *testing.T, e CounterEnv) {
 func checkCounterRefusalCountsNothing(t *testing.T, e CounterEnv) {
 	root := e.record(t, uuid.Nil(), limes.RequestCeiling{Max: 1})
 	child := e.record(t, root, unlimitedRequests)
-	frozen := []limes.CopyCeiling{{RevocationID: []byte("frozen"), Requests: &limes.RequestCeiling{}}}
-	n, err := e.bump(e.Ctx, subjectSpec{capID: child, copies: frozen})
-	refused(t, "a bump past a frozen copy", n, err, 0)
-	n, err = e.bump(e.Ctx, subjectSpec{capID: child})
+	if e.NoCopies {
+		n, err := e.bump(e.Ctx, subjectSpec{capID: child, requests: &limes.RequestCeiling{}})
+		refused(t, "a bump past a frozen ceiling of its own", n, err, 0)
+	} else {
+		frozen := []limes.CopyCeiling{{RevocationID: []byte("frozen"), Requests: &limes.RequestCeiling{}}}
+		n, err := e.bump(e.Ctx, subjectSpec{capID: child, copies: frozen})
+		refused(t, "a bump past a frozen copy", n, err, 0)
+	}
+	n, err := e.bump(e.Ctx, subjectSpec{capID: child})
 	admitted(t, "a bump after a refused one, the root's one request still free", n, err, 1)
 }
 
