@@ -118,6 +118,9 @@ func contractEnv(t *testing.T, cfg Config, readOnly func(context.Context) contex
 			_, err := owner.Exec(context.Background(), deleteRecord, id)
 			return err
 		},
+		HoldTenantAlone: func(tenant uuid.UUID) func() {
+			return holdTenantAlone(t, tenant)
+		},
 		Revoke: func(id uuid.UUID) error {
 			_, err := records.Revoke(WithAllTenants(t.Context()), limes.RevokeRequest{CapabilityID: id})
 			return err
@@ -168,4 +171,21 @@ func TestNewUsageStoreRefusesANegativeCopyQuota(t *testing.T) {
 	if _, err := NewUsageStore(Config{DB: app, MaxCopiesPerCapability: -1}); err == nil {
 		t.Fatal("a negative MaxCopiesPerCapability was accepted")
 	}
+}
+
+// holdTenantAlone takes tenant's erase lock alone, as a period reset and an
+// erase take it, in a transaction of the owner's, and returns what lets it
+// go. A lock it cannot take fails the test and holds nothing.
+func holdTenantAlone(t *testing.T, tenant uuid.UUID) (release func()) {
+	tx, err := owner.Begin(context.Background())
+	if err != nil {
+		t.Errorf("hold the tenant alone: %v", err)
+		return func() {}
+	}
+	if _, err := tx.Exec(context.Background(), sqlTakeTenantLock, eraseLockClass, tenant); err != nil {
+		_ = tx.Rollback(context.Background())
+		t.Errorf("hold the tenant alone: %v", err)
+		return func() {}
+	}
+	return func() { _ = tx.Rollback(context.Background()) }
 }
