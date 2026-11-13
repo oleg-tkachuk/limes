@@ -2,6 +2,16 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.182.0](https://github.com/oleg-tkachuk/limes/compare/v0.181.0...v0.182.0) (2026-11-13)
+
+### Features
+
+* **metertest:** check that every ending call waits for a tenant held alone ([9bf65ab](https://github.com/oleg-tkachuk/limes/commit/9bf65ab87b6b2757fd775e0db2ec936ec6d08287))
+
+### Bug Fixes
+
+* **limes:** walk an error chain for its code without a frame per link ([75cc846](https://github.com/oleg-tkachuk/limes/commit/75cc846f1f8aa17655e09c74a58aaa99ba7f4d5e))
+
 ## [0.181.0](https://github.com/oleg-tkachuk/limes/compare/v0.180.0...v0.181.0) (2026-11-13)
 
 ### ⚠ BREAKING CHANGES
