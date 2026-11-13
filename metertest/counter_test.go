@@ -45,7 +45,20 @@ type counter struct {
 	mu     sync.Mutex
 	// tenants are the tenants the store knows: its own and NewTenant's.
 	tenants map[uuid.UUID]bool
+	// refs are the receipts faultRacesRefs replays, by capability and ref.
+	refs map[racedRef]meter.BumpReceipt
 }
+
+// racedRef is a capability and a ref, as faultRacesRefs keeps them.
+type racedRef struct {
+	capID uuid.UUID
+	ref   string
+}
+
+// raceWindow is how long faultRacesRefs waits between reading a ref and
+// recording it: long enough for every concurrent delivery to read it
+// missing.
+const raceWindow = 10 * time.Millisecond
 
 // The faults, by what the counter gets wrong.
 const (
@@ -54,9 +67,22 @@ const (
 	faultHidesRefusal     = "answers a refusal as admitted"
 	faultIgnoresScope     = "ignores the call's scope"
 	faultCountsRefused    = "counts a call it refuses for its scope"
+	faultForgetsRefs      = "counts every delivery of a ref"
+	faultHidesRefConflict = "answers a ref conflict as a replay"
+	faultAcceptsAnyRef    = "counts under a malformed ref"
+	faultRacesRefs        = "replays a ref by a read and a write apart"
+	faultSkipsCallback    = "never runs the callback"
+	faultKeepsFailedBump  = "counts a bump whose callback failed"
+	faultCallsOnReplay    = "runs the callback on a replay"
 )
 
-func (c *counter) Bump(ctx context.Context, req meter.BumpRequest) (meter.BumpReceipt, error) {
+func (c *counter) Bump(ctx context.Context, req meter.BumpRequest, onBumped func(context.Context, meter.Bumped) error) (meter.BumpReceipt, error) {
+	switch {
+	case c.fault == faultForgetsRefs, c.fault == faultAcceptsAnyRef && meter.ValidateExternalRef(req.ExternalRef) != nil:
+		req.ExternalRef = ""
+	case c.fault == faultSkipsCallback:
+		onBumped = nil
+	}
 	// A store refuses a malformed request before anything else (meter.Meter).
 	if err := req.Validate(); err != nil {
 		return meter.BumpReceipt{}, err
@@ -64,15 +90,29 @@ func (c *counter) Bump(ctx context.Context, req meter.BumpRequest) (meter.BumpRe
 	if c.scoped {
 		if err := c.admitScope(ctx, req); err != nil {
 			if c.fault == faultCountsRefused {
-				_, _ = c.inner.Bump(ctx, req)
+				_, _ = c.inner.Bump(ctx, req, onBumped)
 			}
 			if c.fault != faultIgnoresScope {
 				return meter.BumpReceipt{}, err
 			}
 		}
 	}
-	r, err := c.inner.Bump(ctx, req)
+	if c.fault == faultRacesRefs && req.ExternalRef != "" {
+		return c.racedBump(ctx, req, onBumped)
+	}
+	var failed error
+	if c.fault == faultKeepsFailedBump && onBumped != nil {
+		run := onBumped
+		onBumped = func(ctx context.Context, b meter.Bumped) error { failed = run(ctx, b); return nil }
+	}
+	r, err := c.inner.Bump(ctx, req, onBumped)
 	switch {
+	case failed != nil:
+		return r, failed
+	case c.fault == faultHidesRefConflict && errors.Is(err, meter.ErrExternalRefConflict):
+		return replayedReceipt(1), nil
+	case c.fault == faultCallsOnReplay && err == nil && r.Replayed && onBumped != nil:
+		return r, onBumped(ctx, meter.Bumped{Receipt: r})
 	case c.fault == faultMiscounts && err == nil:
 		return receipt(r.RequestCount + 1), nil
 	case c.fault == faultMiscountsRefusal && err != nil:
@@ -88,6 +128,34 @@ func receipt(n int64) meter.BumpReceipt {
 	var r meter.BumpReceipt
 	r.RequestCount = n
 	return r
+}
+
+// replayedReceipt is a receipt replaying a first count of n.
+func replayedReceipt(n int64) meter.BumpReceipt {
+	r := receipt(n)
+	r.Replayed = true
+	return r
+}
+
+// racedBump is a keyed bump that keeps its ref beside the store, read and
+// recorded raceWindow apart, so concurrent deliveries all count.
+func (c *counter) racedBump(ctx context.Context, req meter.BumpRequest, onBumped func(context.Context, meter.Bumped) error) (meter.BumpReceipt, error) {
+	key := racedRef{req.Subject.CapabilityID(), req.ExternalRef}
+	c.mu.Lock()
+	first, ok := c.refs[key]
+	c.mu.Unlock()
+	if ok {
+		return replayedReceipt(first.RequestCount), nil
+	}
+	time.Sleep(raceWindow)
+	req.ExternalRef = ""
+	r, err := c.inner.Bump(ctx, req, onBumped)
+	if err == nil {
+		c.mu.Lock()
+		c.refs[key] = r
+		c.mu.Unlock()
+	}
+	return r, err
 }
 
 // admitScope refuses a call scoped read only, or to another tenant than
@@ -125,7 +193,7 @@ func counterEnv(t *testing.T, scoped bool, fault string) metertest.CounterEnv {
 		t.Fatal(err)
 	}
 	tenant := uuid.New()
-	c := &counter{inner: usage, scoped: scoped, fault: fault, tenants: map[uuid.UUID]bool{tenant: true}}
+	c := &counter{inner: usage, scoped: scoped, fault: fault, tenants: map[uuid.UUID]bool{tenant: true}, refs: map[racedRef]meter.BumpReceipt{}}
 	expiry := time.Now().Add(counterTTL)
 	env := metertest.CounterEnv{
 		Ctx:     context.WithValue(t.Context(), scopeKey{}, tenant),
@@ -200,5 +268,12 @@ func faultChecks() map[string]string {
 		faultHidesRefusal:     "BumpCountsUpToItsOwnCeiling",
 		faultIgnoresScope:     "ACallScopedToAnotherTenantIsRefused",
 		faultCountsRefused:    "AReadOnlyScopeCountsNothing",
+		faultForgetsRefs:      "AKeyedBumpCountsOnce",
+		faultHidesRefConflict: "AnExternalRefNamesOneRequest",
+		faultAcceptsAnyRef:    "AnInvalidExternalRefIsRefused",
+		faultRacesRefs:        "AKeyedBumpCountsOnceConcurrently",
+		faultSkipsCallback:    "TheBumpCallbackSeesTheReceipt",
+		faultKeepsFailedBump:  "AFailedBumpCallbackCountsNothing",
+		faultCallsOnReplay:    "AReplayedBumpRunsNoCallback",
 	}
 }

@@ -42,7 +42,7 @@ func TestIssueForAnErasedTenantIsGone(t *testing.T) {
 		t.Errorf("Issue for an erased tenant: problem %+v, %v; want 410 %s, not_found, no reason", p, ok, limes.CodeTenantGone)
 	}
 
-	_, err = s.usage.Bump(ctx, meter.BumpRequest{Subject: subject})
+	_, err = s.usage.Bump(ctx, meter.BumpRequest{Subject: subject}, nil)
 	if !errors.Is(err, limes.ErrTenantErased) || !errors.Is(err, limes.ErrRevoked) {
 		t.Errorf("Bump for an erased tenant: err = %v; want ErrTenantErased, matching ErrRevoked", err)
 	}

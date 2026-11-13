@@ -63,10 +63,10 @@
 // verifier could still accept the token and its record may be purged
 // (limes.MinPurgeRetention).
 //
-// Charge and Settle hand onCharged the charge's transaction, and Refund
-// hands onRefunded the refund's, which TxFrom reads from its context, so a
-// write of the consumer's commits with the charge or the refund or not at
-// all. The transaction is the store's to end: Commit and Rollback on it
+// Charge and Settle hand onCharged the charge's transaction, Bump hands
+// onBumped the bump's, and Refund hands onRefunded the refund's, which
+// TxFrom reads from its context, so a write of the consumer's commits with
+// the charge, the bump or the refund or not at all. The transaction is the store's to end: Commit and Rollback on it
 // return ErrChargeTransaction, a call whose transaction the callback ended
 // with SQL of its own is refused with ErrChargeTransaction, and once the
 // callback returns every call on it fails with pgx.ErrTxClosed.

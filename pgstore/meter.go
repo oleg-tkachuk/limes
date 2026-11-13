@@ -28,17 +28,19 @@ import (
 // capabilities' counters by id, then the copies' by revocation id, then the
 // tenant aggregate, then the ledger — so two calls never wait on each other
 // in a cycle (lock_order_test.go; docs/adr/0018-fewer-round-trips-per-charge.md).
-// onCharged runs on the call's own transaction, which TxFrom reads from the
-// context it is handed.
+// onCharged, onBumped and onRefunded run on the call's own transaction,
+// which TxFrom reads from the context each is handed.
 //
 // A call whose COMMIT left and whose answer did not come back — the
 // connection failed or the context ended first — returns an error matching
 // meter.ErrOutcomeUnknown, wrapping the cause: it may have committed. Bump,
 // Charge, Reserve, Settle, Release, Refund and the leases' calls log it at
 // WARN. One the database answered, or that sent nothing, never
-// does. A keyed id (ChargeRequest.ExternalRef, ReserveRequest.ReservationID,
-// RefundRequest.RefundID) makes the call safe to send again; refunds
-// recorded under one are kept in limes.refunds, removed with their charge.
+// does. A keyed id (ChargeRequest.ExternalRef, BumpRequest.ExternalRef,
+// ReserveRequest.ReservationID, RefundRequest.RefundID) makes the call safe
+// to send again; refunds recorded under one are kept in limes.refunds,
+// removed with their charge, and bumps in limes.bumps, removed by
+// PurgeCharges past its retention, by DeleteUsage and by an erase.
 type UsageStore struct {
 	conn
 }
@@ -163,9 +165,10 @@ type prelude struct {
 	// not be read: a call that answers a replay needs neither.
 	ancestors  []ancestor
 	lineageErr error
-	// replay is the charge on record under the call's reference, when
-	// replayed.
+	// replay is the charge on record under the call's reference, and
+	// bumped the bump, when replayed.
 	replay   ledgerEntry
+	bumped   priorBump
 	replayed bool
 	// leases are the leases held on the chain, by capability, when the
 	// prelude was asked for them: read, not locked.
@@ -175,16 +178,28 @@ type prelude struct {
 	now time.Time
 }
 
+// refLookup is the call a prelude reads a replay for: a reference, and
+// whether it is a bump's (limes.bumps) rather than a charge's
+// (limes.charges). An empty reference reads none.
+type refLookup struct {
+	ref  string
+	bump bool
+}
+
 // readPrelude shares tenant's erase lock and refuses it erased, reads the
-// charge on record under capID's ref, when ref is not empty, capID's
-// lineage holding its records, and the database's time, in one batch: what
-// notErased, a replay's lookup and lineage read one at a time.
-func readPrelude(ctx context.Context, tx pgx.Tx, tenant, capID uuid.UUID, ref string, leases bool) (prelude, error) {
+// charge or the bump on record under capID's ref, when ref names one,
+// capID's lineage holding its records, and the database's time, in one
+// batch: what notErased, a replay's lookup and lineage read one at a time.
+func readPrelude(ctx context.Context, tx pgx.Tx, tenant, capID uuid.UUID, ref refLookup, leases bool) (prelude, error) {
 	b := &pgx.Batch{}
 	b.Queue(sqlShareTenantLock, eraseLockClass, tenant)
 	b.Queue(sqlIsErased, tenant)
-	if ref != "" {
-		b.Queue(sqlChargeByRef, capID, ref)
+	switch {
+	case ref.ref == "":
+	case ref.bump:
+		b.Queue(sqlBumpByRef, capID, ref.ref)
+	default:
+		b.Queue(sqlChargeByRef, capID, ref.ref)
 	}
 	b.Queue(sqlLineageHeld, capID, limes.MaxDelegationDepth)
 	if leases {
@@ -197,7 +212,7 @@ func readPrelude(ctx context.Context, tx pgx.Tx, tenant, capID uuid.UUID, ref st
 }
 
 // readPreludeResults reads readPrelude's batch from br.
-func readPreludeResults(br pgx.BatchResults, tenant, capID uuid.UUID, ref string, leases bool) (prelude, error) {
+func readPreludeResults(br pgx.BatchResults, tenant, capID uuid.UUID, ref refLookup, leases bool) (prelude, error) {
 	var p prelude
 	if _, err := br.Exec(); err != nil {
 		return p, err
@@ -209,11 +224,16 @@ func readPreludeResults(br pgx.BatchResults, tenant, capID uuid.UUID, ref string
 	if erased {
 		return p, fmt.Errorf("%w: %s", limes.ErrTenantErased, tenant)
 	}
-	if ref != "" {
-		var err error
-		if p.replay, p.replayed, err = scanEntry(br.QueryRow()); err != nil {
-			return p, err
-		}
+	var err error
+	switch {
+	case ref.ref == "":
+	case ref.bump:
+		p.bumped, p.replayed, err = scanBump(br.QueryRow())
+	default:
+		p.replay, p.replayed, err = scanEntry(br.QueryRow())
+	}
+	if err != nil {
+		return p, err
 	}
 	rows, err := br.Query()
 	if err != nil {
@@ -240,7 +260,7 @@ func readPreludeResults(br pgx.BatchResults, tenant, capID uuid.UUID, ref string
 // readLineage is readPrelude with no reference: tenant not erased, capID's
 // lineage, and the database's time.
 func readLineage(ctx context.Context, tx pgx.Tx, tenant, capID uuid.UUID) ([]ancestor, time.Time, error) {
-	p, err := readPrelude(ctx, tx, tenant, capID, "", false)
+	p, err := readPrelude(ctx, tx, tenant, capID, refLookup{}, false)
 	if err != nil {
 		return nil, time.Time{}, err
 	}
@@ -445,6 +465,10 @@ type counters struct {
 	// once the locks were held, when replayed.
 	replay   ledgerEntry
 	replayed bool
+	// bumped is the bump on record under the lock request's bumpRef once
+	// the capability's counters were locked, when bumpReplayed.
+	bumped       priorBump
+	bumpReplayed bool
 	// holdTaken reports that the lock request's holdID named a hold, or a
 	// settled one, once the locks were held.
 	holdTaken bool
@@ -628,7 +652,7 @@ func lockUsageOf(ctx context.Context, tx pgx.Tx, l lockRequest, c *counters) err
 		if len(ids) == 0 {
 			return nil
 		}
-		scanned, err := createAndLockUsage(ctx, tx, l, ids)
+		scanned, err := createAndLockUsage(ctx, tx, l, ids, c)
 		if err != nil {
 			return err
 		}
@@ -646,13 +670,17 @@ func lockUsageOf(ctx context.Context, tx pgx.Tx, l lockRequest, c *counters) err
 }
 
 // createAndLockUsage creates l.created's counters if missing and locks
-// those of ids, in one batch.
-func createAndLockUsage(ctx context.Context, tx pgx.Tx, l lockRequest, ids []uuid.UUID) ([]*usageRow, error) {
+// those of ids, and then reads l's bump under l.bumpRef into c, in one
+// batch.
+func createAndLockUsage(ctx context.Context, tx pgx.Tx, l lockRequest, ids []uuid.UUID, c *counters) ([]*usageRow, error) {
 	b := &pgx.Batch{}
 	if len(l.created) > 0 {
 		b.Queue(sqlCreateUsage, l.created, l.usageTenant)
 	}
 	b.Queue(sqlLockUsage, ids)
+	if l.bumpRef != "" {
+		b.Queue(sqlBumpByRef, l.bumpCapID, l.bumpRef)
+	}
 	br := tx.SendBatch(ctx, b)
 	scanned, err := func() ([]*usageRow, error) {
 		if len(l.created) > 0 {
@@ -664,7 +692,12 @@ func createAndLockUsage(ctx context.Context, tx pgx.Tx, l lockRequest, ids []uui
 		if err != nil {
 			return nil, err
 		}
-		return pgx.CollectRows(rows, scanUsage)
+		scanned, err := pgx.CollectRows(rows, scanUsage)
+		if err != nil || l.bumpRef == "" {
+			return scanned, err
+		}
+		c.bumped, c.bumpReplayed, err = scanBump(br.QueryRow())
+		return scanned, err
 	}()
 	return scanned, errors.Join(err, br.Close())
 }
@@ -805,6 +838,12 @@ type lockRequest struct {
 	// settled one once every lock is held, with the tenant's aggregate: a
 	// keyed Reserve of the id committed while the call waited for them.
 	holdID uuid.UUID
+	// bumpCapID's bump under bumpRef is read once the usage counters are
+	// locked, in the batch that locks them, when bumpRef is set: one
+	// committed while the call waited for them. A bump locks no tenant
+	// aggregate, so it cannot wait for replayRef's read.
+	bumpCapID uuid.UUID
+	bumpRef   string
 }
 
 // chainQuota is one capability's quota of copies, over its subtree.

@@ -184,7 +184,8 @@ var _ meter.LedgerReader = (*Ledger)(nil)
 
 // PurgeCharges implements meter.LedgerHousekeeping: the charges taken more
 // than req.Retention() ago by the store's clock, oldest first, at most the
-// batch's limit, leave the ledger and its indexes.
+// batch's limit, leave the ledger and its indexes, and then, within what is
+// left of the limit, the keyed bumps counted as long ago, oldest first.
 func (l *Ledger) PurgeCharges(_ context.Context, req meter.PurgeChargesRequest) (meter.PurgeChargesResult, error) {
 	if err := req.Validate(); err != nil {
 		return meter.PurgeChargesResult{}, err
@@ -193,6 +194,32 @@ func (l *Ledger) PurgeCharges(_ context.Context, req meter.PurgeChargesRequest) 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cutoff := s.nowFn().Add(-req.Retention())
+	limit := meter.HousekeepingLimit(req.Limit)
+	charges := s.purgeChargesLocked(cutoff, limit)
+	bumps := s.purgeBumpsLocked(cutoff, limit-charges)
+	return meter.PurgeChargesResult{Purged: int64(charges + bumps)}, nil
+}
+
+// purgeBumpsLocked removes the keyed bumps counted before cutoff, oldest
+// first, at most limit of them, and says how many. s.mu must be held.
+func (s *UsageStore) purgeBumpsLocked(cutoff time.Time, limit int) int {
+	var due []refKey
+	for k, b := range s.bumps {
+		if b.at.Before(cutoff) {
+			due = append(due, k)
+		}
+	}
+	slices.SortStableFunc(due, func(a, b refKey) int { return s.bumps[a].at.Compare(s.bumps[b].at) })
+	due = due[:min(len(due), limit)]
+	for _, k := range due {
+		delete(s.bumps, k)
+	}
+	return len(due)
+}
+
+// purgeChargesLocked removes the charges taken before cutoff, oldest first,
+// at most limit of them, and says how many. s.mu must be held.
+func (s *UsageStore) purgeChargesLocked(cutoff time.Time, limit int) int {
 	var due []int
 	for i, e := range s.ledger {
 		if e.At.Before(cutoff) {
@@ -200,9 +227,9 @@ func (l *Ledger) PurgeCharges(_ context.Context, req meter.PurgeChargesRequest) 
 		}
 	}
 	slices.SortStableFunc(due, func(a, b int) int { return s.ledger[a].At.Compare(s.ledger[b].At) })
-	due = due[:min(len(due), meter.HousekeepingLimit(req.Limit))]
+	due = due[:min(len(due), limit)]
 	if len(due) == 0 {
-		return meter.PurgeChargesResult{}, nil
+		return 0
 	}
 	gone := make(map[int]bool, len(due))
 	for _, i := range due {
@@ -215,7 +242,7 @@ func (l *Ledger) PurgeCharges(_ context.Context, req meter.PurgeChargesRequest) 
 		}
 	}
 	s.rebuildLedgerLocked(kept)
-	return meter.PurgeChargesResult{Purged: int64(len(due))}, nil
+	return len(due)
 }
 
 var _ meter.LedgerHousekeeping = (*Ledger)(nil)

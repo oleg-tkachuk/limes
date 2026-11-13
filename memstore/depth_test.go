@@ -27,7 +27,7 @@ func TestMeteringRefusesAChainPastMaxDelegationDepth(t *testing.T) {
 	}
 	u := newTestUsage(records)
 	subject := newSubject(subjectSpec{capID: parent, tenant: tenant})
-	if _, err := u.Bump(ctx, meter.BumpRequest{Subject: subject}); !errors.Is(err, limes.ErrDelegationTooDeep) {
+	if _, err := u.Bump(ctx, meter.BumpRequest{Subject: subject}, nil); !errors.Is(err, limes.ErrDelegationTooDeep) {
 		t.Errorf("Bump: err = %v, want ErrDelegationTooDeep", err)
 	}
 	if _, err := u.Charge(ctx, meter.ChargeRequest{Subject: subject, Amount: unit}, nil); !errors.Is(err, limes.ErrDelegationTooDeep) {

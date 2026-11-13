@@ -233,7 +233,7 @@ func ExampleNewUsageStore() {
 	c := e.record("researcher", uuid.Nil())
 
 	// Bump counts a request against the ceiling; it moves no amount.
-	receipt, err := e.usage.Bump(ctx, meter.BumpRequest{Subject: e.subject(c)})
+	receipt, err := e.usage.Bump(ctx, meter.BumpRequest{Subject: e.subject(c)}, nil)
 	fmt.Println(receipt.RequestCount, err)
 
 	usage, err := e.usage.GetUsage(ctx, c.ID)
@@ -459,7 +459,7 @@ func ExampleUsageStore_DeleteUsage() {
 	ctx := context.Background()
 	e := newExampleEnv()
 	c := e.record("researcher", uuid.Nil())
-	if _, err := e.usage.Bump(ctx, meter.BumpRequest{Subject: e.subject(c)}); err != nil {
+	if _, err := e.usage.Bump(ctx, meter.BumpRequest{Subject: e.subject(c)}, nil); err != nil {
 		log.Fatal(err)
 	}
 
@@ -475,7 +475,7 @@ func ExampleUsageStore_PurgeOrphans() {
 	ctx := context.Background()
 	e := newExampleEnv()
 	c := e.record("researcher", uuid.Nil())
-	if _, err := e.usage.Bump(ctx, meter.BumpRequest{Subject: e.subject(c)}); err != nil {
+	if _, err := e.usage.Bump(ctx, meter.BumpRequest{Subject: e.subject(c)}, nil); err != nil {
 		log.Fatal(err)
 	}
 
@@ -495,12 +495,12 @@ func ExampleUsageStore_EraseTenantUsage() {
 	e := newExampleEnv()
 	c := e.record("researcher", uuid.Nil())
 
-	_, err := e.usage.Bump(ctx, meter.BumpRequest{Subject: e.subject(c)})
+	_, err := e.usage.Bump(ctx, meter.BumpRequest{Subject: e.subject(c)}, nil)
 	fmt.Println(err)
 	erased, err := e.usage.EraseTenantUsage(ctx, meter.EraseTenantUsageRequest{TenantID: e.tenant})
 	fmt.Println(erased.Counters, err)
 	// Nothing of the tenant is counted, or issued, again.
-	_, err = e.usage.Bump(ctx, meter.BumpRequest{Subject: e.subject(c)})
+	_, err = e.usage.Bump(ctx, meter.BumpRequest{Subject: e.subject(c)}, nil)
 	fmt.Println(errors.Is(err, limes.ErrTenantErased))
 	err = e.records.Insert(ctx, limes.InsertRequest{Capability: limes.Capability{
 		ID: uuid.New(), IssuedAt: e.now, ExpiresAt: e.now.Add(exampleTTL),

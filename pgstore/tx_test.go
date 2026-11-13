@@ -28,7 +28,7 @@ func TestTxFromIsTheChargesTransaction(t *testing.T) {
 	subject := meterSubject(f.child.ID, f.mine)
 	// a committed counter row, so another connection sees the charge's lock
 	// on it rather than no row at all
-	if _, err := f.usage.Bump(ctx, meter.BumpRequest{Subject: subject}); err != nil {
+	if _, err := f.usage.Bump(ctx, meter.BumpRequest{Subject: subject}, nil); err != nil {
 		t.Fatal(err)
 	}
 	ran := false

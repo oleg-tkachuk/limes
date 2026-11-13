@@ -1020,6 +1020,9 @@ LIMIT $1`
 
 	sqlDeleteCopies = `DELETE FROM limes.copy_usage WHERE capability_id = ANY ($1)`
 
+	// sqlDeleteBumps drops the keyed bumps of $1 (044_keyed_bumps.sql).
+	sqlDeleteBumps = `DELETE FROM limes.bumps WHERE capability_id = ANY ($1)`
+
 	// sqlForgetAncestors strikes dropped capabilities from the ancestors of
 	// the holds that remain: releasing or settling one later must not write
 	// a dropped row back.
@@ -1265,9 +1268,9 @@ func (s *UsageStore) settledThen(ctx context.Context, op meter.StoreOperation, s
 	}
 }
 
-// DeleteUsage drops a capability's counters and its copies', settling its
-// lease and those below it and releasing its holds first: nothing could
-// settle or release them once it is gone.
+// DeleteUsage drops a capability's counters, its copies' and its keyed
+// bumps, settling its lease and those below it and releasing its holds
+// first: nothing could settle or release them once it is gone.
 func (s *UsageStore) DeleteUsage(ctx context.Context, req meter.DeleteUsageRequest) error {
 	if err := req.Validate(); err != nil {
 		return err
@@ -1285,6 +1288,11 @@ func (s *UsageStore) DeleteUsage(ctx context.Context, req meter.DeleteUsageReque
 				return err
 			}
 			if err := s.dropUsage(ctx, tx, ids, leases); err != nil {
+				return err
+			}
+			// Its counters restart, and its keyed bumps with them; an
+			// orphan's, which PurgeOrphans drops, stay to replay.
+			if _, err := tx.Exec(ctx, sqlDeleteBumps, ids); err != nil {
 				return err
 			}
 			var below bool

@@ -44,6 +44,9 @@ var wrappedHelpers = map[string]map[string]string{
 	"metertest/lease.go": {
 		"checkALeasedChargeRunsOnCharged": "a conformance check's own fixture: the error a side effect fails with",
 	},
+	"metertest/bump_keyed.go": {
+		"errBumpSideEffect": "a conformance check's own fixture: the error a side effect fails with",
+	},
 	"metertest/refund_callback.go": {
 		"checkRefundCallbackRollback":      "a conformance check's own fixture: the error a side effect fails with",
 		"checkALeasedRefundRunsOnRefunded": "a conformance check's own fixture: the error a side effect fails with",

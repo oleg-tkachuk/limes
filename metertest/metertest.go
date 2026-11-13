@@ -480,6 +480,10 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{Name: "RejectionMovesNothing", Run: checkRejectionMovesNothing},
 		{Name: "ExternalRefChargesOnce", Run: checkExternalRefChargesOnce},
 		{Name: "ExternalRefChargesOnceConcurrently", Run: checkExternalRefConcurrent},
+		{Name: "AKeyedBumpGoesWithItsCounters", Run: checkKeyedBumpGoesWithItsCounters},
+		{Name: "AKeyedBumpKeepsTheRetention", Run: checkKeyedBumpKeepsTheRetention},
+		{Name: "AKeyedBumpGoesWithItsTenantsUsage", Run: checkKeyedBumpGoesWithItsTenantsUsage},
+		{Name: "ALeasedBumpIsKeyedAndRunsOnBumped", Run: checkALeasedBumpIsKeyedAndRunsOnBumped},
 		{Name: "AReserveUnderAnIDHoldsOnce", Run: checkReserveReplaysItsID},
 		{Name: "AReservationIDNamesOneHold", Run: checkReserveIDConflicts},
 		{Name: "AReservationIDOutlivesItsHoldOnlyAsACharge", Run: checkReserveIDAfterItsHold},
@@ -1115,7 +1119,7 @@ func checkAncestorUnit(t *testing.T, f fixture) {
 // on it; the first charge that names a unit pins it.
 func checkNoUnit(t *testing.T, f fixture) {
 	none := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, unitless: true})
-	_, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: none})
+	_, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: none}, nil)
 	expect.Must(t, err == nil, "Bump of a subject with no unit: %v", err)
 	u, err := f.Usage.GetUsage(f.Ctx, f.child)
 	expect.That(t, err == nil && u.UnitCode == "" && u.RequestCount == 1, "usage after a bump with no unit = %+v, %v; want one request in no unit", u, err)
@@ -1327,7 +1331,7 @@ func checkReleaseReturnsCopy(t *testing.T, f fixture) {
 // ceiling moving no counter.
 func checkRefusedBump(t *testing.T, f fixture) {
 	frozen := []limes.CopyCeiling{{RevocationID: []byte("frozen"), Requests: &limes.RequestCeiling{}}}
-	_, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, copies: frozen})})
+	_, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, copies: frozen})}, nil)
 	expect.Must(t, errors.Is(err, limes.ErrRequestLimitExceeded), "a bump past a frozen copy: err = %v, want ErrRequestLimitExceeded", err)
 	for name, id := range map[string]uuid.UUID{"capability": f.child, "root": f.root} {
 		u, err := f.Usage.GetUsage(f.Ctx, id)
@@ -1708,7 +1712,7 @@ func checkCopyCountersGo(t *testing.T, f fixture) {
 	counted := func(capID uuid.UUID, copyID []byte) []meter.CopyUsage {
 		t.Helper()
 		copies := []limes.CopyCeiling{{RevocationID: copyID, Requests: &limes.RequestCeiling{Max: requests}}}
-		_, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: f.Tenant, copies: copies})})
+		_, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: f.Tenant, copies: copies})}, nil)
 		expect.Must(t, err == nil, "%v", err)
 		return f.copyUsage(t, reader, capID, copyID)
 	}
@@ -1760,9 +1764,9 @@ func checkCopySharedID(t *testing.T, f fixture) {
 	mine := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, copies: shared})
 	theirs := newSubject(subjectSpec{capID: theirCap, tenant: tenant, copies: shared})
 
-	_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: mine})
+	_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: mine}, nil)
 	expect.Must(t, err == nil, "%v", err)
-	_, err = f.Usage.Bump(theirCtx, meter.BumpRequest{Subject: theirs})
+	_, err = f.Usage.Bump(theirCtx, meter.BumpRequest{Subject: theirs}, nil)
 	expect.That(t, err == nil, "the other capability's first request under the shared id: err = %v, want it counted apart", err)
 	theirCharge, err := f.Usage.Charge(theirCtx, meter.ChargeRequest{Subject: theirs, Amount: one}, nil)
 	expect.Must(t, err == nil, "the other capability's charge under the shared id: %v", err)
@@ -1774,7 +1778,7 @@ func checkCopySharedID(t *testing.T, f fixture) {
 	expect.Must(t, err == nil, "%v", err)
 	got := f.copyUsage(t, reader, f.child, shared[0].RevocationID)
 	expect.That(t, len(got) == 1 && got[0].CapabilityID == f.child && got[0].RequestCount == requests && got[0].SpentAmount == one, "the copy after the other capability's refund and DeleteUsage = %+v; want %d request and %v spent, untouched", got, requests, one)
-	_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: mine})
+	_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: mine}, nil)
 	expect.That(t, errors.Is(err, limes.ErrRequestLimitExceeded), "a request past the copy's ceiling after the other capability's DeleteUsage: err = %v, want ErrRequestLimitExceeded", err)
 }
 
@@ -1800,10 +1804,10 @@ func checkCopyQuota(t *testing.T, f fixture) {
 		return newSubject(subjectSpec{capID: capID, tenant: f.Tenant, copies: c})
 	}
 	full := copies("counted-", quota)
-	_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: subject(full)})
+	_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: subject(full)}, nil)
 	expect.Must(t, err == nil, "Bump of %d copies, the quota: %v", quota, err)
 	past := slices.Concat(full[:1], copies("past-", 1))
-	_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: subject(past)})
+	_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: subject(past)}, nil)
 	expect.That(t, errors.Is(err, meter.ErrCopyLimitExceeded) && errors.Is(err, limes.ErrRequestLimitExceeded), "Bump of a copy past the quota: err = %v, want ErrCopyLimitExceeded, matching ErrRequestLimitExceeded", err)
 	_, err = f.Usage.Charge(f.Ctx, meter.ChargeRequest{Subject: subject(past), Amount: one}, nil)
 	expect.That(t, errors.Is(err, meter.ErrCopyLimitExceeded), "Charge of a copy past the quota: err = %v, want ErrCopyLimitExceeded", err)
@@ -1811,11 +1815,11 @@ func checkCopyQuota(t *testing.T, f fixture) {
 	expect.That(t, errors.Is(err, meter.ErrCopyLimitExceeded), "Reserve of a copy past the quota: err = %v, want ErrCopyLimitExceeded", err)
 	u, err := f.Usage.GetUsage(f.Ctx, capID)
 	expect.That(t, err == nil && u.RequestCount == 1 && u.SpentAmount == 0 && u.ReservedAmount == 0, "usage after the refused calls = %+v, %v; want only the first request counted", u, err)
-	_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: subject(full[:1])})
+	_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: subject(full[:1])}, nil)
 	expect.That(t, err == nil, "Bump of a copy already counted, at the quota: %v", err)
 	err = f.Usage.DeleteUsage(f.Ctx, meter.DeleteUsageRequest{CapabilityID: capID})
 	expect.Must(t, err == nil, "%v", err)
-	_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: subject(past)})
+	_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: subject(past)}, nil)
 	expect.That(t, err == nil, "Bump of a new copy once the capability's usage was dropped: %v", err)
 }
 
@@ -1843,7 +1847,7 @@ func checkCopyQuotaCaveat(t *testing.T, f fixture) {
 	}
 	t.Run("a quota of two", func(t *testing.T) {
 		two := subjectOf(t, limes.CopyQuota{Max: capabilityCopyQuota}, limited("first"), limited("second"))
-		_, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: two})
+		_, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: two}, nil)
 		expect.Must(t, err == nil, "Bump of two copies under a quota of two: %v", err)
 		third := newSubject(subjectSpec{capID: two.CapabilityID(), tenant: f.Tenant, copies: []limes.CopyCeiling{limited("third")},
 			copyQuota: &limes.CopyQuota{Max: capabilityCopyQuota}})
@@ -1851,14 +1855,14 @@ func checkCopyQuotaCaveat(t *testing.T, f fixture) {
 		expect.That(t, errors.Is(err, meter.ErrCopyLimitExceeded), "Charge of a third copy under a quota of two: err = %v, want ErrCopyLimitExceeded", err)
 		again := newSubject(subjectSpec{capID: two.CapabilityID(), tenant: f.Tenant, copies: []limes.CopyCeiling{limited("first")},
 			copyQuota: &limes.CopyQuota{Max: capabilityCopyQuota}})
-		_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: again})
+		_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: again}, nil)
 		expect.That(t, err == nil, "Bump of a copy already counted, at the quota: %v", err)
 	})
 	t.Run("the zero quota", func(t *testing.T) {
 		none := subjectOf(t, limes.CopyQuota{}, limited("limited"))
 		_, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: none, Amount: one})
 		expect.That(t, errors.Is(err, meter.ErrCopyLimitExceeded), "Reserve of a copy with limits under the zero quota: err = %v, want ErrCopyLimitExceeded", err)
-		_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: newSubject(subjectSpec{capID: none.CapabilityID(), tenant: f.Tenant, copyQuota: &limes.CopyQuota{}})})
+		_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: newSubject(subjectSpec{capID: none.CapabilityID(), tenant: f.Tenant, copyQuota: &limes.CopyQuota{}})}, nil)
 		expect.That(t, err == nil, "Bump of the capability itself under the zero quota: %v", err)
 	})
 }
@@ -1895,19 +1899,19 @@ func checkCopyQuotaLineage(t *testing.T, f fixture) {
 		}
 		return newSubject(subjectSpec{capID: capID, tenant: f.Tenant, copies: out, copyQuota: &quota})
 	}
-	_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: copies(a, "a1", "a2")})
+	_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: copies(a, "a1", "a2")}, nil)
 	expect.Must(t, err == nil, "Bump of two copies of a child, the root's quota: %v", err)
-	_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: copies(b, "b1")})
+	_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: copies(b, "b1")}, nil)
 	expect.That(t, errors.Is(err, meter.ErrCopyLimitExceeded), "Bump of a copy of a second child past the root's quota: err = %v, want ErrCopyLimitExceeded", err)
-	_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: copies(root, "r1")})
+	_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: copies(root, "r1")}, nil)
 	expect.That(t, errors.Is(err, meter.ErrCopyLimitExceeded), "Bump of a copy of the root, its children holding its quota: err = %v, want ErrCopyLimitExceeded", err)
 	err = f.Usage.DeleteUsage(f.Ctx, meter.DeleteUsageRequest{CapabilityID: a})
 	expect.Must(t, err == nil, "%v", err)
-	_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: copies(b, "b1")})
+	_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: copies(b, "b1")}, nil)
 	expect.That(t, errors.Is(err, meter.ErrCopyLimitExceeded), "Bump of a copy of the second child once the first's usage was dropped: err = %v, want ErrCopyLimitExceeded", err)
 	err = f.Usage.DeleteUsage(f.Ctx, meter.DeleteUsageRequest{CapabilityID: root})
 	expect.Must(t, err == nil, "%v", err)
-	_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: copies(b, "b1")})
+	_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: copies(b, "b1")}, nil)
 	expect.That(t, err == nil, "Bump of a copy of the second child once the root's own usage was dropped: %v", err)
 }
 
@@ -2011,7 +2015,7 @@ func checkAncestorRequests(t *testing.T, f fixture) {
 	child, err := f.newCapability(root, unlimitedBudget)
 	expect.Must(t, err == nil, "%v", err)
 	bump := func() error {
-		_, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: newSubject(subjectSpec{capID: child, tenant: f.Tenant})})
+		_, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: newSubject(subjectSpec{capID: child, tenant: f.Tenant})}, nil)
 		return err
 	}
 	for range limit {
@@ -2028,7 +2032,7 @@ func checkCopyRequests(t *testing.T, f fixture) {
 	const limit = 1
 	copies := []limes.CopyCeiling{{RevocationID: []byte("copy-requests"), Requests: &limes.RequestCeiling{Max: limit}}}
 	bump := func() error {
-		_, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, copies: copies})})
+		_, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, copies: copies})}, nil)
 		return err
 	}
 	for range limit {
@@ -2075,7 +2079,7 @@ func checkStaleVersion(t *testing.T, f fixture) {
 // tenant — rather than standing for no limit, which only Unlimited does.
 func checkZeroCeilings(t *testing.T, f fixture) {
 	zero := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, requests: requestsOf(0), budget: budgetOf(0)})
-	_, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: zero})
+	_, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: zero}, nil)
 	expect.That(t, errors.Is(err, limes.ErrRequestLimitExceeded), "a bump under a request ceiling of 0: err = %v, want ErrRequestLimitExceeded", err)
 	_, err = f.charge(meter.ChargeRequest{Subject: zero, Amount: cent}, nil)
 	expect.That(t, errors.Is(err, limes.ErrBudgetExceeded), "a charge under a budget of 0: err = %v, want ErrBudgetExceeded", err)
@@ -2528,7 +2532,7 @@ func checkCallbackSeesTheReceipt(t *testing.T, f fixture) {
 func checkBump(t *testing.T, f fixture) {
 	const limit = 2
 	bump := func() (int64, error) {
-		r, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, requests: requestsOf(limit)})})
+		r, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, requests: requestsOf(limit)})}, nil)
 		return r.RequestCount, err
 	}
 	for want := int64(1); want <= limit; want++ {
@@ -2976,7 +2980,7 @@ func checkNotOnRecord(t *testing.T, f fixture) {
 	subject := f.childSubject()
 	_, err = f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: subject, ReservationID: held.ID, Amount: one}, nil)
 	expect.That(t, errors.Is(err, limes.ErrNotFound), "a settle of a capability not on record: err = %v, want ErrNotFound", err)
-	_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: subject})
+	_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: subject}, nil)
 	expect.That(t, errors.Is(err, limes.ErrNotFound), "a bump of a capability not on record: err = %v, want ErrNotFound", err)
 	_, err = f.Usage.Charge(f.Ctx, meter.ChargeRequest{Subject: subject, Amount: one}, nil)
 	expect.That(t, errors.Is(err, limes.ErrNotFound), "a charge of a capability not on record: err = %v, want ErrNotFound", err)
@@ -3129,7 +3133,7 @@ func checkSettleWithinHold(t *testing.T, f fixture) {
 // counting it under the nil id.
 func checkZeroSubject(t *testing.T, f fixture) {
 	var zero limes.MeterSubject
-	_, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: zero})
+	_, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: zero}, nil)
 	expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "Bump: err = %v, want ErrInvalidRequest", err)
 	_, err = f.Usage.Charge(f.Ctx, meter.ChargeRequest{Subject: zero, Amount: one}, nil)
 	expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "Charge: err = %v, want ErrInvalidRequest", err)
@@ -3157,7 +3161,7 @@ func checkScopeMismatch(t *testing.T, f fixture) {
 	wrong := f.tenantCtx(other)
 	for name, call := range map[string]func() error{
 		"Bump": func() error {
-			_, err := f.Usage.Bump(wrong, meter.BumpRequest{Subject: f.childSubject()})
+			_, err := f.Usage.Bump(wrong, meter.BumpRequest{Subject: f.childSubject()}, nil)
 			return err
 		},
 		"Charge": func() error {
@@ -3221,9 +3225,13 @@ func checkReadOnlyScope(t *testing.T, f fixture) {
 		ran = true
 		return nil
 	}
+	onBumped := func(context.Context, meter.Bumped) error {
+		ran = true
+		return nil
+	}
 	writes := map[string]func() error{
 		"Bump": func() error {
-			_, err := f.Usage.Bump(ro, meter.BumpRequest{Subject: f.childSubject()})
+			_, err := f.Usage.Bump(ro, meter.BumpRequest{Subject: f.childSubject(), ExternalRef: bumpRef}, onBumped)
 			return err
 		},
 		"Charge": func() error {
@@ -3326,7 +3334,7 @@ func checkEraseTenantUsage(t *testing.T, f fixture) {
 	expect.That(t, errors.Is(err, meter.ErrUsageNotFound), "usage after metering an erased tenant = %+v, %v; want ErrUsageNotFound", u, err)
 	_, err = f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
 	expect.That(t, errors.Is(err, meter.ErrTenantBudgetNotFound), "GetTenantBudget after metering an erased tenant: err = %v, want ErrTenantBudgetNotFound", err)
-	_, err = f.Usage.Bump(theirCtx, meter.BumpRequest{Subject: theirSubject})
+	_, err = f.Usage.Bump(theirCtx, meter.BumpRequest{Subject: theirSubject}, nil)
 	expect.That(t, err == nil, "another tenant's request after the erase: %v", err)
 }
 
@@ -3388,7 +3396,7 @@ func checkOtherTenantUsageKept(t *testing.T, f fixture, theirCtx context.Context
 func checkMeteringAfterErase(t *testing.T, f fixture) {
 	afterErase := map[string]func() error{
 		"Bump": func() error {
-			_, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: f.childSubject()})
+			_, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: f.childSubject()}, nil)
 			return err
 		},
 		"Charge": func() error {

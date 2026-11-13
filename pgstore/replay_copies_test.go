@@ -56,7 +56,7 @@ func TestAChargeReplayedAfterItsLocksLeavesNothingBehind(t *testing.T) {
 	req := meter.ChargeRequest{Subject: subject, Amount: 1, ExternalRef: replayRef}
 	// The counters are on record before the deliveries, so DeleteUsage
 	// waits for the first delivery's lock on them rather than missing them.
-	if _, err := usage.Bump(ctx, meter.BumpRequest{Subject: meterSubject(c.ID, f.mine)}); err != nil {
+	if _, err := usage.Bump(ctx, meter.BumpRequest{Subject: meterSubject(c.ID, f.mine)}, nil); err != nil {
 		t.Fatal(err)
 	}
 	waitForLockWaits := func(n int) {

@@ -159,7 +159,7 @@ func TestNoTransactionModeWorksEndToEnd(t *testing.T) {
 	capID := uuid.New()
 	usage := newTestUsage(newTestStore())
 
-	if _, err := usage.Bump(ctx, meter.BumpRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: testTenant, requests: requestsOf(5)})}); err != nil {
+	if _, err := usage.Bump(ctx, meter.BumpRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: testTenant, requests: requestsOf(5)})}, nil); err != nil {
 		t.Fatalf("Bump: %v", err)
 	}
 	spent, err := usage.Charge(ctx, meter.ChargeRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: uuid.New(), budget: budgetOf(limes.MustParseAmount("10")), unit: defaultTestUnit}), Amount: limes.MustParseAmount("3"), Op: "op", Actor: "actor"}, nil)

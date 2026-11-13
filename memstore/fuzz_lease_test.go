@@ -253,7 +253,7 @@ func FuzzLeases(f *testing.F) {
 					}
 				}
 			case leaseStepBump:
-				if _, err = u.Bump(ctx, meter.BumpRequest{Subject: subject}); err == nil {
+				if _, err = u.Bump(ctx, meter.BumpRequest{Subject: subject}, nil); err == nil {
 					m.bump(node)
 				}
 			case leaseStepLease:

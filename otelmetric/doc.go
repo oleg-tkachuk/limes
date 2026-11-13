@@ -28,7 +28,8 @@
 //	)
 //
 // Instruments are created per store, and an error creating them is
-// returned. A replayed charge or settle moved nothing and is not counted.
+// returned. A replayed charge, settle or bump moved nothing and is not
+// counted.
 // limes.tenant_id is off by default, as it multiplies every series by the
 // number of tenants; with WithTenantAttribute every measurement, a refused
 // charge or settle among them, carries the subject's tenant.

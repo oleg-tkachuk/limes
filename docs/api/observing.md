@@ -349,7 +349,7 @@ The instruments: limes.charge.amount and limes.refund.amount, by limes.unit\_cod
 		otelmetric.WithTenantAttribute(),       // opt-in: one series per tenant
 	)
 
-Instruments are created per store, and an error creating them is returned. A replayed charge or settle moved nothing and is not counted. limes.tenant\_id is off by default, as it multiplies every series by the number of tenants; with WithTenantAttribute every measurement, a refused charge or settle among them, carries the subject's tenant.
+Instruments are created per store, and an error creating them is returned. A replayed charge, settle or bump moved nothing and is not counted. limes.tenant\_id is off by default, as it multiplies every series by the number of tenants; with WithTenantAttribute every measurement, a refused charge or settle among them, carries the subject's tenant.
 
 NewStoreEvents returns the callbacks a usage store reports to (pgstore.Config.Events): limes.tenant.wait, a histogram in seconds of how long each metered call waited for its tenant's row — the aggregate's, or its stripe's where the store stripes an unlimited tenant — by limes.operation, the store call:
 

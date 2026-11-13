@@ -61,7 +61,7 @@ func TestExpiryFollowsTheDatabasesClock(t *testing.T) {
 	if _, err := here.Lease(ctx, meter.LeaseRequest{Subject: leased, Requests: roundTripLeasedRequests}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ahead.Bump(ctx, meter.BumpRequest{Subject: leased}); err != nil {
+	if _, err := ahead.Bump(ctx, meter.BumpRequest{Subject: leased}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if l, err := here.GetLease(ctx, leased.CapabilityID()); err != nil || l.RequestsSpent != 0 {

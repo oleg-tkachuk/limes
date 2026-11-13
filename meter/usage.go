@@ -25,8 +25,8 @@ import (
 // database replies. Such a call returns an error matching ErrOutcomeUnknown,
 // beside its cause: it may have committed or not, and the store cannot tell.
 // Only a call keyed to its cost is safe to send again — Charge with an
-// ExternalRef, Reserve with a ReservationID, Refund with a RefundID, and
-// Settle, keyed to its reservation: a repeat of one that committed replays
+// ExternalRef, Bump with an ExternalRef, Reserve with a ReservationID,
+// Refund with a RefundID, and Settle, keyed to its reservation: a repeat of one that committed replays
 // it and moves nothing, and a repeat of one that did not commits it now. An
 // unkeyed call sent again may count twice; one not sent again may never
 // count. A store that commits in memory never returns it.
@@ -128,7 +128,35 @@ type RequestCounter interface {
 	// keeps moving while the call locks it, a store may refuse it as
 	// limes.ErrConflict, mutating nothing, for the caller to send again
 	// (Leaser).
-	Bump(ctx context.Context, req BumpRequest) (BumpReceipt, error)
+	//
+	// Any rejection, or an error from onBumped, counts nothing. onBumped
+	// runs inside the bump, atomically with it, once every ceiling has
+	// passed, as onCharged runs inside a charge: it receives a context
+	// carrying the store's transaction, which the store's own accessor reads
+	// (pgstore.TxFrom; a store with none hands the caller's context on), and
+	// the receipt the call will return (Bumped), so a side effect such as an
+	// outbox write commits with the count. Pass nil to skip it. It must not
+	// call back into the Meter, keeps to that store's database through the
+	// transaction it is handed, and is short: the chain's counters are held
+	// while it runs. A store that retries a transaction it lost to a deadlock
+	// runs onBumped again on the retry, the first run having rolled back with
+	// its count, so a side effect outside that transaction is no place for
+	// it.
+	//
+	// With req.ExternalRef set, Bump is idempotent on (CapabilityID,
+	// ExternalRef): a bump whose pair was already counted counts nothing,
+	// does not run onBumped, and returns that bump's receipt with Replayed
+	// set — also once the capability is no longer on record, as Charge
+	// replays a charge — for as long as the store keeps the pair: at least
+	// MinChargeRetention, as a ledger keeps a charge. LedgerHousekeeping's
+	// PurgeCharges removes a keyed bump older than its retention, an erase
+	// of the tenant's usage (TenantUsageEraser) the tenant's, and DeleteUsage
+	// the capability's, whose counters restart and its keys with them; the
+	// pair then counts anew. The pair names one request: arriving again
+	// under another TenantID, or under other Biscuit copies than req.Subject
+	// carries, it returns ErrExternalRefConflict and counts nothing. Empty:
+	// every call counts.
+	Bump(ctx context.Context, req BumpRequest, onBumped func(ctx context.Context, b Bumped) error) (BumpReceipt, error)
 }
 
 // BudgetMeter enforces the budget ceilings (Caveats.Budget, a tenant's
@@ -407,8 +435,9 @@ const (
 
 // MinChargeRetention is the least a ledger keeps a charge: until then the
 // charge's ExternalRef replays it rather than charging again, its settled
-// hold replays its receipt, Refund finds it, and SumCharges counts it. A
-// ledger may remove a charge older than its retention, which is no shorter
+// hold replays its receipt, Refund finds it, and SumCharges counts it; a
+// keyed bump's ExternalRef replays it for as long. A ledger may remove a
+// charge or a keyed bump older than its retention, which is no shorter
 // than this, and those promises then lapse for it. Removing charges by hand
 // is held to it too. Erasing a tenant (TenantUsageEraser) is not: it removes
 // every charge of the tenant, whatever its age. Its value holds for all of
@@ -421,7 +450,9 @@ type UsageHousekeeping interface {
 	// DeleteUsage drops the capability's row and the counters of its Biscuit
 	// copies. Called when the capability is reaped: on a capability still on
 	// record it restarts the capability's own counters, and its ceilings with
-	// them, from zero — PurgeOrphans drops only the rows of records gone. It releases the
+	// them, from zero, and removes its keyed bumps (BumpRequest.ExternalRef),
+	// whose pairs then count anew — PurgeOrphans drops only the rows of
+	// records gone, and keeps their keyed bumps for Bump to replay. It releases the
 	// capability's open reservations first,
 	// returning their holds to its ancestors and its tenant: nothing could
 	// settle or release them afterwards. A capability with no row is no
@@ -457,11 +488,21 @@ type BumpRequest struct {
 	// VerifiedCapability.MeterSubject. Ancestors' ceilings come from their
 	// records.
 	Subject limes.MeterSubject
+	// ExternalRef names the request in the consumer's own records — the id
+	// of the call it counts — and makes the bump idempotent on
+	// (capability, ExternalRef), as ChargeRequest.ExternalRef makes a
+	// charge. Empty: every call counts. At most MaxExternalRefBytes long.
+	ExternalRef string
 }
 
-// Validate refuses a request whose subject names no capability, no tenant or
-// an unknown unit.
-func (r BumpRequest) Validate() error { return r.Subject.Validate() }
+// Validate refuses an external ref ValidateExternalRef refuses, and a
+// subject that names no capability, no tenant or an unknown unit.
+func (r BumpRequest) Validate() error {
+	if err := ValidateExternalRef(r.ExternalRef); err != nil {
+		return err
+	}
+	return r.Subject.Validate()
+}
 
 // ChargeRequest is the input to Meter.Charge.
 type ChargeRequest struct {
@@ -530,7 +571,8 @@ type ChargeRecord struct {
 	_     noCompare
 }
 
-// MaxExternalRefBytes bounds ChargeRequest.ExternalRef: long enough for any
+// MaxExternalRefBytes bounds ChargeRequest.ExternalRef and
+// BumpRequest.ExternalRef: long enough for any
 // UUID, ULID or provider call id, short enough to index.
 const MaxExternalRefBytes = 200
 
@@ -1032,8 +1074,8 @@ func (p OverrunPolicy) String() string {
 }
 
 // ValidateExternalRef reports whether ref is usable as
-// ChargeRequest.ExternalRef: empty, or printable text within
-// MaxExternalRefBytes.
+// ChargeRequest.ExternalRef or BumpRequest.ExternalRef: empty, or printable
+// text within MaxExternalRefBytes.
 func ValidateExternalRef(ref string) error {
 	if len(ref) > MaxExternalRefBytes {
 		return fmt.Errorf("%w: external ref is %d bytes, at most %d", limes.ErrInvalidRequest, len(ref), MaxExternalRefBytes)
@@ -1052,9 +1094,24 @@ func ValidateExternalRef(ref string) error {
 // BumpReceipt is what a Bump counted.
 type BumpReceipt struct {
 	// RequestCount is the capability's request count after this one; on a
-	// Bump refused past a ceiling, the count before it, unchanged.
+	// Bump refused past a ceiling, the count before it, unchanged. On a
+	// replay, the count the first bump of its ExternalRef returned.
 	RequestCount int64
-	_            noCompare
+	// Replayed reports that a bump under the same ExternalRef was already
+	// counted, so this call counted nothing and RequestCount is that
+	// bump's.
+	Replayed bool
+	_        noCompare
+}
+
+// Bumped is what Meter.Bump hands onBumped: the bump it runs inside,
+// before the call commits it. The transaction it commits on travels in
+// onBumped's context, read through the store's own accessor.
+type Bumped struct {
+	// Receipt is the receipt the call returns once the bump commits.
+	// Replayed is never set, as a replay runs no onBumped.
+	Receipt BumpReceipt
+	_       noCompare
 }
 
 // ReleaseRequest names the reservation to release, and who releases it.

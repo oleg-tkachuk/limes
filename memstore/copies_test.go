@@ -40,7 +40,7 @@ func TestCopyRequestLimits(t *testing.T) {
 	bump := func(copies ...limes.CopyCeiling) error {
 		_, err := u.Bump(ctx, meter.BumpRequest{
 			Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant, requests: requestsOf(capLimit), copies: copies}),
-		})
+		}, nil)
 		return err
 	}
 
@@ -153,7 +153,7 @@ func TestCopyCountersPurgedWithTheirCapability(t *testing.T) {
 	ctx, u, capID, tenant := newCopyFixture(t)
 	if _, err := u.Bump(ctx, meter.BumpRequest{
 		Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant, copies: []limes.CopyCeiling{copyCeiling("copy", 1, 0)}}),
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := u.DeleteUsage(ctx, meter.DeleteUsageRequest{CapabilityID: capID}); err != nil {
@@ -166,7 +166,7 @@ func TestCopyCountersPurgedWithTheirCapability(t *testing.T) {
 	gone := uuid.New() // counted while on record, then purged
 	if _, err := u.Bump(ctx, meter.BumpRequest{
 		Subject: recordedSubject(ctx, t, u, subjectSpec{capID: gone, tenant: tenant, copies: []limes.CopyCeiling{copyCeiling("orphan", 1, 0)}}),
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
 	dropRecord(u.records, gone)
@@ -182,7 +182,7 @@ func TestCopyCountersPurgedWithTheirCapability(t *testing.T) {
 func TestCopyUsageReadsTheCounters(t *testing.T) {
 	ctx, u, capID, tenant := newCopyFixture(t)
 	c := copyCeiling("read", 5, 2*unit)
-	if _, err := u.Bump(ctx, meter.BumpRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant, copies: []limes.CopyCeiling{c}})}); err != nil {
+	if _, err := u.Bump(ctx, meter.BumpRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant, copies: []limes.CopyCeiling{c}})}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := u.Charge(ctx, meter.ChargeRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant, copies: []limes.CopyCeiling{c}}), Amount: unit / 2}, nil); err != nil {

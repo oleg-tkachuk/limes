@@ -625,7 +625,8 @@ capability's, each ancestor's (all `ErrBudgetExceeded`), then the tenant
 aggregate (`ErrTenantBudgetExceeded`). If any refuses, no counter moves, so
 a retry after a refusal is safe. `Meter.Bump` counts requests with the same
 subject, against the request ceilings of the same copies, capability and
-ancestors; past one it is `ErrRequestLimitExceeded`.
+ancestors; past one it is `ErrRequestLimitExceeded`. Under an
+`ExternalRef` it counts once, as a charge does (a lost answer, below).
 
 `receipt.ChargeID` names the ledger row. Refund against it:
 
@@ -774,6 +775,15 @@ usage.Refund(ctx, req, func(ctx context.Context, r meter.Refunded) error {
 })
 ```
 
+`Bump` takes one too, handed a `meter.Bumped`:
+
+```go
+usage.Bump(ctx, req, func(ctx context.Context, b meter.Bumped) error {
+    tx, _ := pgstore.TxFrom(ctx) // commits with the count
+    return myOutbox.Enqueue(ctx, tx, req.ExternalRef, b.Receipt.RequestCount)
+})
+```
+
 - An error from the callback rolls the call back whole.
 - It must not call back into the `Meter`: a store may hold its counters
   while it runs. Keep it short, on the store's own database, with no
@@ -854,12 +864,16 @@ cost, so that a repeat of one that committed is answered as a replay:
 | Call | Key | A repeat | The same key for another request |
 |---|---|---|---|
 | `Charge` | `ExternalRef` | the first receipt, `Replayed` | `meter.ErrExternalRefConflict` |
+| `Bump` | `ExternalRef` | the first receipt, `Replayed`, with the count it returned | `meter.ErrExternalRefConflict` (another tenant or Biscuit copy) |
 | `Reserve` | `ReservationID` of your own | the hold on record, `Replayed`, its expiry unchanged | `meter.ErrReserveConflict` (another amount, unit, op, actor, tenant, capability or Biscuit copy, or a hold already settled) |
 | `Refund` | `RefundID` of your own | the first receipt, `Replayed`, with what that refund returned | `meter.ErrRefundConflict` (another charge or amount) |
 | `Settle` | its reservation | the first charge | `meter.ErrSettleConflict` |
 
 A released hold frees its `ReservationID` to hold anew. A `RefundID` goes
-with its charge when the ledger removes it.
+with its charge when the ledger removes it. A bump's `ExternalRef` is kept
+as long as a charge's, until `PurgeCharges` removes it past its retention,
+an erase of the tenant's usage, or `DeleteUsage` of its capability, whose
+counters restart and its references with them.
 
 ```go
 id := uuid.New() // kept with the work it pays for, before the first try
@@ -1071,7 +1085,7 @@ usually needs:
   another tenant's context is `ErrScopeMismatch` and moves nothing. With
   `ReadOnlyCtx`, a context that reads every tenant and writes none, they
   check that every write under it is `ErrScopeMismatch`, changes nothing
-  and runs no `onCharged` or `onRefunded`.
+  and runs no `onCharged`, `onBumped` or `onRefunded`.
 - **Clocks.** `Now` and `Advance` read and move the store's clock. A store
   that measures expiry by another clock — `pgstore` with no `Config.Now`,
   by the database's — sets `ExpiryNow` and `AdvanceExpiry` too.
@@ -1630,8 +1644,8 @@ token's.
   keeps its own tenants answers `ErrUnknownTenant` and `ErrTenantDeleted`
   from the snapshot the record is written in.
 
-`onCharged`, and a refund's `onRefunded`, run on the store's own
-transaction, which `TxFrom` reads from the context and which is theirs only
+`onCharged`, a bump's `onBumped` and a refund's `onRefunded` run on the
+store's own transaction, which `TxFrom` reads from the context and which is theirs only
 while they run: kept past it, a call fails with `pgx.ErrTxClosed`. The
 transaction is the store's to end. `Commit` or `Rollback` on it returns
 `ErrChargeTransaction`, and a charge whose transaction the callback ended
@@ -1753,7 +1767,7 @@ again, and decide:
 |---|---|
 | `ErrAlreadyExists` | `Insert` |
 | `ErrUnitCodeMismatch` | `Insert`, `Delegate`; a `Charge`, `Reserve` or `Settle` in another unit than a counter already counts in; a `SetTenantBudget` to another unit while anything is held in the old one, or spent in it and not reset |
-| `meter.ErrExternalRefConflict` | `Charge` |
+| `meter.ErrExternalRefConflict` | `Charge`, `Bump` |
 | `meter.ErrReserveConflict` | `Reserve` |
 | `meter.ErrSettleConflict` | `Settle` |
 | `meter.ErrRefundConflict` | `Refund` |

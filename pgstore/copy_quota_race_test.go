@@ -45,7 +45,7 @@ func TestTwoChildrenRaceForTheirRootsLastCopy(t *testing.T) {
 					CopyQuota: limes.CopyQuota{Unlimited: true},
 				}).(limes.MeterSubject)
 				<-start
-				_, errs[i] = f.usage.Bump(ctx, meter.BumpRequest{Subject: subject})
+				_, errs[i] = f.usage.Bump(ctx, meter.BumpRequest{Subject: subject}, nil)
 			})
 		}
 		close(start)

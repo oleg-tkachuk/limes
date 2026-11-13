@@ -18,8 +18,9 @@ import (
 )
 
 // Bump counts one request against the capability, each ancestor and each
-// copy, or none when a ceiling would be crossed.
-func (s *UsageStore) Bump(ctx context.Context, req meter.BumpRequest) (meter.BumpReceipt, error) {
+// copy, or none when a ceiling would be crossed, onBumped included, in one
+// transaction; under an ExternalRef already counted it replays that bump.
+func (s *UsageStore) Bump(ctx context.Context, req meter.BumpRequest, onBumped func(ctx context.Context, b meter.Bumped) error) (meter.BumpReceipt, error) {
 	if err := req.Validate(); err != nil {
 		return meter.BumpReceipt{}, err
 	}
@@ -28,52 +29,150 @@ func (s *UsageStore) Bump(ctx context.Context, req meter.BumpRequest) (meter.Bum
 		return s.retryDeadlock(ctx, retriedBump, func() error {
 			return s.inTenantTx(ctx, req.Subject.TenantID(), func(tx pgx.Tx) error {
 				var err error
-				receipt.RequestCount, err = s.bump(ctx, tx, req.Subject)
+				receipt, err = s.bump(ctx, tx, req, onBumped)
 				return err
 			})
 		})
 	}
 	// A lease that moved between its read and its lock is read afresh.
 	err := s.retryLeaseMoved(ctx, retriedBump, req.Subject.CapabilityID(), attempt)
-	if err != nil {
-		return meter.BumpReceipt{RequestCount: receipt.RequestCount}, err
+	switch {
+	case errors.Is(err, errBumpReplayedAfterLock):
+		return receipt, nil
+	case err != nil:
+		return meter.BumpReceipt{RequestCount: receipt.RequestCount}, bumpKeyConflict(err, req.ExternalRef)
 	}
 	return receipt, nil
 }
 
-// bump is Bump in tx: the subject's request count after this request, or,
-// refused once its counters are locked, the count before it.
-func (s *UsageStore) bump(ctx context.Context, tx pgx.Tx, subject limes.MeterSubject) (int64, error) {
+// bump is Bump in tx: the receipt of this request, or, refused once its
+// counters are locked, one of the count before it.
+func (s *UsageStore) bump(ctx context.Context, tx pgx.Tx, req meter.BumpRequest, onBumped func(context.Context, meter.Bumped) error) (meter.BumpReceipt, error) {
+	subject := req.Subject
 	// A bump of a Biscuit copy, whose quota counts on every ancestor's row,
-	// goes through the whole chain, as a charge of one does.
-	p, err := readPrelude(ctx, tx, subject.TenantID(), subject.CapabilityID(), "", len(subject.Copies()) == 0)
+	// goes through the whole chain, as a charge of one does. A replay is
+	// answered before the lineage is read, as a charge's is: it counts
+	// nothing, so it needs no record.
+	p, err := readPrelude(ctx, tx, subject.TenantID(), subject.CapabilityID(), refLookup{ref: req.ExternalRef, bump: true}, len(subject.Copies()) == 0)
 	if err != nil {
-		return 0, err
+		return meter.BumpReceipt{}, err
+	}
+	if p.replayed {
+		return receiptOfBump(req, p.bumped)
 	}
 	ancestors, err := p.ancestors, p.lineageErr
 	if err != nil {
-		return 0, err
+		return meter.BumpReceipt{}, err
 	}
 	// Under a lease of its own or an ancestor's that holds requests, the
 	// bump stops at the leaseholder (docs/adr/0017-budget-leases.md).
 	if holder, below, ok := leaseFor(subject.CapabilityID(), ancestors, p.leases, s.asOf(p.now), leaseState.coversBumps); ok {
-		return s.bumpLeased(ctx, tx, subject, ancestors, below, holder, p.leases[holder], s.asOf(p.now))
+		return s.bumpLeased(ctx, tx, req, ancestors, below, holder, p.leases[holder], s.asOf(p.now), onBumped)
 	}
 	c, err := s.lock(ctx, tx, lockRequest{
 		now:     s.clock(),
 		created: append([]uuid.UUID{subject.CapabilityID()}, ancestorIDs(ancestors)...), usageTenant: subject.TenantID(),
 		copies: copyIDs(subject.Copies()), createCopies: true, copiesCapID: subject.CapabilityID(), maxCopies: subject.CopyQuota().Bounded(s.maxCopies),
 		chainQuotas: quotasOf(subject.CapabilityID(), subject.CopyQuota(), ancestors),
+		bumpCapID:   subject.CapabilityID(), bumpRef: req.ExternalRef,
 	})
 	if err != nil {
-		return 0, err
+		return meter.BumpReceipt{}, err
+	}
+	// Another delivery of the same reference may have committed while this
+	// one waited for the locks: its receipt is the answer, and what locking
+	// made here is rolled back, as a charge's is.
+	if c.bumpReplayed {
+		r, err := receiptOfBump(req, c.bumped)
+		return r, cmp.Or(err, errBumpReplayedAfterLock)
 	}
 	count := c.usage[subject.CapabilityID()].requests
 	if err := admitRequest(c, subject, ancestors); err != nil {
-		return count, err
+		return meter.BumpReceipt{RequestCount: count}, err
 	}
 	countRequest(c, subject.UnitCode())
-	return count + 1, c.writeLast(ctx, tx, s.clock(), false)
+	return s.commitBump(ctx, tx, c, req, count, onBumped)
+}
+
+// errBumpReplayedAfterLock rolls back a Bump that found its reference
+// counted by another delivery once it held the locks; Bump answers with
+// that delivery's receipt.
+var errBumpReplayedAfterLock = fmt.Errorf("%w: pgstore: bump replayed after its locks", limes.ErrInternal)
+
+// commitBump writes c, counted one request past count, with req's row of
+// limes.bumps when it names a reference and the statements then, and runs
+// onBumped after the writes (writeThenCall), as commitCharge runs
+// onCharged. The write is the call's last statement.
+func (s *UsageStore) commitBump(ctx context.Context, tx pgx.Tx, c *counters, req meter.BumpRequest, count int64, onBumped func(context.Context, meter.Bumped) error, then ...heldStmt) (meter.BumpReceipt, error) {
+	receipt := meter.BumpReceipt{RequestCount: count + 1}
+	now := s.clock()
+	if req.ExternalRef != "" {
+		then = append(then, heldStmt{sql: sqlInsertBump, args: []any{
+			req.Subject.CapabilityID(), req.ExternalRef, req.Subject.TenantID(), copyIDs(req.Subject.Copies()), receipt.RequestCount, now,
+		}})
+	}
+	var call callback
+	if onBumped != nil {
+		call = func(ctx context.Context) error { return onBumped(ctx, meter.Bumped{Receipt: receipt}) }
+	}
+	// A bump has no id of its own to mark its transaction with: each call
+	// marks it with one of its own.
+	if err := c.writeThenCall(ctx, tx, now, false, true, uuid.New().String(), call, then); err != nil {
+		return meter.BumpReceipt{RequestCount: count}, err
+	}
+	return receipt, nil
+}
+
+const (
+	// sqlBumpByRef reads the bump of $1 under $2, which a delivery of the
+	// same reference again replays (044_keyed_bumps.sql).
+	sqlBumpByRef = `SELECT tenant_id, copies, request_count FROM limes.bumps WHERE capability_id = $1 AND external_ref = $2`
+
+	sqlInsertBump = `
+INSERT INTO limes.bumps (capability_id, external_ref, tenant_id, copies, request_count, bumped_at)
+VALUES ($1, $2, $3, $4, $5, $6)`
+)
+
+// priorBump is a bump on record under a reference: who it was counted for
+// and what it returned.
+type priorBump struct {
+	tenantID uuid.UUID
+	copies   [][]byte
+	count    int64
+}
+
+// scanBump reads the one row of sqlBumpByRef, if there is one.
+func scanBump(row pgx.Row) (priorBump, bool, error) {
+	var b priorBump
+	err := row.Scan(&b.tenantID, &b.copies, &b.count)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return priorBump{}, false, nil
+	}
+	if err != nil {
+		return priorBump{}, false, err
+	}
+	return b, true, nil
+}
+
+// receiptOfBump answers a bump whose (capability, ExternalRef) is already
+// on record as b: its receipt again, or ErrExternalRefConflict when b was
+// counted for another tenant or under other copies, whose receipt is not
+// req's to read back. The error names the ref, never the other bump.
+func receiptOfBump(req meter.BumpRequest, b priorBump) (meter.BumpReceipt, error) {
+	if b.tenantID != req.Subject.TenantID() || !sameCopyIDs(b.copies, req.Subject.Copies()) {
+		return meter.BumpReceipt{}, fmt.Errorf("%w: %q", meter.ErrExternalRefConflict, req.ExternalRef)
+	}
+	return meter.BumpReceipt{RequestCount: b.count, Replayed: true}, nil
+}
+
+// bumpKeyConflict is err, the error of a keyed bump, as
+// ErrExternalRefConflict when its reference is another tenant's bump of
+// the capability, hidden from the call by row-level security.
+func bumpKeyConflict(err error, ref string) error {
+	if keyViolated(err, bumpKey) {
+		return fmt.Errorf("%w: %q", meter.ErrExternalRefConflict, ref)
+	}
+	return err
 }
 
 // admitRequest refuses one more request of subject past a copy's, its own
@@ -241,7 +340,7 @@ func (s *UsageStore) charge(ctx context.Context, tx pgx.Tx, req meter.ChargeRequ
 	// A replay is answered before the lineage is read: it moves nothing,
 	// so it needs no record, and a capability purged since still gets its
 	// receipt, as a settled hold does.
-	p, err := readPrelude(ctx, tx, req.Subject.TenantID(), req.Subject.CapabilityID(), req.ExternalRef, leasable(req))
+	p, err := readPrelude(ctx, tx, req.Subject.TenantID(), req.Subject.CapabilityID(), refLookup{ref: req.ExternalRef}, leasable(req))
 	if err != nil {
 		return meter.ChargeReceipt{}, err
 	}
@@ -629,6 +728,11 @@ var (
 	// settled one, hidden from its Reserve by row-level security, violates
 	// (002_meter.sql).
 	settledHoldKey = uniqueKey{table: "charges", constraint: "charges_reservation"}
+
+	// bumpKey is limes.bumps' primary key, which a bump under the reference
+	// of another tenant's bump of the capability, hidden from the call by
+	// row-level security, violates (044_keyed_bumps.sql).
+	bumpKey = uniqueKey{table: "bumps", constraint: "bumps_pkey"}
 )
 
 // scanHold reads one row of sqlHoldColumns.
@@ -749,12 +853,19 @@ func settledKeyConflict(err error, id uuid.UUID) error {
 // name on a table of the consumer's, which an onCharged writes, is the
 // consumer's error as it is.
 func keyConflict(err error, key uniqueKey, id uuid.UUID) error {
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation &&
-		pgErr.SchemaName == schema && pgErr.TableName == key.table && pgErr.ConstraintName == key.constraint {
+	if keyViolated(err, key) {
 		return fmt.Errorf("%w: %s", meter.ErrReserveConflict, id)
 	}
 	return err
+}
+
+// keyViolated reports whether err is a unique violation of key, the store's
+// own: a constraint of the same name on a table of the consumer's, which a
+// callback writes, is not.
+func keyViolated(err error, key uniqueKey) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == uniqueViolation &&
+		pgErr.SchemaName == schema && pgErr.TableName == key.table && pgErr.ConstraintName == key.constraint
 }
 
 // reserve is Reserve in tx, copies the encoded copies the hold is under.

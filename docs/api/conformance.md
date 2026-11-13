@@ -302,7 +302,7 @@ Run runs every check as a subtest, each on a fresh Env from setup.
 func RunCounter(t *testing.T, setup func(t *testing.T) CounterEnv)
 ```
 
-RunCounter runs the checks of meter.RequestCounter as subtests, each on a fresh CounterEnv from setup. They read nothing but Bump's receipts and refusals, so a store that counts requests and nothing else passes them: a capability's own ceiling, an ancestor's from its record bounding its whole subtree, a chain at the deepest delegation, a Biscuit copy's ceiling unless the CounterEnv sets NoCopies, a refusal that counts nothing, concurrent bumps at a ceiling, siblings' at their root's among them, the zero ceiling and subject, a capability not on record, and, where the CounterEnv enables them, an ancestor removed, another tenant's scope and a read-only one.
+RunCounter runs the checks of meter.RequestCounter as subtests, each on a fresh CounterEnv from setup. They read nothing but Bump's receipts and refusals, so a store that counts requests and nothing else passes them: a capability's own ceiling, an ancestor's from its record bounding its whole subtree, a chain at the deepest delegation, a Biscuit copy's ceiling unless the CounterEnv sets NoCopies, a refusal that counts nothing, concurrent bumps at a ceiling, siblings' at their root's among them, the zero ceiling and subject, a capability not on record, a bump under an ExternalRef — counted once, concurrently too, replayed once its capability is gone, conflicting under another tenant or copy, refused when malformed — and onBumped — handed the receipt, its error counting nothing, run by no replay — and, where the CounterEnv enables them, an ancestor removed, another tenant's scope and a read-only one.
 
 Run runs these checks too, on its Env's store.
 

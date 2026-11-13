@@ -17,28 +17,30 @@ import (
 	"github.com/oleg-tkachuk/limes/meter"
 )
 
-// txKey keys the transaction a charge or a refund commits on in the context
-// its callback receives.
+// txKey keys the transaction a charge, a bump or a refund commits on in the
+// context its callback receives.
 type txKey struct{}
 
-// ErrChargeTransaction is a callback — onCharged, onRefunded — committing or
-// rolling back the transaction it runs on, which is the store's to end: the
-// charge or the refund is committed after the callback returns, on the same
-// transaction.
+// ErrChargeTransaction is a callback — onCharged, onBumped, onRefunded —
+// committing or rolling back the transaction it runs on, which is the
+// store's to end: the charge, the bump or the refund is committed after the
+// callback returns, on the same transaction.
 var ErrChargeTransaction = fmt.Errorf("%w: pgstore: the transaction a callback runs on is the store's to commit or roll back", limes.ErrInvalidRequest)
 
-// TxFrom returns the transaction a charge or a refund commits on, from the
-// context UsageStore.Charge and UsageStore.Settle hand onCharged, and
-// UsageStore.Refund onRefunded: a write through it commits with the charge
-// or the refund, or with it not at all. Any other context holds none, and
+// TxFrom returns the transaction a charge, a bump or a refund commits on,
+// from the context UsageStore.Charge and UsageStore.Settle hand onCharged,
+// UsageStore.Bump onBumped, and UsageStore.Refund onRefunded: a write
+// through it commits with the charge, the bump or the refund, or with it not
+// at all. Any other context holds none, and
 // TxFrom reports false; no other method of this package reads a transaction
 // from its context.
 //
-// The call's writes are in it already — a charge's ledger row, a refund's
+// The call's writes are in it already — a charge's ledger row, a bump's
+// counters and, under an ExternalRef, its limes.bumps row, a refund's
 // refunded amount on the charge and, under a RefundID, its limes.refunds
-// row — and its locks held: every counter on the chain and the tenant's
-// aggregate, which every other charge of the tenant waits for until the
-// callback returns and the store commits. The callback keeps to statements
+// row — and its locks held: every counter on the chain and, but for a bump,
+// the tenant's aggregate, which every other charge of the tenant waits for
+// until the callback returns and the store commits. The callback keeps to statements
 // on this database, and short ones; a network call there holds the
 // tenant's charges for as long.
 //
@@ -278,8 +280,8 @@ func (t *callbackTx) Conn() *pgx.Conn { return nil }
 // connection in an open transaction block (ReadyForQuery 'T').
 const txStatusInTransaction = 'T'
 
-// settingCharging marks the transaction a charge's or a refund's writes
-// went in, for the rest of it: a transaction the callback ended and began
+// settingCharging marks the transaction a charge's, a bump's or a refund's
+// writes went in, for the rest of it: a transaction the callback ended and began
 // again with SQL of its own does not carry it.
 const settingCharging = "limes.charging"
 
@@ -318,8 +320,8 @@ END $$`
 	sqlStateDivisionByZero = "22012"
 )
 
-// callback is the caller's callback over a call's writes — onCharged or
-// onRefunded, bound to the receipt it is handed.
+// callback is the caller's callback over a call's writes — onCharged,
+// onBumped or onRefunded, bound to the receipt it is handed.
 type callback func(ctx context.Context) error
 
 // writeThenCall writes c and then, and runs call, if any, once they are

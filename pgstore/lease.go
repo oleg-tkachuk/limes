@@ -210,40 +210,49 @@ func leaseFor(capID uuid.UUID, ancestors []ancestor, leases map[uuid.UUID]leaseS
 // bumpLeased is bump under holder's lease, seen read before the lock: the
 // capability's counter and those of the ancestors below the leaseholder
 // are locked and counted as a bump counts them, the leaseholder's and its
-// lease's balance with them, and nothing above. It returns the
-// capability's request count after the bump, or before it when refused.
-// The lease must still be open at asOf.
-func (s *UsageStore) bumpLeased(ctx context.Context, tx pgx.Tx, subject limes.MeterSubject, ancestors []ancestor, below int, holder uuid.UUID, seen leaseState, asOf time.Time) (int64, error) {
+// lease's balance with them, and nothing above, onBumped run after the
+// writes, as bump runs it. It returns the bump's receipt, or one of the
+// count before it when refused. The lease must still be open at asOf.
+func (s *UsageStore) bumpLeased(ctx context.Context, tx pgx.Tx, req meter.BumpRequest, ancestors []ancestor, below int, holder uuid.UUID, seen leaseState, asOf time.Time, onBumped func(context.Context, meter.Bumped) error) (meter.BumpReceipt, error) {
+	subject := req.Subject
 	capID := subject.CapabilityID()
 	isHolder := capID == holder
-	l := lockRequest{now: s.clock(), created: append([]uuid.UUID{capID}, ancestorIDs(ancestors[:below])...), usageTenant: subject.TenantID()}
+	l := lockRequest{
+		now: s.clock(), created: append([]uuid.UUID{capID}, ancestorIDs(ancestors[:below])...), usageTenant: subject.TenantID(),
+		bumpCapID: capID, bumpRef: req.ExternalRef,
+	}
 	if !isHolder {
 		l.existing = []uuid.UUID{holder}
 	}
 	c, err := s.lock(ctx, tx, l)
 	if err != nil {
-		return 0, err
+		return meter.BumpReceipt{}, err
 	}
-	now := s.clock()
 	h, ok := c.usage[holder]
 	if !ok || h.lease.id != seen.id || !h.lease.openAt(asOf) || !h.lease.coversBumps() {
-		return 0, errLeaseMoved
+		return meter.BumpReceipt{}, errLeaseMoved
+	}
+	// Another delivery of the same reference may have committed while this
+	// one waited for the locks: its receipt is the answer.
+	if c.bumpReplayed {
+		r, err := receiptOfBump(req, c.bumped)
+		return r, cmp.Or(err, errBumpReplayedAfterLock)
 	}
 	count := c.usageOf(capID).requests
 	// The leaseholder's own ceiling admitted the lease; a capability below
 	// it is held to its own, and so is every ancestor between them.
 	if !isHolder {
 		if err := admitRequests(c, subject, ancestors[:below], 1); err != nil {
-			return count, err
+			return meter.BumpReceipt{RequestCount: count}, err
 		}
 	}
 	if h.lease.requestsRemaining() <= 0 {
-		return count, fmt.Errorf("%w: %d of %d made", meter.ErrLeaseRequestsExhausted, h.lease.requestsSpent, h.lease.requests)
+		return meter.BumpReceipt{RequestCount: count}, fmt.Errorf("%w: %d of %d made", meter.ErrLeaseRequestsExhausted, h.lease.requestsSpent, h.lease.requests)
 	}
 	countRequest(c, subject.UnitCode())
 	h.reservedRequests = max(h.reservedRequests-1, 0)
 	made := heldStmt{sql: sqlLeaseRequestMade, args: []any{holder, h.lease.id}}
-	return count + 1, c.writeLast(ctx, tx, now, false, made)
+	return s.commitBump(ctx, tx, c, req, count, onBumped, made)
 }
 
 // errLeaseMoved is a lease read before its row was locked that was settled,

@@ -366,6 +366,10 @@ func TestReadOnlyScopeReadsEveryTenantAndWritesNone(t *testing.T) {
 			tx, _ := TxFrom(ctx)
 			return consumer(ctx, tx)
 		}
+		onBumped := func(ctx context.Context, _ meter.Bumped) error {
+			tx, _ := TxFrom(ctx)
+			return consumer(ctx, tx)
+		}
 		onErased := func(ctx context.Context, e Erased) error { return consumer(ctx, e.Tx) }
 		c := f.parent
 		c.ID, c.ParentID = uuid.New(), uuid.Nil()
@@ -393,7 +397,7 @@ func TestReadOnlyScopeReadsEveryTenantAndWritesNone(t *testing.T) {
 				return err
 			},
 			"Bump": func() error {
-				_, err := s.usage.Bump(s.ctx, meter.BumpRequest{Subject: subject})
+				_, err := s.usage.Bump(s.ctx, meter.BumpRequest{Subject: subject, ExternalRef: uuid.New().String()}, onBumped)
 				return err
 			},
 			"Charge": func() error {
@@ -471,7 +475,7 @@ func tableDigests(t *testing.T) map[string]string {
 var scopedTables = []string{
 	"capabilities", "revocations", "biscuit_revocations", "usage",
 	"copy_usage", "tenant_budgets", "charges", "reservations", "erased_tenants",
-	"refunds", "tenant_budget_stripes",
+	"refunds", "tenant_budget_stripes", "bumps",
 }
 
 // Under the read-only setting each table's policies let its rows be read
@@ -487,6 +491,10 @@ func TestReadOnlyPoliciesOfEveryTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := f.usage.Reserve(WithTenant(t.Context(), f.mine), meter.ReserveRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1}); err != nil {
+		t.Fatal(err)
+	}
+	// A keyed bump leaves a row of bumps.
+	if _, err := f.usage.Bump(WithTenant(t.Context(), f.mine), meter.BumpRequest{Subject: meterSubject(f.child.ID, f.mine), ExternalRef: uuid.New().String()}, nil); err != nil {
 		t.Fatal(err)
 	}
 	// A striped tenant's charge leaves a row of tenant_budget_stripes.

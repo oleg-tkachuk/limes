@@ -146,7 +146,7 @@ func BenchmarkBump(b *testing.B) {
 	f := newBenchFixture(b)
 	ctx := WithTenant(b.Context(), f.tenant)
 	for b.Loop() {
-		if _, err := f.usage.Bump(ctx, meter.BumpRequest{Subject: f.leaf()}); err != nil {
+		if _, err := f.usage.Bump(ctx, meter.BumpRequest{Subject: f.leaf()}, nil); err != nil {
 			b.Fatal(err)
 		}
 	}

@@ -107,8 +107,11 @@ type UsageStore struct {
 	// byRefund indexes each keyed refund (RefundRequest.RefundID) to the
 	// position of its charge, which holds it: it goes with the charge.
 	byRefund map[uuid.UUID]int
-	records  *Store // lineage and ceilings of ancestors
-	holds    map[uuid.UUID]hold
+	// bumps is each keyed bump (BumpRequest.ExternalRef) by its capability
+	// and reference, until PurgeCharges, DeleteUsage or an erase removes it.
+	bumps   map[refKey]keyedBump
+	records *Store // lineage and ceilings of ancestors
+	holds   map[uuid.UUID]hold
 	// leases are the budget each leaseholder holds of its chain, by its
 	// capability (meter.Leaser).
 	leases map[uuid.UUID]lease
@@ -153,7 +156,8 @@ func (s *UsageStore) countedLocked(capID uuid.UUID, e *ledgerEntry) bool {
 	return s.born[capID] < e.seq
 }
 
-// refKey is what ChargeRequest.ExternalRef makes a charge idempotent on.
+// refKey is what ChargeRequest.ExternalRef makes a charge idempotent on, and
+// BumpRequest.ExternalRef a bump.
 type refKey struct {
 	capID uuid.UUID
 	ref   string
@@ -392,6 +396,7 @@ func NewUsageStore(cfg UsageStoreConfig) (*UsageStore, error) {
 		byRef:         map[refKey]int{},
 		byReservation: map[uuid.UUID]int{},
 		byRefund:      map[uuid.UUID]int{},
+		bumps:         map[refKey]keyedBump{},
 		records:       cfg.Records,
 		nowFn:         wallClock(cfg.Now),
 	}, nil
@@ -904,8 +909,10 @@ func (s *UsageStore) lineage(capID uuid.UUID) ([]limes.Capability, error) {
 
 // Bump returns limes.ErrRequestLimitExceeded WITHOUT mutating when the
 // increment would cross a copy's ceiling, the capability's or any
-// ancestor's. A rejected call must be safe to retry.
-func (s *UsageStore) Bump(_ context.Context, req meter.BumpRequest) (meter.BumpReceipt, error) {
+// ancestor's. A rejected call must be safe to retry. onBumped runs on the
+// caller's context, once every ceiling has passed and before anything is
+// counted, as Charge runs onCharged.
+func (s *UsageStore) Bump(ctx context.Context, req meter.BumpRequest, onBumped func(ctx context.Context, b meter.Bumped) error) (meter.BumpReceipt, error) {
 	if err := req.Validate(); err != nil {
 		return meter.BumpReceipt{}, err
 	}
@@ -916,6 +923,11 @@ func (s *UsageStore) Bump(_ context.Context, req meter.BumpRequest) (meter.BumpR
 	defer s.mu.Unlock()
 	if err := s.notErasedLocked(req.Subject.TenantID()); err != nil {
 		return meter.BumpReceipt{}, err
+	}
+	// A replay is answered before the lineage is read, as Charge answers
+	// one: it counts nothing, so it needs no record.
+	if receipt, replayed, err := s.replayBumpLocked(req); replayed {
+		return receipt, err
 	}
 	ancestors, err := s.lineage(req.Subject.CapabilityID())
 	if err != nil {
@@ -929,15 +941,68 @@ func (s *UsageStore) Bump(_ context.Context, req meter.BumpRequest) (meter.BumpR
 	// the whole chain, as a charge of one does.
 	if len(req.Subject.Copies()) == 0 {
 		if l, below, ok := s.leaseFor(req.Subject.CapabilityID(), ancestors, lease.coversBumps); ok {
-			return s.bumpLeasedLocked(req.Subject, ancestors[:below], l)
+			return s.bumpLeasedLocked(ctx, req, ancestors[:below], l, onBumped)
 		}
 	}
 	count := s.usage[req.Subject.CapabilityID()].RequestCount
 	if err := s.admitRequestLocked(req.Subject, ancestors); err != nil {
 		return meter.BumpReceipt{RequestCount: count}, err
 	}
+	receipt := meter.BumpReceipt{RequestCount: count + 1}
+	if err := runBumped(ctx, onBumped, receipt); err != nil {
+		// Nothing has been counted — nothing to compensate.
+		return meter.BumpReceipt{RequestCount: count}, err
+	}
 	s.countRequestLocked(req.Subject, ancestors)
-	return meter.BumpReceipt{RequestCount: count + 1}, nil
+	s.keepBumpLocked(req, receipt)
+	return receipt, nil
+}
+
+// keyedBump is one bump counted under a BumpRequest.ExternalRef: who made
+// it, what it returned, and when, by the store's clock.
+type keyedBump struct {
+	tenantID uuid.UUID
+	copies   [][]byte
+	count    int64
+	at       time.Time
+}
+
+// replayBumpLocked is the receipt of the bump req's ExternalRef already
+// names, replayed reporting whether there is one. Another tenant or copy
+// conflicts, as for a charge; the error names the ref, never the other
+// bump. s.mu must be held.
+func (s *UsageStore) replayBumpLocked(req meter.BumpRequest) (receipt meter.BumpReceipt, replayed bool, err error) {
+	if req.ExternalRef == "" {
+		return meter.BumpReceipt{}, false, nil
+	}
+	b, ok := s.bumps[refKey{req.Subject.CapabilityID(), req.ExternalRef}]
+	if !ok {
+		return meter.BumpReceipt{}, false, nil
+	}
+	if b.tenantID != req.Subject.TenantID() || !sameCopyIDs(b.copies, req.Subject.Copies()) {
+		return meter.BumpReceipt{}, true, fmt.Errorf("%w: %q", meter.ErrExternalRefConflict, req.ExternalRef)
+	}
+	return meter.BumpReceipt{RequestCount: b.count, Replayed: true}, true, nil
+}
+
+// keepBumpLocked records req, counted with receipt, under its ExternalRef,
+// if it names one. s.mu must be held.
+func (s *UsageStore) keepBumpLocked(req meter.BumpRequest, receipt meter.BumpReceipt) {
+	if req.ExternalRef == "" {
+		return
+	}
+	s.bumps[refKey{req.Subject.CapabilityID(), req.ExternalRef}] = keyedBump{
+		tenantID: req.Subject.TenantID(), copies: copyIDsOf(req.Subject.Copies()), count: receipt.RequestCount, at: s.nowFn(),
+	}
+}
+
+// runBumped runs onBumped, if any, on the bump receipt describes: on the
+// caller's context, as this store has no transaction to put in it.
+func runBumped(ctx context.Context, onBumped func(context.Context, meter.Bumped) error, receipt meter.BumpReceipt) error {
+	if onBumped == nil {
+		return nil
+	}
+	return onBumped(ctx, meter.Bumped{Receipt: receipt})
 }
 
 // admitRequestLocked refuses one more request of subject past a copy's,
@@ -2247,8 +2312,8 @@ func (s *UsageStore) releaseHoldsLocked(gone func(capID uuid.UUID) bool) {
 	}
 }
 
-// DeleteUsage drops the capability's counters and its copies' counters,
-// first releasing its holds and settling the leases of it and of those
+// DeleteUsage drops the capability's counters, its copies' counters and its
+// keyed bumps, first releasing its holds and settling the leases of it and of those
 // below it: nothing could settle or release them once it is gone, and they
 // would keep counting against its ancestors and its tenant.
 func (s *UsageStore) DeleteUsage(_ context.Context, req meter.DeleteUsageRequest) error {
@@ -2265,6 +2330,8 @@ func (s *UsageStore) DeleteUsage(_ context.Context, req meter.DeleteUsageRequest
 	s.dropUsageLocked(capID)
 	s.dropCopiesLocked(func(id uuid.UUID) bool { return id == capID })
 	s.forgetAncestorLocked(func(id uuid.UUID) bool { return id == capID })
+	// Its counters restart, and its keys with them.
+	maps.DeleteFunc(s.bumps, func(k refKey, _ keyedBump) bool { return k.capID == capID })
 	return nil
 }
 
@@ -2288,8 +2355,8 @@ func (s *UsageStore) forgetAncestorLocked(gone func(uuid.UUID) bool) {
 }
 
 // EraseTenantUsage implements meter.TenantUsageEraser: it drops the
-// tenant's holds, leases, counters, copies' counters, ledger entries and
-// aggregate, counts what it dropped, and marks the tenant erased on the
+// tenant's holds, leases, counters, copies' counters, ledger entries, keyed
+// bumps and aggregate, counts what it dropped, and marks the tenant erased on the
 // Records store.
 func (s *UsageStore) EraseTenantUsage(_ context.Context, req meter.EraseTenantUsageRequest) (meter.EraseTenantUsageResult, error) {
 	if err := req.Validate(); err != nil {
@@ -2324,6 +2391,7 @@ func (s *UsageStore) EraseTenantUsage(_ context.Context, req meter.EraseTenantUs
 	kept := slices.DeleteFunc(s.ledger, func(e ledgerEntry) bool { return e.TenantID == tenant })
 	out.Charges = int64(before - len(kept))
 	s.rebuildLedgerLocked(kept)
+	maps.DeleteFunc(s.bumps, func(_ refKey, b keyedBump) bool { return b.tenantID == tenant })
 	delete(s.budgets, tenant)
 	delete(s.periods, tenant)
 	s.records.markErased(tenant)
