@@ -523,11 +523,17 @@ func (s *UsageStore) settle(ctx context.Context, op meter.StoreOperation, capID,
 	return out, err
 }
 
-// sqlShareLeaseTenantLock shares the erase lock (class $1) of the tenant
-// of capability $2's counter, as sqlShareTenantLock does; it takes none when
-// the capability has no counter.
-const sqlShareLeaseTenantLock = `SELECT pg_advisory_xact_lock_shared(` +
-	tenantLockKeyOpen + `(SELECT tenant_id FROM limes.usage WHERE capability_id = $2)` + tenantLockKeyClose + `)`
+// sqlReadLeaseSharingTenantLock is sqlReadLease of capability $2, sharing
+// the erase lock (class $1) of the tenant it reads, as sqlShareTenantLock
+// does, in the one statement: the lock is that of the tenant whose lease
+// is read, which a lock taken in a statement of its own, on a snapshot of
+// its own, could miss — a capability's first lease committing between the
+// two left the settle unlocked. A lock that waited leaves the lease read
+// before it; settleLease finds the lease moved then.
+const sqlReadLeaseSharingTenantLock = `
+SELECT tenant_id, unit_code, ` + sqlLeaseColumns + `,
+       (SELECT 1 FROM (SELECT pg_advisory_xact_lock_shared(` + tenantLockKeyOpen + `u.tenant_id` + tenantLockKeyClose + `)) shared)
+FROM limes.usage u WHERE capability_id = $2 AND lease_id IS NOT NULL`
 
 // settleLease ends capID's lease in tx: what it spent is charged to its
 // ancestors and its tenant — the tenant's while the lease's period is still
@@ -544,17 +550,8 @@ func (s *UsageStore) settleLease(ctx context.Context, tx pgx.Tx, capID uuid.UUID
 	var tenantID uuid.UUID
 	var unit string
 	var read leaseColumns
-	b := &pgx.Batch{}
-	b.Queue(sqlShareLeaseTenantLock, eraseLockClass, capID)
-	b.Queue(sqlReadLease, capID)
-	br := tx.SendBatch(ctx, b)
-	err := func() error {
-		if _, err := br.Exec(); err != nil {
-			return err
-		}
-		return br.QueryRow().Scan(append([]any{&tenantID, &unit}, read.dest()...)...)
-	}()
-	err = errors.Join(err, br.Close())
+	var shared int
+	err := tx.QueryRow(ctx, sqlReadLeaseSharingTenantLock, eraseLockClass, capID).Scan(append(append([]any{&tenantID, &unit}, read.dest()...), &shared)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return meter.Lease{}, meter.ErrLeaseNotFound
 	}
