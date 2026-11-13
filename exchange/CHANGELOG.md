@@ -2,6 +2,12 @@
 
 Every release of the exchange module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.25.4](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.25.3...exchange%2Fv0.25.4) (2026-11-13)
+
+### Dependencies
+
+* **exchange:** bump jwx v3.4.0 → v4.6.0 ([73d5127](https://github.com/oleg-tkachuk/limes/commit/73d5127eff8df729fa520da5fb62d87ed70af2bd))
+
 ## [0.25.3](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.25.2...exchange%2Fv0.25.3) (2026-11-13)
 
 ### Dependencies
