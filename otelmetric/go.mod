@@ -12,7 +12,7 @@ toolchain go1.27.4
 replace github.com/oleg-tkachuk/limes => ../
 
 require (
-	github.com/oleg-tkachuk/limes v0.178.0
+	github.com/oleg-tkachuk/limes v0.185.0
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/metric v1.47.0
 	go.opentelemetry.io/otel/sdk/metric v1.47.0

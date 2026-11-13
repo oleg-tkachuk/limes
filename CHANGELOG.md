@@ -2,6 +2,24 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.185.0](https://github.com/oleg-tkachuk/limes/compare/v0.184.0...v0.185.0) (2026-11-13)
+
+### ⚠ BREAKING CHANGES
+
+* **meter:** RequestCounter.Bump takes an onBumped callback; pass nil
+  to keep the old behaviour. A store of its own keeps keyed bumps as
+  docs/migration.md describes for v0.185.0.
+
+### Features
+
+* **limes:** write a signing key to a file and load a public key alone ([de22fae](https://github.com/oleg-tkachuk/limes/commit/de22faeae5b22d191a04acc79b8e7a24702707ce)), references [PKCS#8](https://github.com/PKCS/issues/8)
+* **meter:** key Bump and run a callback on its transaction ([5f0ede3](https://github.com/oleg-tkachuk/limes/commit/5f0ede379465f389e4cb64cd329b36f9822d18f6))
+* **metertest:** run the counter contract on a store that sees no copy ([3d8b188](https://github.com/oleg-tkachuk/limes/commit/3d8b1882a2ea6e3d53e6c126275596a51a75c12c))
+
+### Bug Fixes
+
+* **meter:** say an external ref conflict may name a bump ([d2c2b5c](https://github.com/oleg-tkachuk/limes/commit/d2c2b5c8e75620ad73088c70926bc11870f8e422))
+
 ## [0.184.0](https://github.com/oleg-tkachuk/limes/compare/v0.183.0...v0.184.0) (2026-11-13)
 
 ### ⚠ BREAKING CHANGES

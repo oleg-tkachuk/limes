@@ -2,6 +2,16 @@
 
 Every release of the otelmetric module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.22.0](https://github.com/oleg-tkachuk/limes/compare/otelmetric%2Fv0.21.0...otelmetric%2Fv0.22.0) (2026-11-13)
+
+### Features
+
+* **otelmetric:** forward the bump callback and count no replayed bump ([e4b609d](https://github.com/oleg-tkachuk/limes/commit/e4b609d0fd1f0686ec65666f8e72fa83b7bad1a1))
+
+### Dependencies
+
+* require limes v0.185.0
+
 ## [0.21.0](https://github.com/oleg-tkachuk/limes/compare/otelmetric%2Fv0.20.2...otelmetric%2Fv0.21.0) (2026-11-12)
 
 ### Features
