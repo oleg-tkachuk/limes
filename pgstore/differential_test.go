@@ -17,6 +17,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"testing"
 	"time"
 	"uuid"
@@ -81,6 +82,15 @@ const (
 	diffStepPurgeCharges
 	// diffStepEraseOther charges another tenant and erases its usage.
 	diffStepEraseOther
+	// diffStepKeyedBump bumps under one of a few refs, the amount picking
+	// which, so a script sends a ref again; the two must agree on the
+	// receipt, a replay included.
+	diffStepKeyedBump
+	// diffStepKeyedBumpFails is a keyed bump whose onBumped fails.
+	diffStepKeyedBumpFails
+	// diffStepKeyedCopy is a keyed bump under a Biscuit copy, which a ref
+	// first counted without it conflicts with.
+	diffStepKeyedCopy
 	diffSteps
 )
 
@@ -122,7 +132,19 @@ type diffSide struct {
 	scoped  func(tenant uuid.UUID) context.Context
 	charges []uuid.UUID
 	holds   []uuid.UUID
+	// bumped is the receipt of the side's latest keyed bump.
+	bumped meter.BumpReceipt
 }
+
+// errDiffCallback is what onBumped returns on diffStepKeyedBumpFails.
+var errDiffCallback = errors.New("differential: onBumped failed")
+
+// diffBumpRefPrefix names a keyed bump's ExternalRef, ended by its number.
+const diffBumpRefPrefix = "bump-"
+
+// diffCopyID is the revocation id of the copy diffStepKeyedCopy bumps
+// under.
+var diffCopyID = []byte("differential-copy")
 
 // diffSentinels are the outcomes the two stores must agree on, by name.
 var diffSentinels = []struct {
@@ -132,6 +154,8 @@ var diffSentinels = []struct {
 	{"budget", limes.ErrBudgetExceeded},
 	{"requests", limes.ErrRequestLimitExceeded},
 	{"tenant budget", limes.ErrTenantBudgetExceeded},
+	{"callback", errDiffCallback},
+	{"external ref conflict", meter.ErrExternalRefConflict},
 	{"lease nested", meter.ErrLeaseNested},
 	{"lease not found", meter.ErrLeaseNotFound},
 	{"reservation not found", meter.ErrReservationNotFound},
@@ -181,6 +205,13 @@ func FuzzDifferential(f *testing.F) {
 	f.Add(script(step(diffStepLease, diffGrandchild, 8), step(diffStepCharge, diffGrandchild, 3), step(diffStepDeleteUsage, diffRoot, 1),
 		step(diffStepCharge, diffGrandchild, 1), step(diffStepRefund, 0, 2), step(diffStepLease, diffGrandchild, 8),
 		step(diffStepCharge, diffGrandchild, 3), step(diffStepDeleteUsage, diffGrandchild, 1), step(diffStepRefund, 0, 1)))
+	// Keyed bumps sent again, under a copy, with a failing onBumped, under a
+	// request lease, after DeleteUsage, and past a purge.
+	f.Add(script(step(diffStepKeyedBump, diffChildA, 1), step(diffStepKeyedBump, diffChildA, 1), step(diffStepKeyedCopy, diffChildA, 1),
+		step(diffStepKeyedBumpFails, diffChildA, 2), step(diffStepKeyedBump, diffChildA, 2), step(diffStepLeaseRequests, diffGrandchild, 4),
+		step(diffStepKeyedBump, diffGrandchild, 3), step(diffStepKeyedBump, diffGrandchild, 3), step(diffStepDeleteUsage, diffChildA, 1),
+		step(diffStepKeyedBump, diffChildA, 1), step(diffStepPurgeCharges, 0, 1), step(diffStepKeyedBump, diffGrandchild, 3),
+		step(diffStepKeyedCopy, diffChildB, 5), step(diffStepKeyedCopy, diffChildB, 5)))
 	f.Fuzz(func(t *testing.T, script []byte) {
 		if len(script) > diffMaxSteps*diffStepSize {
 			script = script[:diffMaxSteps*diffStepSize]
@@ -189,6 +220,7 @@ func FuzzDifferential(f *testing.F) {
 		tenant := newTenant(t)
 		sides := [2]*diffSide{pgSide(t, tenant, clock), memSide(t, clock)}
 		subjects, ids := diffRecordTree(t, sides, tenant, clock.Now().Add(diffLife))
+		copies := diffCopySubjects(ids, tenant)
 		for _, side := range sides {
 			if _, err := side.usage.SetTenantBudget(side.ctx, meter.SetTenantBudgetRequest{
 				TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: diffTenantBudget * diffUnit, UnitCode: testUnit},
@@ -226,7 +258,7 @@ func FuzzDifferential(f *testing.F) {
 				case diffStepEraseOther:
 					err = diffEraseOther(side, other, otherCap, clock.Now().Add(diffLife))
 				default:
-					err = diffApply(side, s, subjects[node], ids[node], tenant, amount)
+					err = diffApply(side, s, diffSubjects{subjects[node], copies[node]}, ids[node], tenant, amount)
 				}
 				outcomes[j] = outcome(err)
 			}
@@ -235,6 +267,9 @@ func FuzzDifferential(f *testing.F) {
 			}
 			if outcomes[0] != outcomes[1] {
 				t.Fatalf("step %d (%d on %d, %d): %s %s, %s %s", at, s, node, amount, sides[0].name, outcomes[0], sides[1].name, outcomes[1])
+			}
+			if a, b := sides[0].bumped, sides[1].bumped; a.RequestCount != b.RequestCount || a.Replayed != b.Replayed {
+				t.Fatalf("step %d (%d on %d, %d): %s bumped %+v, %s %+v", at, s, node, amount, sides[0].name, sides[0].bumped, sides[1].name, sides[1].bumped)
 			}
 			diffCompare(t, sides, ids, tenant, at)
 		}
@@ -331,9 +366,46 @@ func diffEraseOther(side *diffSide, other, capID uuid.UUID, expires time.Time) e
 	return err
 }
 
+// diffSubjects are one capability's subjects: as recorded, and under
+// diffCopyID.
+type diffSubjects struct {
+	own, copy limes.MeterSubject
+}
+
+// diffCopySubjects are the tree's subjects under diffCopyID, with
+// diffTree's ceilings.
+func diffCopySubjects(ids [diffNodes]uuid.UUID, tenant uuid.UUID) [diffNodes]limes.MeterSubject {
+	var subjects [diffNodes]limes.MeterSubject
+	for i, n := range diffTree {
+		subjects[i] = link.NewMeterSubject(link.MeterSubjectFields{
+			CapabilityID: ids[i], TenantID: tenant,
+			Requests:  limes.RequestCeiling{Max: n.maxReqs},
+			Budget:    limes.BudgetCeiling{Max: limes.Nanos(n.budget) * diffUnit, UnitCode: testUnit},
+			Copies:    []limes.CopyCeiling{{RevocationID: diffCopyID}},
+			CopyQuota: limes.CopyQuota{Unlimited: true},
+		}).(limes.MeterSubject)
+	}
+	return subjects
+}
+
+// diffKeyedBump bumps subject under the ref amount numbers, its onBumped
+// failing when fail is set, and keeps the receipt in side.bumped.
+func diffKeyedBump(side *diffSide, subject limes.MeterSubject, amount int64, fail bool) error {
+	ref := diffBumpRefPrefix + strconv.FormatInt(amount, 10)
+	r, err := side.usage.Bump(side.ctx, meter.BumpRequest{Subject: subject, ExternalRef: ref}, func(context.Context, meter.Bumped) error {
+		if fail {
+			return errDiffCallback
+		}
+		return nil
+	})
+	side.bumped = r
+	return err
+}
+
 // diffApply runs step s on side and returns its error.
-func diffApply(side *diffSide, s int, subject limes.MeterSubject, id, tenant uuid.UUID, amount int64) error {
-	ctx, u := side.ctx, side.usage
+func diffApply(side *diffSide, s int, subjects diffSubjects, id, tenant uuid.UUID, amount int64) error {
+	ctx, u, subject := side.ctx, side.usage, subjects.own
+	side.bumped = meter.BumpReceipt{}
 	nanos := limes.Nanos(amount) * diffUnit
 	switch s {
 	case diffStepCharge:
@@ -395,6 +467,10 @@ func diffApply(side *diffSide, s int, subject limes.MeterSubject, id, tenant uui
 	case diffStepRevoke:
 		_, err := side.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: id})
 		return err
+	case diffStepKeyedBump, diffStepKeyedBumpFails:
+		return diffKeyedBump(side, subject, amount, s == diffStepKeyedBumpFails)
+	case diffStepKeyedCopy:
+		return diffKeyedBump(side, subjects.copy, amount, false)
 	}
 	return fmt.Errorf("no step %d", s)
 }

@@ -69,6 +69,16 @@ const (
 	// leaseStepEraseOther charges another tenant and erases its usage: the
 	// ledger is rebuilt around this tenant's charges.
 	leaseStepEraseOther
+	// leaseStepKeyedBump bumps under one of a few refs, the amount picking
+	// which, so a script sends a ref again and the store must replay it.
+	leaseStepKeyedBump
+	// leaseStepKeyedBumpFails is a keyed bump whose onBumped fails: it
+	// counts nothing and leaves its ref free.
+	leaseStepKeyedBumpFails
+	// leaseStepKeyedConflict sends a ref already counted again for another
+	// tenant or under a Biscuit copy: ErrExternalRefConflict, counting
+	// nothing.
+	leaseStepKeyedConflict
 	leaseSteps
 )
 
@@ -167,7 +177,7 @@ func (m *leaseModel) refund(c *leaseCharge) {
 	c.left = 0
 }
 
-// FuzzLeases runs a script of charges, bumps, leases, settlements, expiries,
+// FuzzLeases runs a script of charges, bumps keyed and not, leases, settlements, expiries,
 // period resets, refunds and dropped counters on a tree of capabilities and
 // holds the store, after every step, to ADR-0017's promise that ceilings
 // stay hard: no capability and not the tenant ever has more spent and
@@ -215,6 +225,15 @@ func FuzzLeases(f *testing.F) {
 	f.Add(script(step(leaseStepCharge, leaseChildA, 4), step(leaseStepDeleteUsage, leaseChildA, 1), step(leaseStepCharge, leaseChildA, 6),
 		step(leaseStepEraseOther, 0, 1), step(leaseStepRefund, leaseChildA, 2), step(leaseStepAudit, 0, 1),
 		step(leaseStepPurgeCharges, 0, 1), step(leaseStepRefund, leaseChildA, 1), step(leaseStepAudit, 0, 1)))
+	// A keyed bump sent again, by another and under a copy, with a failing
+	// onBumped, then under a request lease, its counters dropped, and
+	// aged out of the ledger.
+	f.Add(script(step(leaseStepKeyedBump, leaseChildA, 1), step(leaseStepKeyedBump, leaseChildA, 1), step(leaseStepKeyedConflict, leaseChildA, 1),
+		step(leaseStepKeyedBump, leaseChildA, 2), step(leaseStepKeyedConflict, leaseChildA, 2), step(leaseStepKeyedBumpFails, leaseChildA, 2),
+		step(leaseStepKeyedBumpFails, leaseGrandchild, 3), step(leaseStepKeyedBump, leaseGrandchild, 3), step(leaseStepAudit, 0, 1),
+		step(leaseStepLeaseRequests, leaseGrandchild, 4), step(leaseStepKeyedBump, leaseGrandchild, 4), step(leaseStepKeyedBump, leaseGrandchild, 4),
+		step(leaseStepDeleteUsage, leaseChildA, 1), step(leaseStepKeyedBump, leaseChildA, 1), step(leaseStepAudit, 0, 1),
+		step(leaseStepPurgeCharges, 0, 8), step(leaseStepKeyedBump, leaseGrandchild, 3), step(leaseStepAudit, 0, 1)))
 	f.Fuzz(func(t *testing.T, script []byte) {
 		if len(script) > leaseFuzzMaxSteps*leaseStepSize {
 			script = script[:leaseFuzzMaxSteps*leaseStepSize]
@@ -232,6 +251,7 @@ func FuzzLeases(f *testing.F) {
 		ledger := NewLedger(u)
 		agings := 0
 		var m leaseModel
+		keys := bumpKeys{}
 		for i := 0; i+leaseStepSize <= len(script); i += leaseStepSize {
 			at := i / leaseStepSize
 			arg := script[i+1]
@@ -278,6 +298,7 @@ func FuzzLeases(f *testing.F) {
 					t.Fatalf("step %d: DeleteUsage: %v", at, err)
 				}
 				m.deleteUsage(node)
+				keys.deleteUsage(node)
 			case leaseStepRefund:
 				if len(m.charges) == 0 {
 					break
@@ -304,7 +325,8 @@ func FuzzLeases(f *testing.F) {
 				if err != nil {
 					t.Fatalf("step %d: PurgeCharges: %v", at, err)
 				}
-				cutoff, due := now.Add(-meter.MinChargeRetention), int64(0)
+				cutoff := now.Add(-meter.MinChargeRetention)
+				due := keys.aged(cutoff)
 				for i := range m.charges {
 					if m.charges[i].at.Before(cutoff) && !m.charges[i].mayBeGone {
 						m.charges[i].mayBeGone = true
@@ -314,10 +336,14 @@ func FuzzLeases(f *testing.F) {
 					}
 				}
 				if res.Purged > amount || res.Purged > due {
-					t.Fatalf("step %d: PurgeCharges = %+v, past the limit %d or the %d charges due", at, res, amount, due)
+					t.Fatalf("step %d: PurgeCharges = %+v, past the limit %d or the %d charges and keyed bumps due", at, res, amount, due)
 				}
 			case leaseStepEraseOther:
 				eraseAnotherTenant(ctx, t, u, now.Add(leaseFuzzLife), at)
+			case leaseStepKeyedBump, leaseStepKeyedBumpFails:
+				err = keys.bump(ctx, t, u, subject, node, amount, s == leaseStepKeyedBumpFails, now, &m, at)
+			case leaseStepKeyedConflict:
+				keys.conflict(ctx, t, u, tenant, ids[node], node, amount, at)
 			}
 			if err != nil && !isLeaseRefusal(err) {
 				t.Fatalf("step %d: %v", at, err)
