@@ -2,6 +2,12 @@
 
 Every release of the exchange module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.25.1](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.25.0...exchange%2Fv0.25.1) (2026-11-13)
+
+### Bug Fixes
+
+* **exchange:** let a token's jwks fetch run on when its caller gives up ([7f7aede](https://github.com/oleg-tkachuk/limes/commit/7f7aede6855bf81f464fe454a03783e25c3c94c8))
+
 ## [0.25.0](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.24.2...exchange%2Fv0.25.0) (2026-11-12)
 
 ### ⚠ BREAKING CHANGES
