@@ -65,7 +65,7 @@ var (
 // as booked. The error names the reference, never the charge or the bump it
 // names. Matches limes.ErrConflict: the request is well formed, and would
 // have charged or counted had the reference been free.
-var ErrExternalRefConflict error = &familyError{"limes: external ref already names a different charge", limes.ErrConflict, CodeExternalRefConflict}
+var ErrExternalRefConflict error = &familyError{"limes: external ref already names a different charge or bump", limes.ErrConflict, CodeExternalRefConflict}
 
 // ErrSettleConflict — Settle named a reservation already settled, for a
 // different amount. One reservation names one cost; replaying the first

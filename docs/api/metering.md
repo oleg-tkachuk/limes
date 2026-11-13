@@ -209,7 +209,7 @@ The meter's own sentinels. The refusals ErrorResponse answers — limes.ErrReque
 ### meter.ErrExternalRefConflict
 
 ```go
-var ErrExternalRefConflict error = &familyError{"limes: external ref already names a different charge", limes.ErrConflict, CodeExternalRefConflict}
+var ErrExternalRefConflict error = &familyError{"limes: external ref already names a different charge or bump", limes.ErrConflict, CodeExternalRefConflict}
 ```
 
 ErrExternalRefConflict — Charge named an ExternalRef its capability already charged under, for a different amount, unit or tenant, or under other Biscuit copies; or Bump named one its capability already counted under, for another tenant or under other Biscuit copies. One reference names one cost, or one request; replaying the first receipt would report the second as booked. The error names the reference, never the charge or the bump it names. Matches limes.ErrConflict: the request is well formed, and would have charged or counted had the reference been free.
