@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 	"uuid"
@@ -344,14 +345,7 @@ func TestAProofNamesThePresentedToken(t *testing.T) {
 	ctx := t.Context()
 	key := dpopKeys(t)["Ed25519"]
 	jkt, _ := dpop.Thumbprint(key.Public())
-	_, token, err := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
-		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
-		Audience: []string{audienceData}, Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}}, TTL: time.Hour,
-		ConfirmationJKT: jkt,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	token := issuePresentable(t, issuer, jkt)
 	presented := envelopePrefix + token
 
 	req := withProof(ctx, t, key, presented, audienceData, time.Now())
@@ -370,5 +364,79 @@ func TestAProofNamesThePresentedToken(t *testing.T) {
 	other.Token, other.PresentedToken = token, envelopePrefix
 	if _, err := verifier.Verify(ctx, other); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("a presented token without the token: %v, want ErrInvalidRequest", err)
+	}
+}
+
+// issuePresentable is a token of issuer's for audienceData, bound to the key
+// jkt names, or to none when jkt is empty.
+func issuePresentable(t *testing.T, issuer *Issuer, jkt string) string {
+	t.Helper()
+	_, token, err := issuer.issue(t.Context(), IssueRequest{ClientID: testClientID,
+		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
+		Audience: []string{audienceData}, Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}}, TTL: time.Hour,
+		ConfirmationJKT: jkt,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token
+}
+
+// envelopeOf is token in an envelope of exactly size bytes, its padding
+// before it.
+func envelopeOf(token string, size int) string {
+	return strings.Repeat("x", size-len(token)) + token
+}
+
+// A presented token is held to MaxTokenBytes and MaxEnvelopeBytes together,
+// before the proof's ath is computed over it: one at the bound verifies,
+// one a byte past it is refused as the token is past its own.
+func TestThePresentedTokenIsBounded(t *testing.T) {
+	issuer, verifier, _, _ := buildIssuerVerifier(t)
+	ctx := t.Context()
+	key := dpopKeys(t)["Ed25519"]
+	jkt, _ := dpop.Thumbprint(key.Public())
+	token := issuePresentable(t, issuer, jkt)
+	limit := DefaultMaxTokenBytes + MaxEnvelopeBytes
+
+	at := envelopeOf(token, limit)
+	req := withProof(ctx, t, key, at, audienceData, time.Now())
+	req.Token, req.PresentedToken = token, at
+	if _, err := verifier.Verify(ctx, req); err != nil {
+		t.Errorf("a presented token at the bound: %v", err)
+	}
+
+	past := envelopeOf(token, limit+1)
+	req = withProof(ctx, t, key, past, audienceData, time.Now())
+	req.Token, req.PresentedToken = token, past
+	if _, err := verifier.Verify(ctx, req); !errors.Is(err, ErrInvalidToken) {
+		t.Errorf("a presented token a byte past the bound: %v, want ErrInvalidToken", err)
+	}
+}
+
+// For a capability bound to no key there is no proof, and a presented token
+// changes nothing: one that holds the token verifies, as the token alone
+// does, and one that does not is the server's error, ErrInvalidRequest.
+func TestAPresentedBearerTokenChangesNothing(t *testing.T) {
+	issuer, verifier, _, _ := buildIssuerVerifier(t)
+	ctx := t.Context()
+	token := issuePresentable(t, issuer, "")
+
+	req := VerifyRequest{Token: token, Audience: audienceData, PresentedToken: envelopePrefix + token}
+	got, err := verifier.Verify(ctx, req)
+	if err != nil {
+		t.Fatalf("a bearer token in its envelope: %v", err)
+	}
+	alone, err := verifier.Verify(ctx, VerifyRequest{Token: token, Audience: audienceData})
+	if err != nil {
+		t.Fatalf("the bearer token alone: %v", err)
+	}
+	if got.Capability().ID != alone.Capability().ID {
+		t.Errorf("the envelope verified capability %s, the token alone %s", got.Capability().ID, alone.Capability().ID)
+	}
+
+	req.PresentedToken = envelopePrefix
+	if _, err := verifier.Verify(ctx, req); !errors.Is(err, ErrInvalidRequest) {
+		t.Errorf("a presented token without the bearer token: %v, want ErrInvalidRequest", err)
 	}
 }
