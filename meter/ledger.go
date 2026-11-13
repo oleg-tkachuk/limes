@@ -326,17 +326,22 @@ type LedgerHousekeeping interface {
 	// limit. A charge removed takes its promises with it: its ExternalRef
 	// charges anew, its settled hold is a reservation not found, Refund
 	// and GetCharge answer ErrChargeNotFound, and SumCharges no longer
-	// counts it. It refuses what PurgeChargesRequest.Validate refuses.
+	// counts it. It also removes the keyed bumps (BumpRequest.ExternalRef)
+	// counted more than req.Retention() ago, whose pairs then count anew:
+	// the charges first, then the bumps, at most req.Limit of both together,
+	// so a batch short of the limit leaves neither due. It refuses what
+	// PurgeChargesRequest.Validate refuses.
 	PurgeCharges(ctx context.Context, req PurgeChargesRequest) (PurgeChargesResult, error)
 }
 
 // PurgeChargesRequest is one batch of LedgerHousekeeping.PurgeCharges.
 type PurgeChargesRequest struct {
-	// OlderThan is how long ago a charge must have been taken to go. Zero:
-	// MinChargeRetention; anything shorter, negative included, is refused.
+	// OlderThan is how long ago a charge must have been taken, or a keyed
+	// bump counted, to go. Zero: MinChargeRetention; anything shorter,
+	// negative included, is refused.
 	OlderThan time.Duration
-	// Limit bounds the charges removed. Zero: DefaultHousekeepingLimit;
-	// negative is refused.
+	// Limit bounds the charges and keyed bumps removed together. Zero:
+	// DefaultHousekeepingLimit; negative is refused.
 	Limit int
 }
 
@@ -360,7 +365,7 @@ func (r PurgeChargesRequest) Retention() time.Duration {
 
 // PurgeChargesResult is what one PurgeCharges removed.
 type PurgeChargesResult struct {
-	// Purged is the number of charges removed.
+	// Purged is the number of charges and keyed bumps removed.
 	Purged int64
 	_      noCompare
 }

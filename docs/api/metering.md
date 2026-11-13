@@ -6,7 +6,7 @@ Request limits, budgets, holds, leases, the ledger and tenant ceilings. Part of 
 
 | Package | |
 |---|---|
-| [`github.com/oleg-tkachuk/limes/meter`](#meter) | 97 declarations |
+| [`github.com/oleg-tkachuk/limes/meter`](#meter) | 98 declarations |
 
 <a id="meter"></a><a id="package-meter"></a>
 
@@ -25,6 +25,8 @@ limes verifies a capability and hands the meter what to count it against, [limes
 #### Transactions
 
 Meter.Charge and Meter.Settle take an onCharged callback that runs inside the charge, receiving the charge's receipt (Charged) and a context that carries the store's transaction, so a side effect such as an outbox write commits atomically with the spend and names the charge. The transaction is onCharged's to write through while it runs, and the store's to end: onCharged never commits or rolls it back. The store puts its transaction there and reads it back with an accessor of its own — pgstore.TxFrom — so neither the contract nor a caller holding a UsageStore names a transaction type, and one service can meter through stores of different kinds. That is what keeps this package free of any database dependency.
+
+Meter.Bump takes onBumped, and Meter.Refund onRefunded, which run inside the bump and the refund on the same terms, receiving Bumped and Refunded.
 
 A store with no transactions, such as memstore, hands onCharged the caller's context. Everything else behaves identically; only the atomic-side-effect guarantee is forgone, and that limitation is store-dependent rather than a degradation of the primitive.
 
@@ -134,7 +136,7 @@ MaxCopyUsageIDs is the most revocation ids one CopyUsage reads, as a page of any
 const MaxExternalRefBytes = 200
 ```
 
-MaxExternalRefBytes bounds ChargeRequest.ExternalRef: long enough for any UUID, ULID or provider call id, short enough to index.
+MaxExternalRefBytes bounds ChargeRequest.ExternalRef and BumpRequest.ExternalRef: long enough for any UUID, ULID or provider call id, short enough to index.
 
 <sub>[meter/usage.go](../../meter/usage.go)</sub>
 <a id="meter.MinChargeRetention"></a>
@@ -145,7 +147,7 @@ MaxExternalRefBytes bounds ChargeRequest.ExternalRef: long enough for any UUID, 
 const MinChargeRetention = billingYear + disputeWindow
 ```
 
-MinChargeRetention is the least a ledger keeps a charge: until then the charge's ExternalRef replays it rather than charging again, its settled hold replays its receipt, Refund finds it, and SumCharges counts it. A ledger may remove a charge older than its retention, which is no shorter than this, and those promises then lapse for it. Removing charges by hand is held to it too. Erasing a tenant (TenantUsageEraser) is not: it removes every charge of the tenant, whatever its age. Its value holds for all of v1: raising or lowering it moves what PurgeCharges accepts (docs/adr/0002-ledger-retention.md).
+MinChargeRetention is the least a ledger keeps a charge: until then the charge's ExternalRef replays it rather than charging again, its settled hold replays its receipt, Refund finds it, and SumCharges counts it; a keyed bump's ExternalRef replays it for as long. A ledger may remove a charge or a keyed bump older than its retention, which is no shorter than this, and those promises then lapse for it. Removing charges by hand is held to it too. Erasing a tenant (TenantUsageEraser) is not: it removes every charge of the tenant, whatever its age. Its value holds for all of v1: raising or lowering it moves what PurgeCharges accepts (docs/adr/0002-ledger-retention.md).
 
 <sub>[meter/usage.go](../../meter/usage.go)</sub>
 <a id="meter.ErrCounterOverflow"></a><a id="meter.ErrChargeNotFound"></a><a id="meter.ErrRefundExceedsCharge"></a><a id="meter.ErrReservationNotFound"></a><a id="meter.ErrCopyLimitExceeded"></a><a id="meter.ErrUsageNotFound"></a><a id="meter.ErrTenantBudgetNotFound"></a><a id="meter.ErrTenantBudgetVersionMismatch"></a>
@@ -210,7 +212,7 @@ The meter's own sentinels. The refusals ErrorResponse answers — limes.ErrReque
 var ErrExternalRefConflict error = &familyError{"limes: external ref already names a different charge", limes.ErrConflict, CodeExternalRefConflict}
 ```
 
-ErrExternalRefConflict — Charge named an ExternalRef its capability already charged under, for a different amount, unit or tenant, or under other Biscuit copies. One reference names one cost; replaying the first receipt would report the second as booked. The error names the reference, never the charge it names. Matches limes.ErrConflict: the request is well formed, and would have charged had the reference been free.
+ErrExternalRefConflict — Charge named an ExternalRef its capability already charged under, for a different amount, unit or tenant, or under other Biscuit copies; or Bump named one its capability already counted under, for another tenant or under other Biscuit copies. One reference names one cost, or one request; replaying the first receipt would report the second as booked. The error names the reference, never the charge or the bump it names. Matches limes.ErrConflict: the request is well formed, and would have charged or counted had the reference been free.
 
 <sub>[meter/errors.go](../../meter/errors.go)</sub>
 <a id="meter.ErrFeatureDisabled"></a>
@@ -287,7 +289,7 @@ ErrLeasingDisabled — Lease of a store whose operator disabled leasing (pgstore
 var ErrOutcomeUnknown error = &familyError{"limes: the store lost the answer to the call's commit", nil, CodeOutcomeUnknown}
 ```
 
-ErrOutcomeUnknown — a store sent the call's commit and lost the answer: the connection failed, or the context ended, after the commit left and before the database replied. The call may have committed or not. The error wraps the cause beside it, so errors.Is matches both. Only a call keyed to its cost can be sent again safely: Charge with an ExternalRef, Reserve with a ReservationID, Refund with a RefundID, and Settle; a repeat of one that committed replays it. Matches no family: it is no refusal, and the call is neither wrong nor known to have failed.
+ErrOutcomeUnknown — a store sent the call's commit and lost the answer: the connection failed, or the context ended, after the commit left and before the database replied. The call may have committed or not. The error wraps the cause beside it, so errors.Is matches both. Only a call keyed to its cost can be sent again safely: Charge or Bump with an ExternalRef, Reserve with a ReservationID, Refund with a RefundID, and Settle; a repeat of one that committed replays it. Matches no family: it is no refusal, and the call is neither wrong nor known to have failed.
 
 <sub>[meter/errors.go](../../meter/errors.go)</sub>
 <a id="meter.ErrRefundConflict"></a>
@@ -423,7 +425,7 @@ Require refuses a store without every feature in want, naming each: one it does 
 func ValidateExternalRef(ref string) error
 ```
 
-ValidateExternalRef reports whether ref is usable as ChargeRequest.ExternalRef: empty, or printable text within MaxExternalRefBytes.
+ValidateExternalRef reports whether ref is usable as ChargeRequest.ExternalRef or BumpRequest.ExternalRef: empty, or printable text within MaxExternalRefBytes.
 
 <sub>[meter/usage.go](../../meter/usage.go)</sub>
 <a id="meter.BudgetMeter"></a>
@@ -616,8 +618,13 @@ BudgetMeter enforces the budget ceilings (Caveats.Budget, a tenant's aggregate c
 ```go
 type BumpReceipt struct {
 	// RequestCount is the capability's request count after this one; on a
-	// Bump refused past a ceiling, the count before it, unchanged.
+	// Bump refused past a ceiling, the count before it, unchanged. On a
+	// replay, the count the first bump of its ExternalRef returned.
 	RequestCount int64
+	// Replayed reports that a bump under the same ExternalRef was already
+	// counted, so this call counted nothing and RequestCount is that
+	// bump's.
+	Replayed bool
 	// contains filtered or unexported fields
 }
 ```
@@ -635,6 +642,11 @@ type BumpRequest struct {
 	// VerifiedCapability.MeterSubject. Ancestors' ceilings come from their
 	// records.
 	Subject limes.MeterSubject
+	// ExternalRef names the request in the consumer's own records — the id
+	// of the call it counts — and makes the bump idempotent on
+	// (capability, ExternalRef), as ChargeRequest.ExternalRef makes a
+	// charge. Empty: every call counts. At most MaxExternalRefBytes long.
+	ExternalRef string
 }
 ```
 
@@ -649,7 +661,23 @@ BumpRequest is the input to Meter.Bump.
 func (r BumpRequest) Validate() error
 ```
 
-Validate refuses a request whose subject names no capability, no tenant or an unknown unit.
+Validate refuses an external ref ValidateExternalRef refuses, and a subject that names no capability, no tenant or an unknown unit.
+
+<sub>[meter/usage.go](../../meter/usage.go)</sub>
+<a id="meter.Bumped"></a>
+
+### meter.Bumped
+
+```go
+type Bumped struct {
+	// Receipt is the receipt the call returns once the bump commits.
+	// Replayed is never set, as a replay runs no onBumped.
+	Receipt BumpReceipt
+	// contains filtered or unexported fields
+}
+```
+
+Bumped is what Meter.Bump hands onBumped: the bump it runs inside, before the call commits it. The transaction it commits on travels in onBumped's context, read through the store's own accessor.
 
 <sub>[meter/usage.go](../../meter/usage.go)</sub>
 <a id="meter.ChargeBucket"></a>
@@ -1374,7 +1402,11 @@ type LedgerHousekeeping interface {
 	// limit. A charge removed takes its promises with it: its ExternalRef
 	// charges anew, its settled hold is a reservation not found, Refund
 	// and GetCharge answer ErrChargeNotFound, and SumCharges no longer
-	// counts it. It refuses what PurgeChargesRequest.Validate refuses.
+	// counts it. It also removes the keyed bumps (BumpRequest.ExternalRef)
+	// counted more than req.Retention() ago, whose pairs then count anew:
+	// the charges first, then the bumps, at most req.Limit of both together,
+	// so a batch short of the limit leaves neither due. It refuses what
+	// PurgeChargesRequest.Validate refuses.
 	PurgeCharges(ctx context.Context, req PurgeChargesRequest) (PurgeChargesResult, error)
 }
 ```
@@ -1660,11 +1692,12 @@ Validate reports whether p is an OverrunPolicy this package defines. Implementat
 
 ```go
 type PurgeChargesRequest struct {
-	// OlderThan is how long ago a charge must have been taken to go. Zero:
-	// MinChargeRetention; anything shorter, negative included, is refused.
+	// OlderThan is how long ago a charge must have been taken, or a keyed
+	// bump counted, to go. Zero: MinChargeRetention; anything shorter,
+	// negative included, is refused.
 	OlderThan time.Duration
-	// Limit bounds the charges removed. Zero: DefaultHousekeepingLimit;
-	// negative is refused.
+	// Limit bounds the charges and keyed bumps removed together. Zero:
+	// DefaultHousekeepingLimit; negative is refused.
 	Limit int
 }
 ```
@@ -1700,7 +1733,7 @@ Validate refuses a retention shorter than MinChargeRetention, other than zero, a
 
 ```go
 type PurgeChargesResult struct {
-	// Purged is the number of charges removed.
+	// Purged is the number of charges and keyed bumps removed.
 	Purged int64
 	// contains filtered or unexported fields
 }
@@ -1983,7 +2016,35 @@ type RequestCounter interface {
 	// keeps moving while the call locks it, a store may refuse it as
 	// limes.ErrConflict, mutating nothing, for the caller to send again
 	// (Leaser).
-	Bump(ctx context.Context, req BumpRequest) (BumpReceipt, error)
+	//
+	// Any rejection, or an error from onBumped, counts nothing. onBumped
+	// runs inside the bump, atomically with it, once every ceiling has
+	// passed, as onCharged runs inside a charge: it receives a context
+	// carrying the store's transaction, which the store's own accessor reads
+	// (pgstore.TxFrom; a store with none hands the caller's context on), and
+	// the receipt the call will return (Bumped), so a side effect such as an
+	// outbox write commits with the count. Pass nil to skip it. It must not
+	// call back into the Meter, keeps to that store's database through the
+	// transaction it is handed, and is short: the chain's counters are held
+	// while it runs. A store that retries a transaction it lost to a deadlock
+	// runs onBumped again on the retry, the first run having rolled back with
+	// its count, so a side effect outside that transaction is no place for
+	// it.
+	//
+	// With req.ExternalRef set, Bump is idempotent on (CapabilityID,
+	// ExternalRef): a bump whose pair was already counted counts nothing,
+	// does not run onBumped, and returns that bump's receipt with Replayed
+	// set — also once the capability is no longer on record, as Charge
+	// replays a charge — for as long as the store keeps the pair: at least
+	// MinChargeRetention, as a ledger keeps a charge. LedgerHousekeeping's
+	// PurgeCharges removes a keyed bump older than its retention, an erase
+	// of the tenant's usage (TenantUsageEraser) the tenant's, and DeleteUsage
+	// the capability's, whose counters restart and its keys with them; the
+	// pair then counts anew. The pair names one request: arriving again
+	// under another TenantID, or under other Biscuit copies than req.Subject
+	// carries, it returns ErrExternalRefConflict and counts nothing. Empty:
+	// every call counts.
+	Bump(ctx context.Context, req BumpRequest, onBumped func(ctx context.Context, b Bumped) error) (BumpReceipt, error)
 }
 ```
 
@@ -2536,9 +2597,9 @@ TenantReservationLister lists the holds that count against a tenant's budget, fo
 
 ```go
 type TenantUsageEraser interface {
-	// EraseTenantUsage removes every counter, hold and charge of the
-	// tenant's capabilities and its Biscuit copies, and the tenant's
-	// aggregate: the charges ledger is the tenant's billing history, and
+	// EraseTenantUsage removes every counter, hold, charge and keyed bump
+	// (BumpRequest.ExternalRef) of the tenant's capabilities and its Biscuit
+	// copies, and the tenant's aggregate: the charges ledger is the tenant's billing history, and
 	// it does not come back. It changes no other tenant's rows.
 	//
 	// It also marks the tenant erased, so that a call made after it — a
@@ -2615,7 +2676,9 @@ type UsageHousekeeping interface {
 	// DeleteUsage drops the capability's row and the counters of its Biscuit
 	// copies. Called when the capability is reaped: on a capability still on
 	// record it restarts the capability's own counters, and its ceilings with
-	// them, from zero — PurgeOrphans drops only the rows of records gone. It releases the
+	// them, from zero, and removes its keyed bumps (BumpRequest.ExternalRef),
+	// whose pairs then count anew — PurgeOrphans drops only the rows of
+	// records gone, and keeps their keyed bumps for Bump to replay. It releases the
 	// capability's open reservations first,
 	// returning their holds to its ancestors and its tenant: nothing could
 	// settle or release them afterwards. A capability with no row is no
@@ -2666,7 +2729,7 @@ UsageStore is everything a consumer implements for runtime accounting. It is the
 
 ##### A call whose answer is lost
 
-A store over a database can lose the answer to a call after the call's commit has left: the connection drops, or the context ends, before the database replies. Such a call returns an error matching ErrOutcomeUnknown, beside its cause: it may have committed or not, and the store cannot tell. Only a call keyed to its cost is safe to send again — Charge with an ExternalRef, Reserve with a ReservationID, Refund with a RefundID, and Settle, keyed to its reservation: a repeat of one that committed replays it and moves nothing, and a repeat of one that did not commits it now. An unkeyed call sent again may count twice; one not sent again may never count. A store that commits in memory never returns it.
+A store over a database can lose the answer to a call after the call's commit has left: the connection drops, or the context ends, before the database replies. Such a call returns an error matching ErrOutcomeUnknown, beside its cause: it may have committed or not, and the store cannot tell. Only a call keyed to its cost is safe to send again — Charge with an ExternalRef, Bump with an ExternalRef, Reserve with a ReservationID, Refund with a RefundID, and Settle, keyed to its reservation: a repeat of one that committed replays it and moves nothing, and a repeat of one that did not commits it now. An unkeyed call sent again may count twice; one not sent again may never count. A store that commits in memory never returns it.
 
 ##### Growth from 1.0
 

@@ -119,12 +119,12 @@ func TestBumpRequestRejectsWithoutMutating(t *testing.T) {
 	id := uuid.New()
 
 	for i := int64(1); i <= 2; i++ {
-		r, err := u.Bump(ctx, meter.BumpRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: id, tenant: testTenant, requests: requestsOf(2)})})
+		r, err := u.Bump(ctx, meter.BumpRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: id, tenant: testTenant, requests: requestsOf(2)})}, nil)
 		if err != nil || r.RequestCount != i {
 			t.Fatalf("bump %d: n=%d err=%v", i, r.RequestCount, err)
 		}
 	}
-	n, err := u.Bump(ctx, meter.BumpRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: id, tenant: testTenant, requests: requestsOf(2)})})
+	n, err := u.Bump(ctx, meter.BumpRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: id, tenant: testTenant, requests: requestsOf(2)})}, nil)
 	if !errors.Is(err, limes.ErrRequestLimitExceeded) {
 		t.Fatalf("want ErrRequestLimitExceeded, got %v", err)
 	}
@@ -143,7 +143,7 @@ func TestBumpRequestUnlimited(t *testing.T) {
 	u := newTestUsage(newTestStore())
 	id := uuid.New()
 	for i := range 50 {
-		if _, err := u.Bump(ctx, meter.BumpRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: id, tenant: testTenant})}); err != nil {
+		if _, err := u.Bump(ctx, meter.BumpRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: id, tenant: testTenant})}, nil); err != nil {
 			t.Fatalf("unlimited bump %d: %v", i, err)
 		}
 	}

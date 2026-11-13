@@ -894,9 +894,9 @@ flowchart TB
     class e0,e1,e2,e3,e4,e5,e6,e7,e8,e9,e10,e11 external
 ```
 
-`Bump` takes the same order for requests: the erased-tenant check, the copy
-quota, the lease, then each copy's limit, the capability's and each
-ancestor's. A reservation keeps its copies' budgets, so `Settle` checks them
+`Bump` takes the same order for requests: the erased-tenant check, a
+replay under its `ExternalRef`, the copy quota, the lease, then each copy's
+limit, the capability's and each ancestor's, and `onBumped` last. A reservation keeps its copies' budgets, so `Settle` checks them
 without being handed them again; the subject settling must still carry the
 same copies.
 
@@ -980,7 +980,8 @@ capabilities (`pgstore`'s package documentation, Throughput) — with two
 exceptions: a tenant with no ceiling counts in 64 stripes, each call in its
 connection's, and locks no row (`Config.DisableTenantStripes` turns that off); and a
 charge under a lease locks the lease's counters, not the tenant's. `Bump`
-takes no tenant row. An `ExternalRef` is looked up again once the locks are
+takes no tenant row, and looks its `ExternalRef` up again with its
+counters' locks. An `ExternalRef` is looked up again once the locks are
 held, since a concurrent delivery may have committed in between; if one has,
 the call rolls back and returns that delivery's receipt. A call holds one
 connection, so a small pool serves as many calls at once as it has

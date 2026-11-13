@@ -113,7 +113,7 @@ if err != nil {
     return err // a refusal, e.g. limes.ErrResourceNotAllowed outside corpus/public/
 }
 subject := granted.MeterSubject()
-if _, err := usage.Bump(ctx, meter.BumpRequest{Subject: subject}); err != nil {
+if _, err := usage.Bump(ctx, meter.BumpRequest{Subject: subject}, nil); err != nil {
     return err // limes.ErrRequestLimitExceeded past the 500th request
 }
 if _, err := usage.Charge(ctx, meter.ChargeRequest{

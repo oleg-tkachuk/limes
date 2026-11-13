@@ -53,7 +53,7 @@ func (f fixture) leaseRequests(t *testing.T, l meter.Leaser, subject limes.Meter
 }
 
 func (f fixture) bump(subject limes.MeterSubject) error {
-	_, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: subject})
+	_, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: subject}, nil)
 	return err
 }
 
@@ -71,7 +71,7 @@ func checkRequestLeaseStopsBumpsAtTheLeaseholder(t *testing.T, f fixture) {
 		u := f.usageOf(t, id)
 		expect.That(t, u.ReservedRequests == requestLeased && u.RequestCount == 0, "%s once leased = %+v, want %d requests held", id, u, requestLeased)
 	}
-	r, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: child})
+	r, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: child}, nil)
 	expect.Must(t, err == nil && r.RequestCount == 1, "Bump under the lease = %+v, %v; want the child's first", r, err)
 	cu, ru := f.usageOf(t, c.child), f.usageOf(t, c.root)
 	expect.That(t, cu.RequestCount == 1 && cu.ReservedRequests == requestLeased-1, "the child after a bump under its lease = %+v, want 1 made and %d held", cu, requestLeased-1)

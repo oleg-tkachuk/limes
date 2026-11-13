@@ -59,10 +59,12 @@ var (
 
 // ErrExternalRefConflict — Charge named an ExternalRef its capability already
 // charged under, for a different amount, unit or tenant, or under other
-// Biscuit copies. One reference names one cost; replaying the first receipt
-// would report the second as booked. The error names the reference, never
-// the charge it names. Matches limes.ErrConflict: the request is well formed, and
-// would have charged had the reference been free.
+// Biscuit copies; or Bump named one its capability already counted under,
+// for another tenant or under other Biscuit copies. One reference names one
+// cost, or one request; replaying the first receipt would report the second
+// as booked. The error names the reference, never the charge or the bump it
+// names. Matches limes.ErrConflict: the request is well formed, and would
+// have charged or counted had the reference been free.
 var ErrExternalRefConflict error = &familyError{"limes: external ref already names a different charge", limes.ErrConflict, CodeExternalRefConflict}
 
 // ErrSettleConflict — Settle named a reservation already settled, for a
@@ -90,8 +92,8 @@ var ErrRefundConflict error = &familyError{"limes: refund id already names a dif
 // connection failed, or the context ended, after the commit left and before
 // the database replied. The call may have committed or not. The error wraps
 // the cause beside it, so errors.Is matches both. Only a call keyed to its
-// cost can be sent again safely: Charge with an ExternalRef, Reserve with a
-// ReservationID, Refund with a RefundID, and Settle; a repeat of one that
+// cost can be sent again safely: Charge or Bump with an ExternalRef, Reserve
+// with a ReservationID, Refund with a RefundID, and Settle; a repeat of one that
 // committed replays it. Matches no family: it is no refusal, and the call is
 // neither wrong nor known to have failed.
 var ErrOutcomeUnknown error = &familyError{"limes: the store lost the answer to the call's commit", nil, CodeOutcomeUnknown}

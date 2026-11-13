@@ -9,9 +9,9 @@ import (
 // consumer removing the tenant. It is optional; metertest checks a
 // UsageStore that implements it.
 type TenantUsageEraser interface {
-	// EraseTenantUsage removes every counter, hold and charge of the
-	// tenant's capabilities and its Biscuit copies, and the tenant's
-	// aggregate: the charges ledger is the tenant's billing history, and
+	// EraseTenantUsage removes every counter, hold, charge and keyed bump
+	// (BumpRequest.ExternalRef) of the tenant's capabilities and its Biscuit
+	// copies, and the tenant's aggregate: the charges ledger is the tenant's billing history, and
 	// it does not come back. It changes no other tenant's rows.
 	//
 	// It also marks the tenant erased, so that a call made after it — a

@@ -102,7 +102,7 @@ func TestChildrenCannotExceedTheirParentsRequestCount(t *testing.T) {
 		limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Max: 3}},
 	)
 	bump := func(id uuid.UUID) error {
-		_, err := u.Bump(ctx, meter.BumpRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: id, tenant: tenant, requests: requestsOf(3)})})
+		_, err := u.Bump(ctx, meter.BumpRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: id, tenant: tenant, requests: requestsOf(3)})}, nil)
 		return err
 	}
 	for i, id := range []uuid.UUID{kids[0], kids[0], kids[1]} {

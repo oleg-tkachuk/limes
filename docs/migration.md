@@ -70,6 +70,34 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## v0.185.0
+
+- `meter.RequestCounter.Bump` takes a callback, as `Charge` does:
+  `Bump(ctx, req, onBumped func(ctx context.Context, b meter.Bumped)
+  error)`. It runs inside the bump, atomically with it, so a side effect
+  such as an outbox event commits with the count or not at all; its error
+  counts nothing and is returned. It runs on no replay. Pass `nil` where no
+  callback is needed, and a store of your own takes the parameter and runs
+  it as `meter.RequestCounter.Bump` describes, which `metertest` checks:
+
+  ```go
+  // before
+  receipt, err := usage.Bump(ctx, meter.BumpRequest{Subject: subject})
+  // after
+  receipt, err := usage.Bump(ctx, meter.BumpRequest{Subject: subject}, nil)
+  ```
+
+- `meter.BumpRequest` gains `ExternalRef`, validated as
+  `ChargeRequest.ExternalRef` is, and `meter.BumpReceipt` gains `Replayed`.
+  A bump under a reference already counted for its capability counts
+  nothing and returns the first receipt, `Replayed`; under another tenant
+  or Biscuit copies it is `meter.ErrExternalRefConflict`. A store of your
+  own keeps the pair at least `meter.MinChargeRetention`, removes it in
+  `PurgeCharges` past its retention — charges first, then bumps, within one
+  `Limit` that `Purged` counts together — in `EraseTenantUsage` with the
+  tenant and in `DeleteUsage` with the capability, and keeps it through
+  `PurgeOrphans`.
+
 ## pgstore/v0.81.0
 
 - A `ListTenantReservations` cursor whose time falls outside the years 1

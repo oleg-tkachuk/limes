@@ -50,6 +50,9 @@
 // stores of different kinds. That is what keeps this package free of any
 // database dependency.
 //
+// Meter.Bump takes onBumped, and Meter.Refund onRefunded, which run inside
+// the bump and the refund on the same terms, receiving Bumped and Refunded.
+//
 // A store with no transactions, such as memstore, hands onCharged the
 // caller's context. Everything else behaves identically; only the
 // atomic-side-effect guarantee is forgone, and that limitation is

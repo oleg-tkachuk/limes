@@ -73,9 +73,12 @@ func (e Env) counterEnv() CounterEnv {
 // whole subtree, a chain at the deepest delegation, a Biscuit copy's
 // ceiling unless the CounterEnv sets NoCopies, a refusal that counts nothing, concurrent bumps at a ceiling,
 // siblings' at their root's among them, the zero ceiling and subject, a
-// capability not on record, and, where the
-// CounterEnv enables them, an ancestor removed, another tenant's scope and a
-// read-only one.
+// capability not on record, a bump under an ExternalRef — counted once,
+// concurrently too, replayed once its capability is gone, conflicting
+// under another tenant or copy, refused when malformed — and onBumped —
+// handed the receipt, its error counting nothing, run by no replay — and,
+// where the CounterEnv enables them, an ancestor removed, another tenant's
+// scope and a read-only one.
 //
 // Run runs these checks too, on its Env's store.
 func RunCounter(t *testing.T, setup func(t *testing.T) CounterEnv) {
@@ -94,6 +97,14 @@ func RunCounter(t *testing.T, setup func(t *testing.T) CounterEnv) {
 		{Name: "AnAncestorNoLongerOnRecordBoundsNothing", Run: checkCounterAncestorRemoved},
 		{Name: "ACallScopedToAnotherTenantIsRefused", Run: checkCounterScopeMismatch},
 		{Name: "AReadOnlyScopeCountsNothing", Run: checkCounterReadOnly},
+		{Name: "AKeyedBumpCountsOnce", Run: checkCounterKeyedBumpCountsOnce},
+		{Name: "AnExternalRefNamesOneRequest", Run: checkCounterExternalRefNamesOneRequest},
+		{Name: "AFailedBumpCallbackCountsNothing", Run: checkCounterFailedBumpCallbackCountsNothing},
+		{Name: "TheBumpCallbackSeesTheReceipt", Run: checkCounterBumpCallbackSeesTheReceipt},
+		{Name: "AReplayedBumpRunsNoCallback", Run: checkCounterReplayedBumpRunsNoCallback},
+		{Name: "AnInvalidExternalRefIsRefused", Run: checkCounterInvalidExternalRefIsRefused},
+		{Name: "AKeyedBumpReplaysOnceItsCapabilityIsGone", Run: checkCounterKeyedBumpReplaysOnceItsCapabilityIsGone},
+		{Name: "AKeyedBumpCountsOnceConcurrently", Run: checkCounterKeyedBumpsCountOnceConcurrently},
 	}
 	watchdog.RunChecks(t, setup, func(e CounterEnv) time.Duration { return e.CheckTimeout }, checks)
 }
@@ -120,7 +131,7 @@ func (e CounterEnv) bump(ctx context.Context, spec subjectSpec) (int64, error) {
 	if spec.tenant == uuid.Nil() {
 		spec.tenant = e.Tenant
 	}
-	r, err := e.Counter.Bump(ctx, meter.BumpRequest{Subject: newSubject(spec)})
+	r, err := e.Counter.Bump(ctx, meter.BumpRequest{Subject: newSubject(spec)}, nil)
 	return r.RequestCount, err
 }
 
@@ -244,7 +255,7 @@ func checkCounterZeroCeiling(t *testing.T, e CounterEnv) {
 }
 
 func checkCounterZeroSubject(t *testing.T, e CounterEnv) {
-	_, err := e.Counter.Bump(e.Ctx, meter.BumpRequest{})
+	_, err := e.Counter.Bump(e.Ctx, meter.BumpRequest{}, nil)
 	expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "Bump of the zero subject: err = %v, want ErrInvalidRequest", err)
 }
 
@@ -303,8 +314,10 @@ func checkCounterReadOnly(t *testing.T, e CounterEnv) {
 		t.Skip("CounterEnv.ReadOnlyCtx not set")
 	}
 	id := e.record(t, uuid.Nil(), unlimitedRequests)
-	_, err := e.bump(e.ReadOnlyCtx, subjectSpec{capID: id})
+	ran := false
+	_, err := e.keyedBump(e.ReadOnlyCtx, subjectSpec{capID: id}, bumpRef, func(context.Context, meter.Bumped) error { ran = true; return nil })
 	expect.That(t, errors.Is(err, limes.ErrScopeMismatch), "a bump under a read-only scope: err = %v, want ErrScopeMismatch", err)
-	n, err := e.bump(e.Ctx, subjectSpec{capID: id})
-	admitted(t, "a bump after one refused as read-only", n, err, 1)
+	expect.That(t, !ran, "a bump refused as read-only ran onBumped")
+	r, err := e.keyedBump(e.Ctx, subjectSpec{capID: id}, bumpRef, nil)
+	counted(t, "the ref after a bump of it refused as read-only", r, err, 1)
 }

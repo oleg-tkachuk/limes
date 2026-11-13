@@ -122,11 +122,11 @@ type copyBlind struct{ meter.RequestCounter }
 // errCopiesUnseen is copyBlind's refusal of a subject with copies.
 var errCopiesUnseen = errors.New("this store counts no Biscuit copy")
 
-func (c copyBlind) Bump(ctx context.Context, req meter.BumpRequest) (meter.BumpReceipt, error) {
+func (c copyBlind) Bump(ctx context.Context, req meter.BumpRequest, onBumped func(context.Context, meter.Bumped) error) (meter.BumpReceipt, error) {
 	if len(req.Subject.Copies()) > 0 {
 		return meter.BumpReceipt{}, errCopiesUnseen
 	}
-	return c.RequestCounter.Bump(ctx, req)
+	return c.RequestCounter.Bump(ctx, req, onBumped)
 }
 
 // A store that sees no Biscuit copy passes RunCounter with NoCopies set: no

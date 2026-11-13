@@ -1208,7 +1208,7 @@ NewLedger returns the ledger reader of usage.
 func (l *Ledger) PurgeCharges(_ context.Context, req meter.PurgeChargesRequest) (meter.PurgeChargesResult, error)
 ```
 
-PurgeCharges implements meter.LedgerHousekeeping: the charges taken more than req.Retention() ago by the store's clock, oldest first, at most the batch's limit, leave the ledger and its indexes.
+PurgeCharges implements meter.LedgerHousekeeping: the charges taken more than req.Retention() ago by the store's clock, oldest first, at most the batch's limit, leave the ledger and its indexes, and then, within what is left of the limit, the keyed bumps counted as long ago, oldest first.
 
 <sub>[memstore/ledger.go](../../memstore/ledger.go)</sub>
 <a id="memstore.Ledger.SumCharges"></a>
@@ -1447,10 +1447,10 @@ NewUsageStore returns an empty usage store.
 #### memstore.UsageStore.Bump
 
 ```go
-func (s *UsageStore) Bump(_ context.Context, req meter.BumpRequest) (meter.BumpReceipt, error)
+func (s *UsageStore) Bump(ctx context.Context, req meter.BumpRequest, onBumped func(ctx context.Context, b meter.Bumped) error) (meter.BumpReceipt, error)
 ```
 
-Bump returns limes.ErrRequestLimitExceeded WITHOUT mutating when the increment would cross a copy's ceiling, the capability's or any ancestor's. A rejected call must be safe to retry.
+Bump returns limes.ErrRequestLimitExceeded WITHOUT mutating when the increment would cross a copy's ceiling, the capability's or any ancestor's. A rejected call must be safe to retry. onBumped runs on the caller's context, once every ceiling has passed and before anything is counted, as Charge runs onCharged.
 
 <sub>[memstore/memstore.go](../../memstore/memstore.go)</sub>
 <a id="memstore.UsageStore.Charge"></a>
@@ -1500,7 +1500,7 @@ CopyUsage implements meter.CopyUsageReader.
 func (s *UsageStore) DeleteUsage(_ context.Context, req meter.DeleteUsageRequest) error
 ```
 
-DeleteUsage drops the capability's counters and its copies' counters, first releasing its holds and settling the leases of it and of those below it: nothing could settle or release them once it is gone, and they would keep counting against its ancestors and its tenant.
+DeleteUsage drops the capability's counters, its copies' counters and its keyed bumps, first releasing its holds and settling the leases of it and of those below it: nothing could settle or release them once it is gone, and they would keep counting against its ancestors and its tenant.
 
 <sub>[memstore/memstore.go](../../memstore/memstore.go)</sub>
 <a id="memstore.UsageStore.EraseTenantUsage"></a>
@@ -1511,7 +1511,7 @@ DeleteUsage drops the capability's counters and its copies' counters, first rele
 func (s *UsageStore) EraseTenantUsage(_ context.Context, req meter.EraseTenantUsageRequest) (meter.EraseTenantUsageResult, error)
 ```
 
-EraseTenantUsage implements meter.TenantUsageEraser: it drops the tenant's holds, leases, counters, copies' counters, ledger entries and aggregate, counts what it dropped, and marks the tenant erased on the Records store.
+EraseTenantUsage implements meter.TenantUsageEraser: it drops the tenant's holds, leases, counters, copies' counters, ledger entries, keyed bumps and aggregate, counts what it dropped, and marks the tenant erased on the Records store.
 
 <sub>[memstore/memstore.go](../../memstore/memstore.go)</sub>
 <a id="memstore.UsageStore.GetCharge"></a>

@@ -270,12 +270,19 @@ func (s *UsageStore) leaseFor(capID uuid.UUID, ancestors []limes.Capability, cov
 	return lease{}, 0, false
 }
 
-// bumpLeasedLocked counts one request of subject under l: on the
+// bumpLeasedLocked counts one request of req's subject under l: on the
 // capability and the ancestors below the leaseholder as a bump does, on
-// the leaseholder and the lease's balance, and on nothing above it. below
-// are the ancestors between the capability and the leaseholder. s.mu must
-// be held.
-func (s *UsageStore) bumpLeasedLocked(subject limes.MeterSubject, below []limes.Capability, l lease) (meter.BumpReceipt, error) {
+// the leaseholder and the lease's balance, and on nothing above it,
+// onBumped run before anything is counted. below are the ancestors between
+// the capability and the leaseholder. s.mu must be held.
+func (s *UsageStore) bumpLeasedLocked(
+	ctx context.Context,
+	req meter.BumpRequest,
+	below []limes.Capability,
+	l lease,
+	onBumped func(context.Context, meter.Bumped) error,
+) (meter.BumpReceipt, error) {
+	subject := req.Subject
 	capID, tenantID := subject.CapabilityID(), subject.TenantID()
 	held := capID == l.capID
 	count := s.usage[capID].RequestCount
@@ -288,6 +295,10 @@ func (s *UsageStore) bumpLeasedLocked(subject limes.MeterSubject, below []limes.
 	}
 	if l.requestsSpent >= l.requests {
 		return meter.BumpReceipt{RequestCount: count}, fmt.Errorf("%w: %d of %d made", meter.ErrLeaseRequestsExhausted, l.requestsSpent, l.requests)
+	}
+	receipt := meter.BumpReceipt{RequestCount: count + 1}
+	if err := runBumped(ctx, onBumped, receipt); err != nil {
+		return meter.BumpReceipt{RequestCount: count}, err
 	}
 	unit := subject.UnitCode()
 	ids := append([]uuid.UUID{capID}, ancestorIDs(below)...)
@@ -306,7 +317,8 @@ func (s *UsageStore) bumpLeasedLocked(subject limes.MeterSubject, below []limes.
 	s.putUsageLocked(l.capID, tenantID, hu)
 	l.requestsSpent++
 	s.leases[l.capID] = l
-	return meter.BumpReceipt{RequestCount: count + 1}, nil
+	s.keepBumpLocked(req, receipt)
+	return receipt, nil
 }
 
 // chargeLeasedLocked charges req under l: the capability and the ancestors
