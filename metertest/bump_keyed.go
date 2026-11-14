@@ -71,7 +71,9 @@ const conflictCopyRequests = 1
 
 // An ExternalRef names one request: sent again under a Biscuit copy, or for
 // another tenant, a bump is ErrExternalRefConflict, a conflict, and counts
-// nothing — on the capability, on its ancestors or on the copy.
+// nothing — on the capability, on its ancestors or on the copy. A store
+// that scopes tenants is also held to it under the other tenant's own
+// scope: it refuses the bump, never replaying the first tenant's receipt.
 func checkCounterExternalRefNamesOneRequest(t *testing.T, e CounterEnv) {
 	root := e.record(t, uuid.Nil(), limes.RequestCeiling{Max: counterRequestLimit})
 	id := e.record(t, root, unlimitedRequests)
@@ -103,6 +105,10 @@ func checkCounterExternalRefNamesOneRequest(t *testing.T, e CounterEnv) {
 		expect.That(t, !errors.Is(want, meter.ErrExternalRefConflict) || errors.Is(err, limes.ErrConflict), "the ref again %s: %v, want a conflict", name, err)
 		// The conflict says which ref, not whose the first bump was.
 		expect.That(t, err == nil || !strings.Contains(err.Error(), e.Tenant.String()), "the ref again %s: the error names the first bump's tenant: %v", name, err)
+	}
+	if e.ScopesTenants && e.TenantCtx != nil {
+		r, err := e.keyedBump(e.TenantCtx(other), subjectSpec{capID: id, tenant: other}, bumpRef, nil)
+		expect.That(t, err != nil && !r.Replayed, "the ref again under the other tenant's own scope = %+v, %v; want it refused, not the first tenant's receipt", r, err)
 	}
 	if e.NoCopies {
 		return

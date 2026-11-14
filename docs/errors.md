@@ -408,7 +408,7 @@ check of its mapping (`limestest.WithoutMeter`).
 | `usage_not_found` | 404 | `meter.ErrUsageNotFound` |  |  | The capability has no usage on record | `not_found` |
 | `tenant_budget_not_found` | 404 | `meter.ErrTenantBudgetNotFound` |  |  | The tenant has no budget on record | `not_found` |
 | `tenant_budget_version_mismatch` | 409 | `meter.ErrTenantBudgetVersionMismatch` |  |  | The tenant budget changed since it was read | `conflict` |
-| `external_ref_conflict` | 409 | `meter.ErrExternalRefConflict` |  |  | The external reference names another charge | `conflict` |
+| `external_ref_conflict` | 409 | `meter.ErrExternalRefConflict` |  |  | The external reference names another charge or bump | `conflict` |
 | `settle_conflict` | 409 | `meter.ErrSettleConflict` |  |  | The reservation was settled for another amount | `conflict` |
 | `reserve_conflict` | 409 | `meter.ErrReserveConflict` |  |  | The reservation id names another hold | `conflict` |
 | `refund_conflict` | 409 | `meter.ErrRefundConflict` |  |  | The refund id names another refund | `conflict` |

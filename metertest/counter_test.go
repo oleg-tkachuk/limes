@@ -45,6 +45,8 @@ type counter struct {
 	mu     sync.Mutex
 	// tenants are the tenants the store knows: its own and NewTenant's.
 	tenants map[uuid.UUID]bool
+	// own is the tenant the suite's own calls run for.
+	own uuid.UUID
 	// refs are the receipts faultRacesRefs replays, by capability and ref.
 	refs map[racedRef]meter.BumpReceipt
 }
@@ -74,6 +76,9 @@ const (
 	faultSkipsCallback    = "never runs the callback"
 	faultKeepsFailedBump  = "counts a bump whose callback failed"
 	faultCallsOnReplay    = "runs the callback on a replay"
+	// faultReplaysAcrossScopes is a scoping store answering another
+	// tenant's ref, under that tenant's own scope, with the first receipt.
+	faultReplaysAcrossScopes = "replays another tenant's ref under its scope"
 )
 
 func (c *counter) Bump(ctx context.Context, req meter.BumpRequest, onBumped func(context.Context, meter.Bumped) error) (meter.BumpReceipt, error) {
@@ -109,7 +114,8 @@ func (c *counter) Bump(ctx context.Context, req meter.BumpRequest, onBumped func
 	switch {
 	case failed != nil:
 		return r, failed
-	case c.fault == faultHidesRefConflict && errors.Is(err, meter.ErrExternalRefConflict):
+	case c.fault == faultHidesRefConflict && errors.Is(err, meter.ErrExternalRefConflict),
+		c.fault == faultReplaysAcrossScopes && c.inOtherScope(ctx) && errors.Is(err, meter.ErrExternalRefConflict):
 		return replayedReceipt(1), nil
 	case c.fault == faultCallsOnReplay && err == nil && r.Replayed && onBumped != nil:
 		return r, onBumped(ctx, meter.Bumped{Receipt: r})
@@ -180,6 +186,13 @@ func (c *counter) admitScope(ctx context.Context, req meter.BumpRequest) error {
 	return nil
 }
 
+// inOtherScope reports whether ctx is scoped to a tenant other than the
+// suite's own (TenantCtx of a NewTenant).
+func (c *counter) inOtherScope(ctx context.Context) bool {
+	tenant, ok := ctx.Value(scopeKey{}).(uuid.UUID)
+	return ok && tenant != c.own
+}
+
 // counterEnv is a CounterEnv over a fresh memstore, scoped when scoped,
 // with fault laid over its counter.
 func counterEnv(t *testing.T, scoped bool, fault string) metertest.CounterEnv {
@@ -193,7 +206,7 @@ func counterEnv(t *testing.T, scoped bool, fault string) metertest.CounterEnv {
 		t.Fatal(err)
 	}
 	tenant := uuid.New()
-	c := &counter{inner: usage, scoped: scoped, fault: fault, tenants: map[uuid.UUID]bool{tenant: true}, refs: map[racedRef]meter.BumpReceipt{}}
+	c := &counter{inner: usage, scoped: scoped, fault: fault, tenants: map[uuid.UUID]bool{tenant: true}, own: tenant, refs: map[racedRef]meter.BumpReceipt{}}
 	expiry := time.Now().Add(counterTTL)
 	env := metertest.CounterEnv{
 		Ctx:     context.WithValue(t.Context(), scopeKey{}, tenant),
@@ -258,22 +271,23 @@ func TestRunCounterFailsAFaultyCounter(t *testing.T) {
 }
 
 // scopedFaults are the faults of a scoping store.
-var scopedFaults = map[string]struct{}{faultIgnoresScope: {}, faultCountsRefused: {}}
+var scopedFaults = map[string]struct{}{faultIgnoresScope: {}, faultCountsRefused: {}, faultReplaysAcrossScopes: {}}
 
 // faultChecks is the check each fault must fail.
 func faultChecks() map[string]string {
 	return map[string]string{
-		faultMiscounts:        "BumpCountsUpToItsOwnCeiling",
-		faultMiscountsRefusal: "AZeroCeilingAllowsNothing",
-		faultHidesRefusal:     "BumpCountsUpToItsOwnCeiling",
-		faultIgnoresScope:     "ACallScopedToAnotherTenantIsRefused",
-		faultCountsRefused:    "AReadOnlyScopeCountsNothing",
-		faultForgetsRefs:      "AKeyedBumpCountsOnce",
-		faultHidesRefConflict: "AnExternalRefNamesOneRequest",
-		faultAcceptsAnyRef:    "AnInvalidExternalRefIsRefused",
-		faultRacesRefs:        "AKeyedBumpCountsOnceConcurrently",
-		faultSkipsCallback:    "TheBumpCallbackSeesTheReceipt",
-		faultKeepsFailedBump:  "AFailedBumpCallbackCountsNothing",
-		faultCallsOnReplay:    "AReplayedBumpRunsNoCallback",
+		faultMiscounts:           "BumpCountsUpToItsOwnCeiling",
+		faultMiscountsRefusal:    "AZeroCeilingAllowsNothing",
+		faultHidesRefusal:        "BumpCountsUpToItsOwnCeiling",
+		faultIgnoresScope:        "ACallScopedToAnotherTenantIsRefused",
+		faultCountsRefused:       "AReadOnlyScopeCountsNothing",
+		faultForgetsRefs:         "AKeyedBumpCountsOnce",
+		faultHidesRefConflict:    "AnExternalRefNamesOneRequest",
+		faultAcceptsAnyRef:       "AnInvalidExternalRefIsRefused",
+		faultRacesRefs:           "AKeyedBumpCountsOnceConcurrently",
+		faultSkipsCallback:       "TheBumpCallbackSeesTheReceipt",
+		faultKeepsFailedBump:     "AFailedBumpCallbackCountsNothing",
+		faultCallsOnReplay:       "AReplayedBumpRunsNoCallback",
+		faultReplaysAcrossScopes: "AnExternalRefNamesOneRequest",
 	}
 }

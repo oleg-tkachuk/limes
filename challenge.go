@@ -152,6 +152,12 @@ func (v *Verifier) ErrorResponse(ctx context.Context, err error, scheme AuthSche
 	resp := answer(r, kind, rule.reason)
 	resp.Problem.Code, _ = CodeOf(err)
 	resp.Problem.Category, _ = CategoryOf(err)
+	// A code with a status of its own, the refusal's, is answered with its
+	// own problem, as ProblemOf answers it: a meter conflict is typed by
+	// its code, not as the family's conflict.
+	if cr, ok := codeRuleFor(err); ok && cr.status == r.status {
+		resp.Problem = problemOfRule(cr)
+	}
 	if r.code == "" && !r.bare {
 		return resp
 	}
