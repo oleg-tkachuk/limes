@@ -351,9 +351,24 @@ func jktOf(tok jwt.Token) (string, error) {
 	return jkt, nil
 }
 
-// claimsOf is every claim of the token the policy may read.
+// claimsOf is every claim of the token the policy may read. The registered
+// claims jwx holds in types of its own — aud, exp, iat, nbf — are given as
+// the token's accessors read them, []string and time.Time, so a policy
+// names no jwx type.
 func claimsOf(tok jwt.Token) map[string]any {
 	claims := maps.Collect(tok.Claims())
+	if aud, ok := tok.Audience(); ok {
+		claims[jwt.AudienceKey] = aud
+	}
+	for key, read := range map[string]func() (time.Time, bool){
+		jwt.ExpirationKey: tok.Expiration,
+		jwt.IssuedAtKey:   tok.IssuedAt,
+		jwt.NotBeforeKey:  tok.NotBefore,
+	} {
+		if at, ok := read(); ok {
+			claims[key] = at
+		}
+	}
 	return claims
 }
 
