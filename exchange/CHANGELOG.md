@@ -2,6 +2,12 @@
 
 Every release of the exchange module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.25.5](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.25.4...exchange%2Fv0.25.5) (2026-11-14)
+
+### Bug Fixes
+
+* **exchange:** give a subject's registered claims as Go values again ([9e633bf](https://github.com/oleg-tkachuk/limes/commit/9e633bf97acfcb4703ff328dac79e36a30489ac2))
+
 ## [0.25.4](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.25.3...exchange%2Fv0.25.4) (2026-11-13)
 
 ### Dependencies
