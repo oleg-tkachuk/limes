@@ -2,6 +2,21 @@
 
 Every release of the exchange module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.26.0](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.25.5...exchange%2Fv0.26.0) (2026-11-14)
+
+### ⚠ BREAKING CHANGES
+
+* **exchange:** a subject token with a null or empty sub or jti, or a
+  payload that is not a JSON object, is exchange.ErrInvalidGrant.
+
+### Bug Fixes
+
+* **exchange:** refuse a subject token naming no one or carrying a nested JWS ([362bbeb](https://github.com/oleg-tkachuk/limes/commit/362bbeba4d201978fe062e2541dceae1f10152cc))
+
+### Dependencies
+
+* require limes v0.186.0
+
 ## [0.25.5](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.25.4...exchange%2Fv0.25.5) (2026-11-14)
 
 ### Bug Fixes

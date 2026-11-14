@@ -21,7 +21,7 @@ require (
 	github.com/jackc/pgx/v5 v5.12.0
 	github.com/jwx-go/jwkfetch/v4 v4.0.4
 	github.com/lestrrat-go/jwx/v4 v4.6.0
-	github.com/oleg-tkachuk/limes v0.185.0
+	github.com/oleg-tkachuk/limes v0.186.0
 	github.com/oleg-tkachuk/limes/exchange v0.1.1
 	github.com/oleg-tkachuk/limes/pgstore v0.29.3
 	github.com/testcontainers/testcontainers-go v0.45.0

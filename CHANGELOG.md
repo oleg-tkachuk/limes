@@ -2,6 +2,22 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.186.0](https://github.com/oleg-tkachuk/limes/compare/v0.185.0...v0.186.0) (2026-11-14)
+
+### ⚠ BREAKING CHANGES
+
+* **limes:** ErrorResponse's problem for the meter's conflict codes is
+  typed and titled by the code, as ProblemOf answers it.
+
+### Features
+
+* **metertest:** hold a scoping store to refusing another tenant's ref under its own scope ([f1434c2](https://github.com/oleg-tkachuk/limes/commit/f1434c29d9d67488436bf1589c40aff11833de26))
+
+### Bug Fixes
+
+* **limes:** answer a meter conflict as its own problem in ErrorResponse ([047773c](https://github.com/oleg-tkachuk/limes/commit/047773c6b85866e7a7bba59f59e2783062c7776e))
+* **limes:** keep the presented token's bound from wrapping ([94f3315](https://github.com/oleg-tkachuk/limes/commit/94f33158f943f247192773862d1412becd7a6bee))
+
 ## [0.185.0](https://github.com/oleg-tkachuk/limes/compare/v0.184.0...v0.185.0) (2026-11-13)
 
 ### ⚠ BREAKING CHANGES
