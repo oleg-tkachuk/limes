@@ -70,6 +70,14 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## exchange/v0.26.0
+
+- `jwtverify.Verifier` refuses, as `exchange.ErrInvalidGrant`, a subject
+  token whose `sub` or `jti` is null or empty, and one whose payload is not
+  a JSON object, such as a JWS signed inside another: such a token names no
+  user, or carries its claims past the checks of its own header. A token an
+  identity provider issues as RFC 9068 describes is unaffected.
+
 ## exchange/v0.25.5
 
 - `exchange/v0.25.4`, the move to jwx v4, changed what `Subject.Claims`

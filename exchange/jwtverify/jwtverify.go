@@ -7,6 +7,7 @@
 package jwtverify
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"maps"
@@ -197,6 +198,12 @@ func (v *Verifier) VerifySubject(ctx context.Context, token string) (exchange.Su
 	if err != nil || len(msg.Signatures()) != 1 {
 		return exchange.Subject{}, fmt.Errorf("%w: not a compact JWS", exchange.ErrInvalidGrant)
 	}
+	if !isJSONObject(msg.Payload()) {
+		// A payload that is itself a JWS, or anything but the claims set,
+		// would be unwrapped and verified a second time by jwt.ParseString
+		// under the outer header's key, past the typ and alg checked here.
+		return exchange.Subject{}, fmt.Errorf("%w: the payload is not a JSON object", exchange.ErrInvalidGrant)
+	}
 	headers := msg.Signatures()[0].ProtectedHeaders()
 	typ, _ := headers.Type()
 	if !slices.ContainsFunc(v.cfg.Types, func(t string) bool { return strings.EqualFold(t, typ) }) {
@@ -227,6 +234,8 @@ func (v *Verifier) VerifySubject(ctx context.Context, token string) (exchange.Su
 	opts := []jwt.ParseOption{
 		jwt.WithContext(ctx), jwt.WithKey(alg, key), jwt.WithIssuer(v.cfg.Issuer),
 		jwt.WithClock(jwt.ClockFunc(v.cfg.Now)), jwt.WithAcceptableSkew(v.cfg.ClockSkew),
+		// A string claim given as null is refused, not read as "".
+		jwt.WithStrictStringClaims(true),
 	}
 	for _, claim := range []string{claimIssuer, claimExpiry, claimAudience, claimSubject, v.cfg.ClientIDClaim, claimIssuedAt, claimJWTID} {
 		opts = append(opts, jwt.WithRequiredClaim(claim))
@@ -282,7 +291,18 @@ func checkKeyKind(key jwk.Key, kid string, alg jwa.SignatureAlgorithm) error {
 	return nil
 }
 
-// subjectOf is the Subject tok, a verified token, names.
+// jsonObjectOpen opens a JSON object, which an RFC 7519 claims set is.
+const jsonObjectOpen = '{'
+
+// isJSONObject reports whether payload, white space aside, opens a JSON
+// object; the claims parser checks the rest.
+func isJSONObject(payload []byte) bool {
+	trimmed := bytes.TrimSpace(payload)
+	return len(trimmed) > 0 && trimmed[0] == jsonObjectOpen
+}
+
+// subjectOf is the Subject tok, a verified token, names. Its sub and jti
+// name the user and the token: an empty one names neither, and is refused.
 func subjectOf(tok jwt.Token, clientIDClaim string) (exchange.Subject, error) {
 	s := exchange.Subject{}
 	s.Issuer, _ = tok.Issuer()
@@ -291,6 +311,11 @@ func subjectOf(tok jwt.Token, clientIDClaim string) (exchange.Subject, error) {
 	s.ID, _ = tok.JwtID()
 	s.IssuedAt, _ = tok.IssuedAt()
 	s.ExpiresAt, _ = tok.Expiration()
+	for claim, value := range map[string]string{claimSubject: s.Subject, claimJWTID: s.ID} {
+		if value == "" {
+			return exchange.Subject{}, fmt.Errorf("%w: %s is empty", exchange.ErrInvalidGrant, claim)
+		}
+	}
 	var err error
 	if s.ClientID, err = jwt.Get[string](tok, clientIDClaim); err != nil || s.ClientID == "" {
 		return exchange.Subject{}, fmt.Errorf("%w: %s is not a non-empty string", exchange.ErrInvalidGrant, clientIDClaim)
