@@ -156,29 +156,24 @@ whose counters drift fails it.
 - Commit subjects follow
   [Conventional Commits](https://www.conventionalcommits.org): the release
   is computed from them (`feat` a minor; `fix`, `perf` and `security` a
-  patch; before 1.0, a breaking change a minor), so a non-conforming
-  subject releases nothing.
+  patch), so a non-conforming subject releases nothing.
 - Each module's `CHANGELOG.md` is written from its releases' notes: the
   release pull request adds each module's entry, and CI holds every entry
   to a release tag (`.github/ci/changelog.ts`). Nobody edits a changelog
   by hand.
-- A change that breaks the Go API is marked breaking — `type!:` or a
-  `BREAKING CHANGE:` footer — in one of its commits. CI's **API
+- Every module's API is stable from 1.0.0
+  ([docs/compatibility.md](../docs/compatibility.md)). CI's **API
   compatibility** job compares the pull request's API with its base using
-  apidiff and fails an unmarked break. CI's **Breaking markers** job fails
-  a change to the error codes or the defaults that no commit marks. No
-  job sees a break of behaviour: a call answered with another code than
-  before, a fix among them, or one refused that was accepted, or the other
-  way round, though its signature holds
-  ([docs/compatibility.md](../docs/compatibility.md)). Its author marks
-  it, as for any other break. Before
-  1.0.0 a marked change also adds its entry to
-  [docs/migration.md](../docs/migration.md) — what each name was and what
-  it is — and **Breaking markers** fails one that leaves that file alone.
-  From 1.0.0 on, **API compatibility** fails every break, and **Breaking
-  markers** fails any commit marked breaking, documentation-only ones
-  included, since the release would tag a v2 the Go proxy ignores. A v2 is
-  a new module path, planned on its own.
+  apidiff and fails any incompatible change. CI's **Breaking markers** job
+  fails any commit marked breaking (`type!:` or a `BREAKING CHANGE:`
+  footer), documentation-only ones included, and any change to an error
+  code's answer or to a default, since the release would tag a v2 the Go
+  proxy ignores. A v2 is a new module path, planned on its own. No job sees
+  a break of behaviour: a call answered with another code than before, a
+  fix among them, or one refused that was accepted, or the other way round,
+  though its signature holds
+  ([docs/compatibility.md](../docs/compatibility.md)). It is a break all
+  the same, and waits for a v2 like any other.
 - New behaviour comes with a test; a bug fix with a test that reproduced
   it.
 - A change to the token wire format regenerates the golden fixtures in

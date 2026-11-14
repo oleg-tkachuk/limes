@@ -33,10 +33,13 @@
 // one commit raises every nested module's requirement at once, so its scope
 // is LIMES_REQUIREMENT_SCOPE, a patch of each nested module: module-commits.cjs
 // hands it only to those whose directory it changes.
-// Every module is pre-1.0, where a breaking change is a minor; that rule goes
-// from a module's own rules when it reaches 1.0. release-rules.test.mjs and
-// release-notes.test.mjs pin all of it. major-guard.cjs refuses a major the
-// module path does not carry, whatever marker cut it.
+// Every module is on its v1 line, where a breaking change is a major: the
+// marker and API checks (.github/ci/release-checks.ts) keep one off the line,
+// and major-guard.cjs refuses a major the module path does not carry,
+// whatever marker cut it — a v2 is a module path move. A module added later
+// starts before 1.0, with BREAKING_IS_A_MINOR_BEFORE_1_0 in its own rules
+// until it reaches 1.0. release-rules.test.mjs and release-notes.test.mjs
+// pin all of it.
 
 const PRESET = "conventionalcommits";
 const SECURITY_IS_A_PATCH = { type: "security", release: "patch" };
@@ -107,7 +110,7 @@ function buildIsListed(name) {
 
 // nestedRules are the release rules of the nested module name.
 function nestedRules(name) {
-  return [SECURITY_IS_A_PATCH, BREAKING_IS_A_MINOR_BEFORE_1_0, buildIsAPatch(name), ...REQUIREMENT_SCOPES.map(buildIsAPatch)];
+  return [SECURITY_IS_A_PATCH, buildIsAPatch(name), ...REQUIREMENT_SCOPES.map(buildIsAPatch)];
 }
 
 // The variable that picks the module to release, and the one picked without it.
@@ -129,7 +132,6 @@ const MODULES = {
     dir: "",
     releaseRules: [
       SECURITY_IS_A_PATCH,
-      BREAKING_IS_A_MINOR_BEFORE_1_0,
       PGSTORE_RELEASES_NOTHING,
       REDISREPLAY_RELEASES_NOTHING,
       OTELMETRIC_RELEASES_NOTHING,
@@ -199,7 +201,7 @@ function configFor(name) {
 }
 
 // breaksAreMinor reports whether the module name still releases a breaking
-// change as a minor, as every module does before 1.0. The checks of breaking
+// change as a minor, as a module does before 1.0. The checks of breaking
 // markers and of the API ask it rather than read the rules themselves.
 function breaksAreMinor(name) {
   return configFor(name).analyzer.releaseRules.includes(BREAKING_IS_A_MINOR_BEFORE_1_0);

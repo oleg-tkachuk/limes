@@ -214,9 +214,10 @@ cuts a minor; `fix`, `perf` and `security` a patch; a nested module's own
 `build` commit, such as `build(pgstore): bump pgx`, a patch of it. A commit
 scoped to a nested module never releases limes, breaking or not.
 
-Every module is pre-1.0, so a breaking change cuts a minor too: **the Go API
-may change between minor versions**. Read the release notes, which list
-breaking changes first, before bumping. Each module's `CHANGELOG.md` holds
+From 1.0.0 every module's API is stable
+([compatibility.md](docs/compatibility.md)): no change on the v1 line breaks a
+caller, and CI refuses one that would. A breaking change would be a v2 under
+its own module path. Each module's `CHANGELOG.md` holds
 them: [CHANGELOG.md](CHANGELOG.md) for limes, `<module>/CHANGELOG.md` for a
 nested one.
 
@@ -242,10 +243,9 @@ pseudo-version (`v1.0.0-rc.N.0.…-<commit>`) before it settles.
 
 Run by hand on the `prerelease` channel, the Release workflow tags a release
 candidate, `vX.Y.Z-rc.N`, of what the next release would be. With
-`next_major`, it tags a candidate of limes 1.0, `v1.0.0-rc.N`, from `main` as
-it is; while that line is open, a candidate also follows every release of
-limes. limes stays on 0.x on `main` until the release that cuts 1.0, so its
-API may still break between two candidates. Each candidate's
+`next_major`, it tagged the candidates of limes 1.0, `v1.0.0-rc.N`, while
+limes was on 0.x; on the v1 line there is no next major to cut a candidate
+of, a v2 being a new module path. Each candidate's
 [GitHub release](https://github.com/oleg-tkachuk/limes/releases?q=v1.0.0-rc&expanded=true)
 names the 0.x release whose API it carries and each nested module's release
 on `main` at that commit; [migration.md](docs/migration.md#release-candidates-of-10)
@@ -259,8 +259,8 @@ Go orders every `v1.0.0-rc.N` above every 0.x release, so it selects the
 candidate over the 0.x a nested module requires. Require a nested module's
 release only with a candidate at or above the one that names it.
 
-When limes reaches v1.0.0, every nested module still on 0.x reaches its own
-v1.0.0 with it; from then on no module breaks its v1 line
+The release that cut limes v1.0.0 took every nested module to its own
+v1.0.0 with it; no module breaks its v1 line
 ([compatibility.md](docs/compatibility.md)).
 
 The token wire format — claims, `typ: at+jwt` with `limes_v: 7`, the
