@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"math"
 	"net/netip"
 	"slices"
 	"strings"
@@ -483,13 +484,23 @@ func (v *Verifier) checkPresented(req VerifyRequest) error {
 	if req.PresentedToken == "" {
 		return nil
 	}
-	if limit := v.cfg.MaxTokenBytes + MaxEnvelopeBytes; len(req.PresentedToken) > limit {
+	if limit := presentedLimit(v.cfg.MaxTokenBytes); len(req.PresentedToken) > limit {
 		return fmt.Errorf("%w: presented token is %d bytes (limit %d)", ErrInvalidToken, len(req.PresentedToken), limit)
 	}
 	if !strings.Contains(req.PresentedToken, req.Token) {
 		return refuseRequest("VerifyRequest.PresentedToken does not hold Token")
 	}
 	return nil
+}
+
+// presentedLimit is how long a presented token may be: maxTokenBytes and
+// MaxEnvelopeBytes together, held at math.MaxInt for a bound so large the
+// sum would wrap negative and refuse every presented token.
+func presentedLimit(maxTokenBytes int) int {
+	if maxTokenBytes > math.MaxInt-MaxEnvelopeBytes {
+		return math.MaxInt
+	}
+	return maxTokenBytes + MaxEnvelopeBytes
 }
 
 // presented is the credential req's proof names: the presented token, or

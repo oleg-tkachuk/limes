@@ -8,6 +8,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"errors"
+	"math"
 	"net/netip"
 	"strings"
 	"testing"
@@ -438,5 +439,20 @@ func TestAPresentedBearerTokenChangesNothing(t *testing.T) {
 	req.PresentedToken = envelopePrefix
 	if _, err := verifier.Verify(ctx, req); !errors.Is(err, ErrInvalidRequest) {
 		t.Errorf("a presented token without the bearer token: %v, want ErrInvalidRequest", err)
+	}
+}
+
+// The presented token's bound is MaxTokenBytes and MaxEnvelopeBytes
+// together, and stays the largest int for a MaxTokenBytes so large the sum
+// would wrap.
+func TestThePresentedBoundDoesNotWrap(t *testing.T) {
+	for maxTokenBytes, want := range map[int]int{
+		DefaultMaxTokenBytes:           DefaultMaxTokenBytes + MaxEnvelopeBytes,
+		math.MaxInt - MaxEnvelopeBytes: math.MaxInt,
+		math.MaxInt:                    math.MaxInt,
+	} {
+		if got := presentedLimit(maxTokenBytes); got != want {
+			t.Errorf("presentedLimit(%d) = %d, want %d", maxTokenBytes, got, want)
+		}
 	}
 }
