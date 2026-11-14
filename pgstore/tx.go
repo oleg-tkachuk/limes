@@ -345,7 +345,7 @@ func (c *counters) writeThenCall(ctx context.Context, tx pgx.Tx, now time.Time, 
 		return call(callbackCtx)
 	}()
 	if err != nil {
-		return callbackFailure(tx, err)
+		return callbackFailure(ctx, tx, mark, err)
 	}
 	return endCallback(ctx, tx, mark, last)
 }
@@ -375,14 +375,36 @@ type deadlockOutside struct{ err error }
 func (d deadlockOutside) Error() string { return d.err.Error() }
 func (d deadlockOutside) Unwrap() error { return d.err }
 
-// callbackFailure is err, a callback's, as deadlockOutside when it is a
-// deadlock and the call's transaction is still open: PostgreSQL aborted
-// another transaction, not this one.
-func callbackFailure(tx pgx.Tx, err error) error {
-	if isDeadlock(err) && tx.Conn().PgConn().TxStatus() == txStatusInTransaction {
-		return deadlockOutside{err}
+// callbackFailure is err, a callback's, as the call answers it. A callback
+// that ended the call's transaction with SQL of its own before failing —
+// COMMIT, ROLLBACK, or either followed by BEGIN — committed or undid the
+// call's writes as that SQL had it, so the call fails as endCallback fails
+// it, ErrChargeTransaction and meter.ErrOutcomeUnknown, beside err: a plain
+// error would tell the caller nothing counted. A deadlock with the call's
+// transaction still the marked one is deadlockOutside: PostgreSQL aborted
+// another transaction, not this one. Neither is run again.
+func callbackFailure(ctx context.Context, tx pgx.Tx, mark string, err error) error {
+	switch tx.Conn().PgConn().TxStatus() {
+	case txStatusIdle:
+		return errs.Errorf("%w: %w: the callback ended it: %w", meter.ErrOutcomeUnknown, ErrChargeTransaction, deadlockOutside{err})
+	case txStatusInTransaction:
+		if !stillMarked(ctx, tx, mark) {
+			return errs.Errorf("%w: %w: the callback ended it and began another: %w", meter.ErrOutcomeUnknown, ErrChargeTransaction, deadlockOutside{err})
+		}
+		if isDeadlock(err) {
+			return deadlockOutside{err}
+		}
 	}
 	return err
+}
+
+// stillMarked reports whether the transaction is still the one marked mark
+// (sqlChargeStillOpen), false only when the check finds another: a check
+// that fails otherwise leaves the answer to the rollback that follows.
+func stillMarked(ctx context.Context, tx pgx.Tx, mark string) bool {
+	_, err := tx.Exec(ctx, sqlChargeStillOpen, mark)
+	pgErr := (*pgconn.PgError)(nil)
+	return !errors.As(err, &pgErr) || pgErr.Code != sqlStateDivisionByZero
 }
 
 // endCallback ends a call whose writes were sent, marked mark, before its

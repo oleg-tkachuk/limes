@@ -303,7 +303,8 @@ func (t *deferTx) Conn() *pgx.Conn {
 }
 
 // Commit commits: what is held back scopes nothing the transaction did, so
-// it is not sent. On a lent connection, a transaction never begun commits
+// it is not sent. A lent connection whose callback left the session under
+// another role is closed rather than given back, as on rollback. On a lent connection, a transaction never begun commits
 // nothing and sends nothing, and one whose COMMIT went with its last batch
 // sends nothing more and reports whether it committed.
 func (t *deferTx) Commit(ctx context.Context) error {
@@ -325,7 +326,12 @@ func (t *deferTx) Commit(ctx context.Context) error {
 		return nil
 	}
 	defer t.finish()
-	return t.Tx.Commit(ctx)
+	err := t.Tx.Commit(ctx)
+	if !t.keepsCallbackRole(ctx) {
+		t.discarded = true
+		err = errors.Join(err, t.lent.Close(ctx))
+	}
+	return err
 }
 
 // Rollback rolls back. On a lent connection it sends nothing for a
