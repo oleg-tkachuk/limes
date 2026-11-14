@@ -2,6 +2,19 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.83.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.82.0...pgstore%2Fv0.83.0) (2026-11-14)
+
+### ⚠ BREAKING CHANGES
+
+* **pgstore:** Erased.Tx refuses Commit and Rollback with
+  ErrChargeTransaction and its Conn is nil; a callback that ends the call's
+  transaction by SQL and then fails is ErrChargeTransaction and
+  meter.ErrOutcomeUnknown beside its error.
+
+### Bug Fixes
+
+* **pgstore:** hold a callback that ends the transaction to outcome unknown on every path ([f2a0d77](https://github.com/oleg-tkachuk/limes/commit/f2a0d777608368c712e343a18a1ba6929a082f7c))
+
 ## [0.82.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.81.0...pgstore%2Fv0.82.0) (2026-11-13)
 
 ### ⚠ BREAKING CHANGES
