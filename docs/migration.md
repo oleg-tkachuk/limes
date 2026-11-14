@@ -70,6 +70,39 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## exchange/v0.25.5
+
+- `exchange/v0.25.4`, the move to jwx v4, changed what `Subject.Claims`
+  holds for the registered claims jwx keeps in types of its own: `aud` was
+  a jwx `types.StringList` and `exp`, `iat` and `nbf` a `types.NumericDate`,
+  so a policy asserting `[]string` or `time.Time` failed on them. This
+  release gives them as `[]string` and `time.Time` again, as before
+  `v0.25.4`; nothing to change unless a policy was adapted to the jwx types.
+
+## pgstore/v0.83.0
+
+- `Erased.Tx`, the transaction `Store.EraseTenant` hands `onErased`, is
+  now the one `TxFrom` lends a charge's callback, and `TxFrom` reads it from
+  `onErased`'s context: its `Commit` and `Rollback` are
+  `ErrChargeTransaction` and its `Conn` is nil. An `onErased` that committed
+  or rolled back the erase through `Erased.Tx` must return instead: the
+  store ends the transaction. A lent connection committed under another
+  role than a callback found is closed, as one rolled back already was.
+
+  ```go
+  // before
+  return e.Tx.Commit(ctx)
+  // after
+  return nil
+  ```
+
+- A callback (`onCharged`, `onBumped`, `onRefunded`, `onErased`) that ends
+  the call's transaction with SQL of its own and then fails now fails the
+  call as `ErrChargeTransaction` and `meter.ErrOutcomeUnknown` beside its
+  own error, as one that returns nil already did: the call's writes may
+  have committed. It used to answer the callback's error alone, read as
+  nothing counted.
+
 ## pgstore/v0.82.0
 
 - `UsageStore.Bump` takes the `onBumped` callback of

@@ -5,12 +5,15 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"errors"
-	"github.com/oleg-tkachuk/limes/exchange"
 	"slices"
 	"testing"
+	"time"
+
+	"github.com/oleg-tkachuk/limes/exchange"
 
 	"github.com/lestrrat-go/jwx/v4/jwa"
 	"github.com/lestrrat-go/jwx/v4/jwk"
+	"github.com/lestrrat-go/jwx/v4/jwt"
 )
 
 // typJWT is the generic type some identity providers give their access
@@ -42,6 +45,23 @@ func TestVerifierReadsAnAccessToken(t *testing.T) {
 			!s.ExpiresAt.Equal(testNow.Add(subjectTTL)) || !s.IssuedAt.Equal(testNow) || s.JKT != "" || s.Claims[ClaimClientID] != idpClient {
 			t.Errorf("typ %s: subject %+v", typ, s)
 		}
+	}
+}
+
+// Subject.Claims gives the registered claims jwx holds in types of its own
+// as plain Go values: aud a []string, exp and iat a time.Time.
+func TestVerifierGivesRegisteredClaimsAsGoValues(t *testing.T) {
+	p := newIDP(t)
+	v := newVerifier(t, Config{Issuer: idpIssuer, Keys: staticKeys(t, p.keys), Now: clock})
+	s, err := v.VerifySubject(t.Context(), p.sign(t, TypeAccessToken, accessClaims()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	aud, audOK := s.Claims[jwt.AudienceKey].([]string)
+	exp, expOK := s.Claims[jwt.ExpirationKey].(time.Time)
+	iat, iatOK := s.Claims[jwt.IssuedAtKey].(time.Time)
+	if !audOK || !slices.Equal(aud, []string{mcpServer}) || !expOK || !exp.Equal(testNow.Add(subjectTTL)) || !iatOK || !iat.Equal(testNow) {
+		t.Errorf("claims aud %T %v, exp %T %v, iat %T %v; want []string and time.Time", s.Claims[jwt.AudienceKey], aud, s.Claims[jwt.ExpirationKey], exp, s.Claims[jwt.IssuedAtKey], iat)
 	}
 }
 

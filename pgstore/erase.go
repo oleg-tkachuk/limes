@@ -155,7 +155,9 @@ func (s *Store) EraseTenantRecords(ctx context.Context, req limes.EraseTenantReq
 // the tenant, in the transaction that erases it. Like the result it
 // carries, it does not compare, so a field added in 1.x breaks no caller.
 type Erased struct {
-	// Tx is the erase's transaction, scoped to the tenant.
+	// Tx is the erase's transaction, scoped to the tenant, as TxFrom lends
+	// it to a charge's callback: Commit and Rollback are ErrChargeTransaction
+	// and Conn is nil, the transaction being the store's to end.
 	Tx pgx.Tx
 	// Result is what the call returns once the transaction commits.
 	Result limes.EraseTenantResult
@@ -165,12 +167,14 @@ type Erased struct {
 // its usage, as UsageStore.EraseTenantUsage does, in one transaction, and
 // runs onErased in it last, so a consumer removes its own rows of the tenant
 // with them or not at all. An error from onErased rolls everything back.
-// Erased.Tx is the store's to commit, as the transaction TxFrom lends is:
-// an onErased that ended it with SQL of its own — COMMIT, ROLLBACK, or
+// Erased.Tx is the transaction TxFrom lends, which TxFrom also reads from
+// onErased's context, and the store's to commit: an onErased that ended it
+// with SQL of its own — COMMIT, ROLLBACK, or
 // either followed by BEGIN — has the call fail with ErrChargeTransaction
 // and meter.ErrOutcomeUnknown, the erase committed or undone as that SQL
 // had it; one that set the session's role has the call refused with
-// ErrChargeTransaction and rolled back, the role with it.
+// ErrChargeTransaction and rolled back, the role with it. An onErased that
+// ended it and then failed fails the call the same way, beside its error.
 func (s *Store) EraseTenant(ctx context.Context, req limes.EraseTenantRequest, onErased func(ctx context.Context, e Erased) error) (limes.EraseTenantResult, error) {
 	if err := req.Validate(); err != nil {
 		return limes.EraseTenantResult{}, err
@@ -199,8 +203,14 @@ func (s *Store) EraseTenant(ctx context.Context, req limes.EraseTenantRequest, o
 		if err := sendWrites(ctx, tx, []heldStmt{markCallback(tx, mark)}, false); err != nil {
 			return err
 		}
-		if err := onErased(ctx, Erased{Tx: tx, Result: out}); err != nil {
-			return err
+		callbackCtx, end := withTx(ctx, tx)
+		lent, _ := TxFrom(callbackCtx)
+		err = func() error {
+			defer end()
+			return onErased(callbackCtx, Erased{Tx: lent, Result: out})
+		}()
+		if err != nil {
+			return callbackFailure(ctx, tx, mark, err)
 		}
 		return endCallback(ctx, tx, mark, false)
 	})
