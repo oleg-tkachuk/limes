@@ -552,3 +552,18 @@ func TestARefusalsCodeIsAnsweredAsItsOwnRefusal(t *testing.T) {
 		t.Errorf("ErrorResponse(no_credentials in the budget's family) = %d %+v, want %d %+v", resp.Status, resp.Problem, want.Status, want)
 	}
 }
+
+// A meter conflict, a code with a 409 of its own in ErrConflict's family,
+// is answered by ErrorResponse with the problem ProblemOf gives it: typed
+// and titled by its code, not as the family's conflict.
+func TestAConflictsCodeIsTheSameProblemEitherWay(t *testing.T) {
+	v := &Verifier{}
+	for _, code := range []Code{CodeExternalRefConflict, CodeTenantBudgetVersionMismatch, CodeSettleConflict, CodeReserveConflict, CodeRefundConflict, CodeLeaseNested} {
+		err := coded{code, ErrConflict}
+		want, _ := ProblemOf(err)
+		resp := v.ErrorResponse(t.Context(), err, AuthSchemeBearer)
+		if g := resp.Problem; resp.Status != want.Status || g.Type != want.Type || g.Title != want.Title || g.Status != want.Status || g.Code != want.Code || g.Category != want.Category || g.Reason != want.Reason {
+			t.Errorf("%s: ErrorResponse = %d %+v, ProblemOf = %+v", code, resp.Status, resp.Problem, want)
+		}
+	}
+}

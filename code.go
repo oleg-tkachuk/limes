@@ -217,7 +217,7 @@ var meterCodeRules = []codeRule{
 	{nil, CodeUsageNotFound, http.StatusNotFound, "The capability has no usage on record", CategoryNotFound},
 	{nil, CodeTenantBudgetNotFound, http.StatusNotFound, "The tenant has no budget on record", CategoryNotFound},
 	{nil, CodeTenantBudgetVersionMismatch, http.StatusConflict, "The tenant budget changed since it was read", CategoryConflict},
-	{nil, CodeExternalRefConflict, http.StatusConflict, "The external reference names another charge", CategoryConflict},
+	{nil, CodeExternalRefConflict, http.StatusConflict, "The external reference names another charge or bump", CategoryConflict},
 	{nil, CodeSettleConflict, http.StatusConflict, "The reservation was settled for another amount", CategoryConflict},
 	{nil, CodeReserveConflict, http.StatusConflict, "The reservation id names another hold", CategoryConflict},
 	{nil, CodeRefundConflict, http.StatusConflict, "The refund id names another refund", CategoryConflict},

@@ -154,7 +154,7 @@
     "code": "external_ref_conflict",
     "status": 409,
     "category": "conflict",
-    "title": "The external reference names another charge",
+    "title": "The external reference names another charge or bump",
     "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#external_ref_conflict",
     "permanent": false
   },
