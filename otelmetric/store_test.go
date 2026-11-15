@@ -130,6 +130,44 @@ func TestMeteringCountsNoReplay(t *testing.T) {
 	}
 }
 
+// A keyed refund or reservation replayed moved nothing, so the decorator
+// counts it once: counting the replay would report the refund or the hold
+// twice.
+func TestMeteringCountsNoReplayedRefundOrReservation(t *testing.T) {
+	usage, reader, records := meteredStore(t)
+	ctx := context.Background()
+	subject := recordedSubject(ctx, t, records, subjectSpec{capID: uuid.New(), tenant: uuid.New()})
+	charged, err := usage.Charge(ctx, meter.ChargeRequest{Subject: subject, Amount: limes.MustParseAmount("2")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refund := meter.RefundRequest{ChargeID: charged.ChargeID, Amount: limes.MustParseAmount("1"), RefundID: uuid.New()}
+	reserve := meter.ReserveRequest{Subject: subject, Amount: limes.MustParseAmount("1"), ReservationID: uuid.New()}
+	for range 2 {
+		if _, err := usage.Refund(ctx, refund, nil); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := usage.Reserve(ctx, reserve); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := sum(points(t, reader, metricRefundAmount)); got != 1 {
+		t.Errorf("%v refunded, want 1: the replay refunded nothing", got)
+	}
+	if got := valueAt(points(t, reader, metricReservations), attrOutcome, "allowed"); got != 1 {
+		t.Errorf("%v reservations counted, want 1: the replay held nothing", got)
+	}
+}
+
+// sum is the total of ps's values.
+func sum(ps []point) float64 {
+	total := 0.0
+	for _, p := range ps {
+		total += p.value
+	}
+	return total
+}
+
 // A keyed bump replayed counted nothing, so the decorator counts it once;
 // and the callback reaches the wrapped store, which runs it once.
 func TestMeteringCountsNoReplayedBump(t *testing.T) {

@@ -20,7 +20,9 @@
 // on whichever counter the call it refused counts on — a Bump on
 // limes.request.bumps, a Charge or Settle on limes.charge.decisions, a
 // Reserve on limes.reservation.decisions — so an alert on every limit reads
-// all three, by limes.scope.
+// all three, by limes.scope. A keyed call replayed — a charge, settle,
+// bump, refund or reservation under an id already on record — moved
+// nothing and counts on none of them.
 //
 //	usage, err := otelmetric.Instrument(store,
 //		otelmetric.WithMeterProvider(provider), // default: the global provider

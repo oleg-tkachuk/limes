@@ -130,18 +130,23 @@ func (s *meteringStore) Charge(ctx context.Context, req meter.ChargeRequest, onC
 	return receipt, err
 }
 
-// Refund emits limes.refund.amount.
+// Refund emits limes.refund.amount. A replay returned nothing more, so it
+// counts nothing: counting it would report the refund twice.
 func (s *meteringStore) Refund(ctx context.Context, req meter.RefundRequest, onRefunded func(ctx context.Context, r meter.Refunded) error) (meter.RefundReceipt, error) {
 	r, err := s.inner.Refund(ctx, req, onRefunded)
-	if err == nil && r.Amount > 0 {
+	if err == nil && !r.Replayed && r.Amount > 0 {
 		s.in.recordRefund(ctx, r)
 	}
 	return r, err
 }
 
-// Reserve emits limes.reservation.decisions.
+// Reserve emits limes.reservation.decisions. A replay held nothing more, so
+// it counts nothing, as a replayed charge does not.
 func (s *meteringStore) Reserve(ctx context.Context, req meter.ReserveRequest) (meter.Reservation, error) {
 	r, err := s.inner.Reserve(ctx, req)
+	if err == nil && r.Replayed {
+		return r, nil
+	}
 	s.in.recordReservation(ctx, req.Subject.TenantID(), err)
 	return r, err
 }
