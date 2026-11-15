@@ -2,6 +2,12 @@
 
 Every release of the otelmetric module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.23.1](https://github.com/oleg-tkachuk/limes/compare/otelmetric%2Fv0.23.0...otelmetric%2Fv0.23.1) (2026-11-15)
+
+### Bug Fixes
+
+* **otelmetric:** count no replayed refund or reservation ([e930570](https://github.com/oleg-tkachuk/limes/commit/e930570060603c33094ad74b578332a965360810))
+
 ## [0.23.0](https://github.com/oleg-tkachuk/limes/compare/otelmetric%2Fv0.22.0...otelmetric%2Fv0.23.0) (2026-11-13)
 
 ### Features

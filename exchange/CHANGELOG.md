@@ -2,6 +2,12 @@
 
 Every release of the exchange module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.26.1](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.26.0...exchange%2Fv0.26.1) (2026-11-15)
+
+### Bug Fixes
+
+* **exchange:** keep a client's replay share apart from a capability's ([9f6c77b](https://github.com/oleg-tkachuk/limes/commit/9f6c77b11af4d8f60504eedf539d29e8c569c88e))
+
 ## [0.26.0](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.25.5...exchange%2Fv0.26.0) (2026-11-14)
 
 ### ⚠ BREAKING CHANGES
