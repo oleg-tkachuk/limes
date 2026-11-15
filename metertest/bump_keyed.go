@@ -110,11 +110,15 @@ func checkCounterExternalRefNamesOneRequest(t *testing.T, e CounterEnv) {
 		r, err := e.keyedBump(e.TenantCtx(other), subjectSpec{capID: id, tenant: other}, bumpRef, nil)
 		expect.That(t, err != nil && !r.Replayed, "the ref again under the other tenant's own scope = %+v, %v; want it refused, not the first tenant's receipt", r, err)
 	}
+	// Nothing the conflicts refused counted: the root's limit leaves room
+	// for exactly one more bump, under the copy or, for a store that counts
+	// no copy, on the capability.
+	after := subjectSpec{capID: id, copies: another}
 	if e.NoCopies {
-		return
+		after = subjectSpec{capID: id}
 	}
-	n, err := e.bump(e.Ctx, subjectSpec{capID: id, copies: another})
-	admitted(t, "a bump under the copy after the conflicts", n, err, counterRequestLimit)
+	n, err := e.bump(e.Ctx, after)
+	admitted(t, "a bump after the conflicts", n, err, counterRequestLimit)
 }
 
 // An error from onBumped is returned as it is and counts nothing: not on

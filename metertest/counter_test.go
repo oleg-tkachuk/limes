@@ -49,6 +49,9 @@ type counter struct {
 	own uuid.UUID
 	// refs are the receipts faultRacesRefs replays, by capability and ref.
 	refs map[racedRef]meter.BumpReceipt
+	// admitted is the last subject admitted for each capability, which
+	// faultCountsAcrossScopes counts again.
+	admitted map[uuid.UUID]limes.MeterSubject
 }
 
 // racedRef is a capability and a ref, as faultRacesRefs keeps them.
@@ -79,6 +82,9 @@ const (
 	// faultReplaysAcrossScopes is a scoping store answering another
 	// tenant's ref, under that tenant's own scope, with the first receipt.
 	faultReplaysAcrossScopes = "replays another tenant's ref under its scope"
+	// faultCountsAcrossScopes is a scoping store counting a bump of another
+	// tenant's ref, under that tenant's own scope, and then refusing it.
+	faultCountsAcrossScopes = "counts another tenant's ref under its scope and refuses it"
 )
 
 func (c *counter) Bump(ctx context.Context, req meter.BumpRequest, onBumped func(context.Context, meter.Bumped) error) (meter.BumpReceipt, error) {
@@ -111,7 +117,20 @@ func (c *counter) Bump(ctx context.Context, req meter.BumpRequest, onBumped func
 		onBumped = func(ctx context.Context, b meter.Bumped) error { failed = run(ctx, b); return nil }
 	}
 	r, err := c.inner.Bump(ctx, req, onBumped)
+	if err == nil {
+		c.mu.Lock()
+		c.admitted[req.Subject.CapabilityID()] = req.Subject
+		c.mu.Unlock()
+	}
 	switch {
+	case c.fault == faultCountsAcrossScopes && c.inOtherScope(ctx) && errors.Is(err, meter.ErrExternalRefConflict):
+		c.mu.Lock()
+		first, ok := c.admitted[req.Subject.CapabilityID()]
+		c.mu.Unlock()
+		if ok {
+			_, _ = c.inner.Bump(ctx, meter.BumpRequest{Subject: first}, nil)
+		}
+		return r, err
 	case failed != nil:
 		return r, failed
 	case c.fault == faultHidesRefConflict && errors.Is(err, meter.ErrExternalRefConflict),
@@ -206,7 +225,7 @@ func counterEnv(t *testing.T, scoped bool, fault string) metertest.CounterEnv {
 		t.Fatal(err)
 	}
 	tenant := uuid.New()
-	c := &counter{inner: usage, scoped: scoped, fault: fault, tenants: map[uuid.UUID]bool{tenant: true}, own: tenant, refs: map[racedRef]meter.BumpReceipt{}}
+	c := &counter{inner: usage, scoped: scoped, fault: fault, tenants: map[uuid.UUID]bool{tenant: true}, own: tenant, refs: map[racedRef]meter.BumpReceipt{}, admitted: map[uuid.UUID]limes.MeterSubject{}}
 	expiry := time.Now().Add(counterTTL)
 	env := metertest.CounterEnv{
 		Ctx:     context.WithValue(t.Context(), scopeKey{}, tenant),
@@ -221,6 +240,9 @@ func counterEnv(t *testing.T, scoped bool, fault string) metertest.CounterEnv {
 			return cap.ID, records.Insert(context.Background(), limes.InsertRequest{Capability: cap, IssuedBy: limes.Principal{Subject: "issuer"}})
 		},
 	}
+	// A store that counts no copy is held to the suite's checks without
+	// them: the faults it alone shows run so.
+	_, env.NoCopies = noCopyFaults[fault]
 	if scoped {
 		env.ScopesTenants = true
 		env.ReadOnlyCtx = context.WithValue(t.Context(), readOnlyKey{}, true)
@@ -271,7 +293,11 @@ func TestRunCounterFailsAFaultyCounter(t *testing.T) {
 }
 
 // scopedFaults are the faults of a scoping store.
-var scopedFaults = map[string]struct{}{faultIgnoresScope: {}, faultCountsRefused: {}, faultReplaysAcrossScopes: {}}
+var scopedFaults = map[string]struct{}{faultIgnoresScope: {}, faultCountsRefused: {}, faultReplaysAcrossScopes: {}, faultCountsAcrossScopes: {}}
+
+// noCopyFaults are the faults of a store that counts no Biscuit copy, where
+// no check under a copy can catch them.
+var noCopyFaults = map[string]struct{}{faultCountsAcrossScopes: {}}
 
 // faultChecks is the check each fault must fail.
 func faultChecks() map[string]string {
@@ -289,5 +315,6 @@ func faultChecks() map[string]string {
 		faultKeepsFailedBump:     "AFailedBumpCallbackCountsNothing",
 		faultCallsOnReplay:       "AReplayedBumpRunsNoCallback",
 		faultReplaysAcrossScopes: "AnExternalRefNamesOneRequest",
+		faultCountsAcrossScopes:  "AnExternalRefNamesOneRequest",
 	}
 }
