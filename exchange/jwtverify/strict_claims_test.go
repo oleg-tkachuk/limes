@@ -15,16 +15,22 @@ import (
 // jsonNull is a claim's value given as JSON null.
 var jsonNull = json.RawMessage("null")
 
-// A token whose sub or jti is null or empty names no user or no token, and
-// is refused rather than read as an empty name.
+// blankClaim is a claim's value of white space alone.
+const blankClaim = " \t "
+
+// A token whose sub, jti or client id is null, empty or white space alone
+// names no user, token or client, and is refused rather than read as a name.
 func TestVerifierRefusesAnEmptySubjectOrID(t *testing.T) {
 	p := newIDP(t)
 	v := newVerifier(t, Config{Issuer: idpIssuer, Keys: staticKeys(t, p.keys), Now: clock})
 	for name, change := range map[string]map[string]any{
-		"sub null":  {claimSubject: jsonNull},
-		"sub empty": {claimSubject: ""},
-		"jti null":  {claimJWTID: jsonNull},
-		"jti empty": {claimJWTID: ""},
+		"sub null":        {claimSubject: jsonNull},
+		"sub empty":       {claimSubject: ""},
+		"sub blank":       {claimSubject: blankClaim},
+		"jti null":        {claimJWTID: jsonNull},
+		"jti empty":       {claimJWTID: ""},
+		"jti blank":       {claimJWTID: blankClaim},
+		"client id blank": {ClaimClientID: blankClaim},
 	} {
 		if s, err := v.VerifySubject(t.Context(), p.sign(t, TypeAccessToken, with(accessClaims(), change))); !errors.Is(err, exchange.ErrInvalidGrant) {
 			t.Errorf("%s: subject %+v, err %v; want ErrInvalidGrant", name, s, err)

@@ -70,6 +70,14 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## exchange/v0.27.0
+
+- `jwtverify.Verifier` refuses, as `exchange.ErrInvalidGrant`, a subject
+  token whose `sub`, `jti` or client id claim is white space alone, as it
+  already refused an empty one: such a value names no user, token or
+  client. A token an identity provider issues as RFC 9068 describes is
+  unaffected.
+
 ## pgstore/v0.84.0
 
 - A callback (`onCharged`, `onBumped`, `onRefunded`, `onErased`) that
