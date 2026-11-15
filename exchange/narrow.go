@@ -195,7 +195,7 @@ func (e *Exchanger) checkRebind(ctx context.Context, req NarrowRequest, parent l
 	if e.cfg.DPoP == nil {
 		return dpop.CheckedProof{}, false, fmt.Errorf("%w: this endpoint binds no capability to a key", dpop.ErrInvalid)
 	}
-	checked, err = e.cfg.DPoP.CheckTokenRequest(ctx, dpop.TokenRequest{Proof: req.DPoP, Holder: req.Client.ID})
+	checked, err = e.cfg.DPoP.CheckTokenRequest(ctx, dpop.TokenRequest{Proof: req.DPoP, Holder: replayHolder(req.Client)})
 	if err != nil {
 		return dpop.CheckedProof{}, false, err
 	}
