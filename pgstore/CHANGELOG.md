@@ -2,6 +2,17 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.84.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.83.0...pgstore%2Fv0.84.0) (2026-11-15)
+
+### ⚠ BREAKING CHANGES
+
+* **pgstore:** a callback that commits the call's transaction, begins another and leaves it failed, or whose call's context is cancelled after such a COMMIT, now fails the call as ErrChargeTransaction and meter.ErrOutcomeUnknown and is never run again.
+
+### Bug Fixes
+
+* **pgstore:** answer a callback that commits and leaves another transaction failed as outcome unknown ([9d5c5ac](https://github.com/oleg-tkachuk/limes/commit/9d5c5ac4173af76debadfde5c2f0ed00af0eefea))
+* **pgstore:** call the catalog's functions by their schema ([eb497e9](https://github.com/oleg-tkachuk/limes/commit/eb497e94221845cad4403189a96a110f9ddc8b66))
+
 ## [0.83.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.82.0...pgstore%2Fv0.83.0) (2026-11-14)
 
 ### ⚠ BREAKING CHANGES
