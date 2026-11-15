@@ -373,6 +373,16 @@ type ReplayCache interface {
 	// is refused rather than accepted unrecorded, and not as a replay. A
 	// cache that cannot answer — its store unreachable — returns another
 	// error, and Verify refuses the proof with it.
+	//
+	// An id is the proof's JKT and JTI. A cache may remember it across
+	// holders, as MemoryReplayCache does, or per Holder, as one that keeps a
+	// key per holder must: either refuses every replay that could gain
+	// anything. A resource request's proof names its access token (ath),
+	// and Check refuses it with any other token, and so any other holder,
+	// before the cache is asked. A token request's proof names no token: one
+	// replayed by another client is recorded apart there, and the token
+	// issued for it is bound to the proof's key, which that client cannot
+	// prove it holds.
 	Seen(ctx context.Context, e ReplayEntry) (bool, error)
 }
 
@@ -500,7 +510,10 @@ func (v *Verifier) Check(ctx context.Context, req Request) (CheckedProof, error)
 type TokenRequest struct {
 	Proof Proof
 	// Holder names whose share of the replay cache the proof counts
-	// against: the client the token endpoint authenticated. Required.
+	// against: the client the token endpoint authenticated, in a namespace
+	// apart from the capability ids Request.Holder names (exchange prefixes
+	// the client id), so that a client never shares a capability's share.
+	// Required.
 	Holder string
 }
 

@@ -579,6 +579,16 @@ type ReplayCache interface {
 	// is refused rather than accepted unrecorded, and not as a replay. A
 	// cache that cannot answer — its store unreachable — returns another
 	// error, and Verify refuses the proof with it.
+	//
+	// An id is the proof's JKT and JTI. A cache may remember it across
+	// holders, as MemoryReplayCache does, or per Holder, as one that keeps a
+	// key per holder must: either refuses every replay that could gain
+	// anything. A resource request's proof names its access token (ath),
+	// and Check refuses it with any other token, and so any other holder,
+	// before the cache is asked. A token request's proof names no token: one
+	// replayed by another client is recorded apart there, and the token
+	// issued for it is bound to the proof's key, which that client cannot
+	// prove it holds.
 	Seen(ctx context.Context, e ReplayEntry) (bool, error)
 }
 ```
@@ -656,7 +666,10 @@ SignRequest is the request a proof is signed for.
 type TokenRequest struct {
 	Proof Proof
 	// Holder names whose share of the replay cache the proof counts
-	// against: the client the token endpoint authenticated. Required.
+	// against: the client the token endpoint authenticated, in a namespace
+	// apart from the capability ids Request.Holder names (exchange prefixes
+	// the client id), so that a client never shares a capability's share.
+	// Required.
 	Holder string
 }
 ```
@@ -792,7 +805,7 @@ It is a module of its own so that limes itself never depends on a Redis client.
 
 Each holder has one sorted set, KeyPrefix followed by the holder, whose members are the proof ids recorded against it and whose scores are when they lapse. One call touches that one key, in one script, so a call is atomic and the cache works unchanged on Redis Cluster.
 
-Ids are remembered per holder, not across holders. That loses nothing: a proof names the access token it was made for (its \`ath\`), and dpop.Verifier.Verify refuses it with any other token before the cache is asked, so a captured proof cannot reach the cache under another holder.
+Ids are remembered per holder, not across holders, as dpop.ReplayCache allows. That loses nothing: a resource request's proof names the access token it was made for (its \`ath\`), and dpop.Verifier.Check refuses it with any other token before the cache is asked, so a captured proof cannot reach the cache under another holder. A token request's proof names no token, so one captured and replayed by another client is accepted here, where dpop.MemoryReplayCache would refuse it; the token issued for it is bound to the proof's key, which that client cannot prove it holds.
 
 #### Clocks
 
