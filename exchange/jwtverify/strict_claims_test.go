@@ -3,6 +3,7 @@ package jwtverify
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/lestrrat-go/jwx/v4/jwa"
@@ -52,5 +53,30 @@ func TestVerifierRefusesANestedJWS(t *testing.T) {
 	}
 	if _, err := v.VerifySubject(t.Context(), inner); err != nil {
 		t.Errorf("the inner token alone: %v", err)
+	}
+}
+
+// A token in the JWS JSON serialization is refused as not a compact JWS,
+// where the verifier says it is, not later by the claims parser.
+func TestVerifierRefusesAJSONSerializedJWS(t *testing.T) {
+	p := newIDP(t)
+	v := newVerifier(t, Config{Issuer: idpIssuer, Keys: staticKeys(t, p.keys), Now: clock})
+	payload, err := json.Marshal(accessClaims())
+	if err != nil {
+		t.Fatal(err)
+	}
+	headers := jws.NewHeaders()
+	for name, value := range map[string]any{jws.TypeKey: TypeAccessToken, jws.KeyIDKey: p.kid} {
+		if err := headers.Set(name, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	flattened, err := jws.Sign(payload, jws.WithJSON(), jws.WithKey(jwa.EdDSAEd25519(), p.key, jws.WithProtectedHeaders(headers)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = v.VerifySubject(t.Context(), string(flattened))
+	if !errors.Is(err, exchange.ErrInvalidGrant) || !strings.Contains(err.Error(), notCompact) {
+		t.Errorf("a JSON-serialized JWS: err %v; want ErrInvalidGrant, %q", err, notCompact)
 	}
 }

@@ -194,9 +194,9 @@ func setClockSkew(cfg *Config) error {
 // exchange.ErrInvalidGrant; keys it cannot get are another error, the
 // server's.
 func (v *Verifier) VerifySubject(ctx context.Context, token string) (exchange.Subject, error) {
-	msg, err := jws.ParseString(token)
+	msg, err := jws.ParseString(token, jws.WithCompact())
 	if err != nil || len(msg.Signatures()) != 1 {
-		return exchange.Subject{}, fmt.Errorf("%w: not a compact JWS", exchange.ErrInvalidGrant)
+		return exchange.Subject{}, fmt.Errorf("%w: %s", exchange.ErrInvalidGrant, notCompact)
 	}
 	if !isJSONObject(msg.Payload()) {
 		// A payload that is itself a JWS, or anything but the claims set,
@@ -293,6 +293,9 @@ func checkKeyKind(key jwk.Key, kid string, alg jwa.SignatureAlgorithm) error {
 
 // jsonObjectOpen opens a JSON object, which an RFC 7519 claims set is.
 const jsonObjectOpen = '{'
+
+// notCompact is why a token that is not one compact JWS is refused.
+const notCompact = "not a compact JWS"
 
 // isJSONObject reports whether payload, white space aside, opens a JSON
 // object; the claims parser checks the rest.
