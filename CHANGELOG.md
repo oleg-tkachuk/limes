@@ -2,6 +2,16 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.187.0](https://github.com/oleg-tkachuk/limes/compare/v0.186.0...v0.187.0) (2026-11-15)
+
+### Features
+
+* **storetest:** name the store calls a check's default limit is sized for ([d772774](https://github.com/oleg-tkachuk/limes/commit/d772774905a64f8371b87c49506f9f9bf8037142))
+
+### Bug Fixes
+
+* **storetest:** size each check's watchdog limit to the store calls it makes ([1ed774e](https://github.com/oleg-tkachuk/limes/commit/1ed774eb3196832c2cef44e118b1bccbd294d03c))
+
 ## [0.186.0](https://github.com/oleg-tkachuk/limes/compare/v0.185.0...v0.186.0) (2026-11-14)
 
 ### ⚠ BREAKING CHANGES
