@@ -809,7 +809,7 @@ Ids are remembered per holder, not across holders, as dpop.ReplayCache allows. T
 
 #### Clocks
 
-What is live is decided by Config.Now, the verifier's clock, which every call sends to the script. Redis's own clock only runs the key's TTL, a duration that collects a holder gone quiet; a server clock running ahead cannot drop a live id.
+What is live is decided by Config.Now, the verifier's clock, which every call sends to the script. Redis's own clock only runs the key's TTL, a duration that collects a holder gone quiet; a server clock that runs fast or slow by a constant offset cannot drop a live id. Redis stores that TTL as an instant on its own clock, though, so a step of the server's clock forward expires the key, and its live ids, early: keep the Redis servers on NTP, which slews rather than steps, as the verifiers.
 
 The verifiers' clocks must agree to within dpop.ReplayClockSkew. An id is kept until ReplayClockSkew past the last instant a verifier accepts its proof, and each call drops the ids that have lapsed by its own clock: a replica running further ahead than that drops an id while a replica behind it still accepts the proof, which can then be replayed there. Keep the replicas on NTP.
 
