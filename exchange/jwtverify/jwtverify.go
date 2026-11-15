@@ -194,9 +194,9 @@ func setClockSkew(cfg *Config) error {
 // exchange.ErrInvalidGrant; keys it cannot get are another error, the
 // server's.
 func (v *Verifier) VerifySubject(ctx context.Context, token string) (exchange.Subject, error) {
-	msg, err := jws.ParseString(token)
+	msg, err := jws.ParseString(token, jws.WithCompact())
 	if err != nil || len(msg.Signatures()) != 1 {
-		return exchange.Subject{}, fmt.Errorf("%w: not a compact JWS", exchange.ErrInvalidGrant)
+		return exchange.Subject{}, fmt.Errorf("%w: %s", exchange.ErrInvalidGrant, notCompact)
 	}
 	if !isJSONObject(msg.Payload()) {
 		// A payload that is itself a JWS, or anything but the claims set,
@@ -294,6 +294,12 @@ func checkKeyKind(key jwk.Key, kid string, alg jwa.SignatureAlgorithm) error {
 // jsonObjectOpen opens a JSON object, which an RFC 7519 claims set is.
 const jsonObjectOpen = '{'
 
+// isBlank reports whether s is empty or white space alone: a name of no one.
+func isBlank(s string) bool { return strings.TrimSpace(s) == "" }
+
+// notCompact is why a token that is not one compact JWS is refused.
+const notCompact = "not a compact JWS"
+
 // isJSONObject reports whether payload, white space aside, opens a JSON
 // object; the claims parser checks the rest.
 func isJSONObject(payload []byte) bool {
@@ -301,8 +307,9 @@ func isJSONObject(payload []byte) bool {
 	return len(trimmed) > 0 && trimmed[0] == jsonObjectOpen
 }
 
-// subjectOf is the Subject tok, a verified token, names. Its sub and jti
-// name the user and the token: an empty one names neither, and is refused.
+// subjectOf is the Subject tok, a verified token, names. Its sub, jti and
+// client id name the user, the token and the client: one that is empty or
+// white space alone names none, and is refused.
 func subjectOf(tok jwt.Token, clientIDClaim string) (exchange.Subject, error) {
 	s := exchange.Subject{}
 	s.Issuer, _ = tok.Issuer()
@@ -312,12 +319,12 @@ func subjectOf(tok jwt.Token, clientIDClaim string) (exchange.Subject, error) {
 	s.IssuedAt, _ = tok.IssuedAt()
 	s.ExpiresAt, _ = tok.Expiration()
 	for claim, value := range map[string]string{claimSubject: s.Subject, claimJWTID: s.ID} {
-		if value == "" {
+		if isBlank(value) {
 			return exchange.Subject{}, fmt.Errorf("%w: %s is empty", exchange.ErrInvalidGrant, claim)
 		}
 	}
 	var err error
-	if s.ClientID, err = jwt.Get[string](tok, clientIDClaim); err != nil || s.ClientID == "" {
+	if s.ClientID, err = jwt.Get[string](tok, clientIDClaim); err != nil || isBlank(s.ClientID) {
 		return exchange.Subject{}, fmt.Errorf("%w: %s is not a non-empty string", exchange.ErrInvalidGrant, clientIDClaim)
 	}
 	if s.Scopes, err = scopesOf(tok); err != nil {
