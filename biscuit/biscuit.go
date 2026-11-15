@@ -378,8 +378,9 @@ func sealedToken(authority decodedBlock) (string, error) {
 }
 
 // blockFacts is what one attenuation block says, read but not yet applied.
-// A fact the block repeats accumulates (ops, resources, planes), takes the
-// earliest value (expiry) or takes the last (binding, copy limits).
+// A fact the block repeats accumulates (ops, resources, planes) or takes the
+// earliest value (expiry); a binding or a copy limit it names twice with
+// different values is refused, as two answers to one question.
 type blockFacts struct {
 	ops            []limes.Op
 	prefixes, uris []string
@@ -473,23 +474,36 @@ func (f *blockFacts) readBind(fact decodedFact) error {
 	if !ok || (limes.Attenuation{ConfirmationJKT: s}).Validate() != nil {
 		return errors.New("limes_bind takes a JWK thumbprint")
 	}
+	if f.bind != "" && f.bind != s {
+		return fmt.Errorf(namedTwice, fact.name)
+	}
 	f.bind = s
 	return nil
 }
 
-// readCeiling keeps the last request or budget limit the block sets.
+// readCeiling keeps the request or budget limit the block sets.
 func (f *blockFacts) readCeiling(fact decodedFact) error {
 	n, ok := fact.term.(int64)
 	if !ok || n < 0 {
 		return fmt.Errorf("%s takes an integer of 0 or more", fact.name)
 	}
 	if fact.name == biscuitFactMaxRequests {
+		if f.requests != nil && f.requests.Max != n {
+			return fmt.Errorf(namedTwice, fact.name)
+		}
 		f.requests = &limes.RequestCeiling{Max: n}
 	} else {
+		if f.budget != nil && f.budget.Max != limes.Nanos(n) {
+			return fmt.Errorf(namedTwice, fact.name)
+		}
 		f.budget = &limes.BudgetCeiling{Max: limes.Nanos(n)}
 	}
 	return nil
 }
+
+// namedTwice is the refusal of a block that names a single-valued fact,
+// its one argument, twice with different values.
+const namedTwice = "%s is named twice with different values"
 
 // attenuation is what the block says, as the core folds it in.
 func (f blockFacts) attenuation() limes.Attenuation {
