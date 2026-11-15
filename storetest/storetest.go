@@ -285,7 +285,14 @@ func sameRevocation(a, b limes.Revocation) bool {
 // Run runs every check as a subtest, each on a fresh Env from setup.
 func Run(t *testing.T, setup func(t *testing.T) Env) {
 	t.Helper()
-	checks := []watchdog.Check[fixture]{
+	watchdog.RunChecks(t, func(t *testing.T) fixture { return newFixture(t, setup) }, func(f fixture) time.Duration { return f.CheckTimeout }, checks())
+}
+
+// checks is every check Run runs, in order. A check making more store calls
+// than watchdog.OrdinaryCalls declares them, from the constants its loops run
+// over, so its limit is sized to them.
+func checks() []watchdog.Check[fixture] {
+	return []watchdog.Check[fixture]{
 		{Name: "InsertReadsBack", Run: checkRoundTrip},
 		{Name: "InsertRefusesADuplicate", Run: checkDuplicate},
 		{Name: "ARecordIsNoCallersToChange", Run: checkRecordIsItsOwn},
@@ -299,9 +306,9 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{Name: "CascadeRecordsTheDeepestChain", Run: checkMaxDepthCascade},
 		{Name: "PurgeDropsExpiredRecordsAndTheirEntries", Run: checkPurge},
 		{Name: "PurgeWorksInBatches", Run: checkPurgeBatches},
-		{Name: "PurgeTakesTheDefaultBatchWhenAskedForNone", Run: checkPurgeDefaultLimit},
+		{Name: "PurgeTakesTheDefaultBatchWhenAskedForNone", Run: checkPurgeDefaultLimit, Calls: purgeDefaultLimitCalls},
 		{Name: "ARevocationOutlastsTimePassing", Run: checkRevocationOutlastsTime},
-		{Name: "ListByPrincipalClampsItsLimit", Run: checkListLimits},
+		{Name: "ListByPrincipalClampsItsLimit", Run: checkListLimits, Calls: listLimitsCalls},
 		{Name: "ListByPrincipalEndsOnAFullLastPage", Run: checkListFullLastPage},
 		{Name: "PurgeKeepsARevocationAVerifierMayStillNeed", Run: checkPurgeRetention},
 		{Name: "PurgeNeverLeavesAChildWithoutItsParent", Run: checkPurgeKeepsLineage},
@@ -342,7 +349,6 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{Name: "RevokeMatchingAcrossTenantsNeedsEveryTenantsScope", Run: checkRevokeMatchingAllTenantsScope},
 		{Name: "CensusAndListingPreviewRevokeMatching", Run: checkRevokeMatchingPreview},
 	}
-	watchdog.RunChecks(t, func(t *testing.T) fixture { return newFixture(t, setup) }, func(f fixture) time.Duration { return f.CheckTimeout }, checks)
 }
 
 func checkRoundTrip(t *testing.T, f fixture) {
@@ -598,6 +604,10 @@ func checkPurgeBatches(t *testing.T, f fixture) {
 
 // checkPurgeDefaultLimit holds Purge to DefaultHousekeepingLimit when no
 // limit is asked for, rather than everything due in one go.
+// purgeDefaultLimitCalls is the store calls checkPurgeDefaultLimit makes:
+// one Insert past the default batch, and the Purge.
+const purgeDefaultLimitCalls = limes.DefaultHousekeepingLimit + 2
+
 func checkPurgeDefaultLimit(t *testing.T, f fixture) {
 	for range limes.DefaultHousekeepingLimit + 1 {
 		f.insert(t, f.newCapability("agent:old", uuid.Nil(), f.now.Add(-expiredAgo)))
@@ -625,6 +635,10 @@ func checkRevocationOutlastsTime(t *testing.T, f fixture) {
 
 // checkListLimits holds ListByPrincipal to its page sizes: DefaultListLimit
 // when none is asked for, and never more than MaxListLimit.
+// listLimitsCalls is the store calls checkListLimits makes: one Insert past
+// the most a page holds, and a list for each of its two cases.
+const listLimitsCalls = limes.MaxListLimit + 3
+
 func checkListLimits(t *testing.T, f fixture) {
 	const subject = "agent:many"
 	for range limes.MaxListLimit + 1 {

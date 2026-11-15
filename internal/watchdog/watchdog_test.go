@@ -82,7 +82,7 @@ func TestRunChecksGivesEachCheckItsOwnSubtestAndEnv(t *testing.T) {
 		}
 		return limit
 	}
-	RunChecks(t, func(*testing.T) *env { setups++; return &env{} }, limitOf, []Check[*env]{{"First", record}, {"Second", record}})
+	RunChecks(t, func(*testing.T) *env { setups++; return &env{} }, limitOf, []Check[*env]{{Name: "First", Run: record}, {Name: "Second", Run: record}})
 	want := []string{t.Name() + "/First", t.Name() + "/Second"}
 	if setups != len(want) || limits != len(want) || strings.Join(ran, ",") != strings.Join(want, ",") {
 		t.Errorf("%d setups, %d limits, ran %v; want %d each, %v", setups, limits, ran, len(want), want)

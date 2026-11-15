@@ -13,32 +13,69 @@ import (
 	"time"
 )
 
-// DefaultLimit is how long one check runs when its Env sets no limit: the
-// slowest check makes a few hundred store calls, which a store over a
-// database on a loaded CI runner finishes well inside it.
+// DefaultLimit is how long an ordinary check — one making at most
+// OrdinaryCalls store calls — runs when its Env sets no limit: a store over a
+// database on a loaded CI runner finishes that many well inside it.
 const DefaultLimit = time.Minute
+
+// OrdinaryCalls is how many store calls DefaultLimit is sized for. A check
+// that makes more declares them in Check.Calls and gets one DefaultLimit for
+// every OrdinaryCalls or part of them: bounded by its whole run, a check
+// seeding a thousand rows one call each on a loaded host is slow, not stuck,
+// and a limit sized for the ordinary checks reads it as deadlocked.
+const OrdinaryCalls = 300
 
 // stackBuffer is how many bytes of goroutine stacks the dump keeps: enough
 // for the hundreds of goroutines a concurrent check leaves behind.
 const stackBuffer = 1 << 20
 
-// Check is one check of a contract suite: its subtest's name, and the check
-// run on the env the suite's setup gives.
+// Check is one check of a contract suite: its subtest's name, the check run
+// on the env the suite's setup gives, and the store calls it makes when they
+// are more than OrdinaryCalls — zero for an ordinary check.
 type Check[E any] struct {
 	Name string
 	Run  func(*testing.T, E)
+	// Calls is how many store calls the check makes, from the constants its
+	// loops run over, when that is more than OrdinaryCalls; zero otherwise.
+	Calls int
 }
 
 // RunChecks runs each check as a subtest, in order, on an env of its own from
-// setup, under Run with the limit limitOf reads from that env.
-func RunChecks[E any](t *testing.T, setup func(*testing.T) E, limitOf func(E) time.Duration, checks []Check[E]) {
+// setup, under Run with the limit envLimit reads from that env: as it is when
+// the env sets one, and otherwise DefaultLimit scaled to the check's Calls.
+func RunChecks[E any](t *testing.T, setup func(*testing.T) E, envLimit func(E) time.Duration, checks []Check[E]) {
+	t.Helper()
+	runChecks(t, setup, envLimit, checks, DefaultLimit, func(name string, limit time.Duration, stack []byte) {
+		panic(message(name, limit, stack))
+	})
+}
+
+// runChecks is RunChecks on base in place of DefaultLimit, with what a
+// timeout does left to the caller.
+func runChecks[E any](t *testing.T, setup func(*testing.T) E, envLimit func(E) time.Duration, checks []Check[E], base time.Duration, expired func(name string, limit time.Duration, stack []byte)) {
 	t.Helper()
 	for _, c := range checks {
 		t.Run(c.Name, func(t *testing.T) {
 			env := setup(t)
-			Run(c.Name, limitOf(env), func() { c.Run(t, env) })
+			limit := scaled(envLimit(env), c.Calls, base)
+			run(limit, func() { c.Run(t, env) }, func(stack []byte) { expired(c.Name, limit, stack) })
 		})
 	}
+}
+
+// limitOf is the limit of a check making calls store calls under an env
+// whose own limit is env: env when it is set, otherwise DefaultLimit for
+// every OrdinaryCalls or part of them, and at least one.
+func limitOf(env time.Duration, calls int) time.Duration {
+	return scaled(env, calls, DefaultLimit)
+}
+
+// scaled is limitOf on base in place of DefaultLimit.
+func scaled(env time.Duration, calls int, base time.Duration) time.Duration {
+	if env > 0 {
+		return env
+	}
+	return base * time.Duration(max(1, (calls+OrdinaryCalls-1)/OrdinaryCalls))
 }
 
 // Run runs check, and panics with every goroutine's stack if it has not
