@@ -2,6 +2,16 @@
 
 Every release of the biscuit module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.2.0](https://github.com/oleg-tkachuk/limes/compare/biscuit%2Fv0.1.33...biscuit%2Fv0.2.0) (2026-11-15)
+
+### ⚠ BREAKING CHANGES
+
+* **biscuit:** a Biscuit block naming limes_bind, limes_max_requests or limes_max_budget_nanos twice with different values is refused as limes.ErrBiscuitAttenuation.
+
+### Bug Fixes
+
+* **biscuit:** refuse a block that names a single-valued fact twice ([47dfa7a](https://github.com/oleg-tkachuk/limes/commit/47dfa7ae67944238bf209766184faf45546dfda8))
+
 ## [0.1.33](https://github.com/oleg-tkachuk/limes/compare/biscuit%2Fv0.1.32...biscuit%2Fv0.1.33) (2026-11-13)
 
 ### Dependencies
