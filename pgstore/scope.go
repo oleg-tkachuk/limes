@@ -29,11 +29,11 @@ const (
 
 // sqlSetLocal sets a setting for the rest of the transaction only, so a
 // pooled connection carries nothing into the next one.
-const sqlSetLocal = `SELECT set_config($1, $2, true)`
+const sqlSetLocal = `SELECT pg_catalog.set_config($1, $2, true)`
 
 // sqlSetScope sets both of the settings the policies read, for the rest of
 // the transaction: the tenant, then whether every tenant is in scope.
-const sqlSetScope = `SELECT set_config($1, $2, true), set_config($3, $4, true)`
+const sqlSetScope = `SELECT pg_catalog.set_config($1, $2, true), pg_catalog.set_config($3, $4, true)`
 
 // settingUnset is a setting the policies read as not set.
 const settingUnset = ""
@@ -87,7 +87,7 @@ func readOnly(ctx context.Context) bool {
 
 // sqlScopeReadOnly is whether the transaction is scoped to reading only, as
 // the schema's settings hold it: unset reads as not.
-const sqlScopeReadOnly = `SELECT coalesce(current_setting('` + SettingAllTenants + `', true) = '` + SettingAllTenantsRead + `', false)`
+const sqlScopeReadOnly = `SELECT coalesce(pg_catalog.current_setting('` + SettingAllTenants + `', true) = '` + SettingAllTenantsRead + `', false)`
 
 // checkSchemaReadOnly refuses with limes.ErrScopeMismatch a transaction that
 // a Scope of the consumer's scoped to reading only, before the call writes:
@@ -132,7 +132,7 @@ func ScopeFromContext(ctx context.Context, tx pgx.Tx) error {
 // or one with BYPASSRLS — or the schema's settings admit tenant, as its
 // policies read them. tenant_visible is NULL in a transaction scoped to no
 // tenant, which a policy reads as false and so does this.
-const sqlScopeAdmits = `SELECT NOT row_security_active('` + schema + `.capabilities') OR coalesce(` + schema + `.tenant_visible($1), false)`
+const sqlScopeAdmits = `SELECT NOT pg_catalog.row_security_active('` + schema + `.capabilities') OR coalesce(` + schema + `.tenant_visible($1), false)`
 
 // CheckSchemaScope refuses with limes.ErrScopeMismatch a transaction whose
 // scope, as the schema's settings hold it, does not admit tenant — scoped to
@@ -173,12 +173,12 @@ func scopeMismatch(tenant uuid.UUID) error {
 // rows: the role is not bound by row-level security on the schema's tables,
 // or the schema's settings scope it to every tenant, to read and write or to
 // read.
-const sqlScopeAdmitsEvery = `SELECT NOT row_security_active('` + schema + `.capabilities') OR coalesce(current_setting('` + SettingAllTenants + `', true) IN ('` + SettingAllTenantsOn + `', '` + SettingAllTenantsRead + `'), false)`
+const sqlScopeAdmitsEvery = `SELECT NOT pg_catalog.row_security_active('` + schema + `.capabilities') OR coalesce(pg_catalog.current_setting('` + SettingAllTenants + `', true) IN ('` + SettingAllTenantsOn + `', '` + SettingAllTenantsRead + `'), false)`
 
 // sqlScopeAdmitsAny is whether the transaction may see any tenant's rows:
 // the role is not bound by row-level security on the schema's tables, or the
 // schema's settings scope it to every tenant or to one.
-const sqlScopeAdmitsAny = `SELECT NOT row_security_active('` + schema + `.capabilities') OR coalesce(current_setting('` + SettingAllTenants + `', true) IN ('` + SettingAllTenantsOn + `', '` + SettingAllTenantsRead + `'), false) OR coalesce(current_setting('` + SettingTenant + `', true), '') <> ''`
+const sqlScopeAdmitsAny = `SELECT NOT pg_catalog.row_security_active('` + schema + `.capabilities') OR coalesce(pg_catalog.current_setting('` + SettingAllTenants + `', true) IN ('` + SettingAllTenantsOn + `', '` + SettingAllTenantsRead + `'), false) OR coalesce(pg_catalog.current_setting('` + SettingTenant + `', true), '') <> ''`
 
 // errScopeNone is a call that acts on the rows its scope reaches, made under
 // a scope that reaches none.

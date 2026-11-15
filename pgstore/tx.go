@@ -312,13 +312,13 @@ const (
 	// sqlMarkCharge sets settingCharging to $1, and settingCallbackRole to
 	// the session's role, local to the transaction, with the call's writes,
 	// and reads the transaction's id: sent after the writes, it has one.
-	sqlMarkCharge = `SELECT set_config('` + settingCharging + `', $1, true),
-       set_config('` + settingCallbackRole + `', current_setting('role'), true),
-       pg_current_xact_id()::text`
+	sqlMarkCharge = `SELECT pg_catalog.set_config('` + settingCharging + `', $1, true),
+       pg_catalog.set_config('` + settingCallbackRole + `', pg_catalog.current_setting('role'), true),
+       pg_catalog.pg_current_xact_id()::text`
 
 	// sqlCallStatus reads whether the transaction $1, the call's, committed:
 	// run after the transaction a callback left failed is rolled back.
-	sqlCallStatus = `SELECT pg_xact_status($1::xid8)`
+	sqlCallStatus = `SELECT pg_catalog.pg_xact_status($1::xid8)`
 
 	// sqlRollback ends the failed transaction a callback left, so that
 	// sqlCallStatus can run on the connection.
@@ -329,7 +329,7 @@ const (
 	// committed, would outlast the call on the pooled connection. A SET of
 	// the session is undone with the transaction its failure aborts.
 	sqlRoleKept = `DO $$ BEGIN
-  IF current_setting('role') IS DISTINCT FROM current_setting('` + settingCallbackRole + `', true) THEN
+  IF pg_catalog.current_setting('role') IS DISTINCT FROM pg_catalog.current_setting('` + settingCallbackRole + `', true) THEN
     RAISE EXCEPTION USING ERRCODE = '` + sqlStateRoleChanged + `', MESSAGE = 'the callback set the session''s role';
   END IF;
 END $$`
@@ -343,7 +343,7 @@ END $$`
 	// COMMIT queued after it commit the call, and one that does aborts it.
 	// The divisor reads a setting, never folded into a constant, so the
 	// statement fails only when it runs.
-	sqlChargeStillOpen = `SELECT 1 / (coalesce(current_setting('` + settingCharging + `', true), '') = $1)::int`
+	sqlChargeStillOpen = `SELECT 1 / (coalesce(pg_catalog.current_setting('` + settingCharging + `', true), '') = $1)::int`
 
 	// sqlStateDivisionByZero is the SQLSTATE sqlChargeStillOpen fails with.
 	sqlStateDivisionByZero = "22012"

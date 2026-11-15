@@ -52,7 +52,7 @@ type deferTx struct {
 }
 
 // sqlSessionRole reads the session's role setting.
-const sqlSessionRole = `SELECT current_setting('role')`
+const sqlSessionRole = `SELECT pg_catalog.current_setting('role')`
 
 // heldStmt is one statement a scope executed, not sent yet.
 type heldStmt struct {

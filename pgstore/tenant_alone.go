@@ -74,7 +74,7 @@ const lockKeyHalfSQL = "4294967295"
 const (
 	// sqlSetLockTimeout bounds the transaction's lock waits to $1, until
 	// sqlDefaultLockTimeout or its end.
-	sqlSetLockTimeout = `SELECT set_config('lock_timeout', $1, true)`
+	sqlSetLockTimeout = `SELECT pg_catalog.set_config('lock_timeout', $1, true)`
 	// sqlDefaultLockTimeout puts the transaction's lock waits back on the
 	// role's or the database's default for the rest of it.
 	sqlDefaultLockTimeout = `SET LOCAL lock_timeout TO DEFAULT`
