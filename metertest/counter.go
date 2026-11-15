@@ -27,8 +27,8 @@ type CounterEnv struct {
 	// the counter finds its lineage and its ceilings, and returns its id.
 	// Its Budget is the unlimited one in the suite's unit.
 	NewCapability func(spec CapabilitySpec) (uuid.UUID, error)
-	// CheckTimeout bounds one check. Optional: without it,
-	// DefaultCheckTimeout.
+	// CheckTimeout bounds every check as it is. Optional: without it,
+	// DefaultCheckTimeout, scaled for a check past OrdinaryCalls store calls.
 	CheckTimeout time.Duration
 	// DeleteCapability removes a capability's record, as Store.Purge does.
 	// Optional: without it, the checks of a capability or an ancestor no
