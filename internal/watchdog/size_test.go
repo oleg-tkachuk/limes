@@ -1,6 +1,7 @@
 package watchdog
 
 import (
+	"sync"
 	"testing"
 	"time"
 )
@@ -35,13 +36,23 @@ func TestLimitOfScalesWithTheDeclaredCalls(t *testing.T) {
 // large check runs past an ordinary one's limit, and an ordinary check that
 // takes as long is named.
 func TestRunChecksBoundsEachCheckByItsOwnSize(t *testing.T) {
-	const base = 40 * time.Millisecond
+	// The check runs past base by half, and the large check's limit is four
+	// bases: wide margins either side, as a loaded runner wakes timers late.
+	const base = 100 * time.Millisecond
 	slow := func(*testing.T, struct{}) { time.Sleep(3 * base / 2) }
+	var mu sync.Mutex
 	var fired []string
 	runChecks(t, func(*testing.T) struct{} { return struct{}{} }, func(struct{}) time.Duration { return 0 }, []Check[struct{}]{
-		{Name: "Large", Run: slow, Calls: 2 * OrdinaryCalls},
+		{Name: "Large", Run: slow, Calls: 4 * OrdinaryCalls},
 		{Name: "Ordinary", Run: slow},
-	}, base, func(name string, _ time.Duration, _ []byte) { fired = append(fired, name) })
+	}, base, func(name string, _ time.Duration, _ []byte) {
+		// The watchdog fires on a timer goroutine of its own.
+		mu.Lock()
+		defer mu.Unlock()
+		fired = append(fired, name)
+	})
+	mu.Lock()
+	defer mu.Unlock()
 	if len(fired) != 1 || fired[0] != "Ordinary" {
 		t.Errorf("the watchdog fired on %v, want only the ordinary check", fired)
 	}

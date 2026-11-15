@@ -7,8 +7,8 @@ Test suites a store, cache or consumer of yours runs to prove it keeps the contr
 | Package | |
 |---|---|
 | [`github.com/oleg-tkachuk/limes/limestest`](#limestest) | 5 declarations |
-| [`github.com/oleg-tkachuk/limes/storetest`](#storetest) | 3 declarations |
-| [`github.com/oleg-tkachuk/limes/metertest`](#metertest) | 6 declarations |
+| [`github.com/oleg-tkachuk/limes/storetest`](#storetest) | 4 declarations |
+| [`github.com/oleg-tkachuk/limes/metertest`](#metertest) | 7 declarations |
 | [`github.com/oleg-tkachuk/limes/dpop/dpoptest`](#dpoptest) | 5 declarations |
 | [`github.com/oleg-tkachuk/limes/jwks/jwkstest`](#jwkstest) | 3 declarations |
 | [`github.com/oleg-tkachuk/limes/exchange/exchangetest`](#exchangetest) | 4 declarations |
@@ -156,7 +156,18 @@ The checks cover what every caller relies on: a record reads back as it was writ
 const DefaultCheckTimeout = watchdog.DefaultLimit
 ```
 
-DefaultCheckTimeout bounds a check whose Env sets no CheckTimeout.
+DefaultCheckTimeout bounds a check of up to OrdinaryCalls store calls whose Env sets no CheckTimeout; a larger check gets one for every OrdinaryCalls or part of them.
+
+<sub>[storetest/storetest.go](../../storetest/storetest.go)</sub>
+<a id="storetest.OrdinaryCalls"></a>
+
+### storetest.OrdinaryCalls
+
+```go
+const OrdinaryCalls = watchdog.OrdinaryCalls
+```
+
+OrdinaryCalls is how many store calls DefaultCheckTimeout is sized for.
 
 <sub>[storetest/storetest.go](../../storetest/storetest.go)</sub>
 <a id="storetest.Run"></a>
@@ -219,8 +230,10 @@ type Env struct {
 	DeleteTenant func(tenant uuid.UUID) error
 	// CheckTimeout bounds one check, setup aside: past it the suite panics
 	// with every goroutine's stack, naming the check, rather than leave a
-	// deadlocked store to go test's -timeout. Optional: without it,
-	// DefaultCheckTimeout.
+	// deadlocked store to go test's -timeout. Set, it bounds every check as
+	// it is. Optional: without it, DefaultCheckTimeout for a check of up to
+	// OrdinaryCalls store calls, and as many DefaultCheckTimeouts as a
+	// larger check needs for the calls it makes.
 	CheckTimeout time.Duration
 	// Census counts the store's records. Optional: without it, or without
 	// Now, the checks of limes.RecordCensus are skipped. A count across
@@ -280,7 +293,18 @@ Several checks call the store from many goroutines at once. Give the Env a conne
 const DefaultCheckTimeout = watchdog.DefaultLimit
 ```
 
-DefaultCheckTimeout bounds a check whose Env sets no CheckTimeout.
+DefaultCheckTimeout bounds a check of up to OrdinaryCalls store calls whose Env sets no CheckTimeout; a larger check gets one for every OrdinaryCalls or part of them.
+
+<sub>[metertest/metertest.go](../../metertest/metertest.go)</sub>
+<a id="metertest.OrdinaryCalls"></a>
+
+### metertest.OrdinaryCalls
+
+```go
+const OrdinaryCalls = watchdog.OrdinaryCalls
+```
+
+OrdinaryCalls is how many store calls DefaultCheckTimeout is sized for.
 
 <sub>[metertest/metertest.go](../../metertest/metertest.go)</sub>
 <a id="metertest.Run"></a>
@@ -365,8 +389,8 @@ type CounterEnv struct {
 	// the counter finds its lineage and its ceilings, and returns its id.
 	// Its Budget is the unlimited one in the suite's unit.
 	NewCapability func(spec CapabilitySpec) (uuid.UUID, error)
-	// CheckTimeout bounds one check. Optional: without it,
-	// DefaultCheckTimeout.
+	// CheckTimeout bounds every check as it is. Optional: without it,
+	// DefaultCheckTimeout, scaled for a check past OrdinaryCalls store calls.
 	CheckTimeout time.Duration
 	// DeleteCapability removes a capability's record, as Store.Purge does.
 	// Optional: without it, the checks of a capability or an ancestor no
@@ -420,8 +444,10 @@ type Env struct {
 	NewCapability func(spec CapabilitySpec) (uuid.UUID, error)
 	// CheckTimeout bounds one check, setup aside: past it the suite panics
 	// with every goroutine's stack, naming the check, rather than leave a
-	// deadlocked store to go test's -timeout. Optional: without it,
-	// DefaultCheckTimeout.
+	// deadlocked store to go test's -timeout. Set, it bounds every check as
+	// it is. Optional: without it, DefaultCheckTimeout for a check of up to
+	// OrdinaryCalls store calls, and as many DefaultCheckTimeouts as a
+	// larger check needs for the calls it makes.
 	CheckTimeout time.Duration
 	// Advance moves the store's clock forward by d. Optional: without it,
 	// the checks that need time to pass are skipped or cut short — a hold's
