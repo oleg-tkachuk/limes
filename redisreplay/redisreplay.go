@@ -12,17 +12,24 @@
 // they lapse. One call touches that one key, in one script, so a call is
 // atomic and the cache works unchanged on Redis Cluster.
 //
-// Ids are remembered per holder, not across holders. That loses nothing: a
-// proof names the access token it was made for (its `ath`), and
-// dpop.Verifier.Verify refuses it with any other token before the cache is
-// asked, so a captured proof cannot reach the cache under another holder.
+// Ids are remembered per holder, not across holders, as dpop.ReplayCache
+// allows. That loses nothing: a resource request's proof names the access
+// token it was made for (its `ath`), and dpop.Verifier.Check refuses it with
+// any other token before the cache is asked, so a captured proof cannot
+// reach the cache under another holder. A token request's proof names no
+// token, so one captured and replayed by another client is accepted here,
+// where dpop.MemoryReplayCache would refuse it; the token issued for it is
+// bound to the proof's key, which that client cannot prove it holds.
 //
 // # Clocks
 //
 // What is live is decided by Config.Now, the verifier's clock, which every
 // call sends to the script. Redis's own clock only runs the key's TTL, a
-// duration that collects a holder gone quiet; a server clock running ahead
-// cannot drop a live id.
+// duration that collects a holder gone quiet; a server clock that runs fast
+// or slow by a constant offset cannot drop a live id. Redis stores that TTL
+// as an instant on its own clock, though, so a step of the server's clock
+// forward expires the key, and its live ids, early: keep the Redis servers
+// on NTP, which slews rather than steps, as the verifiers.
 //
 // The verifiers' clocks must agree to within dpop.ReplayClockSkew. An id is
 // kept until ReplayClockSkew past the last instant a verifier accepts its

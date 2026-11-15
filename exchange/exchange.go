@@ -661,7 +661,7 @@ func (e *Exchanger) checkProof(ctx context.Context, req Request, subject Subject
 	if e.cfg.DPoP == nil {
 		return dpop.CheckedProof{}, false, fmt.Errorf("%w: this endpoint binds no capability to a key", dpop.ErrInvalid)
 	}
-	checked, err = e.cfg.DPoP.CheckTokenRequest(ctx, dpop.TokenRequest{Proof: req.DPoP, Holder: req.Client.ID})
+	checked, err = e.cfg.DPoP.CheckTokenRequest(ctx, dpop.TokenRequest{Proof: req.DPoP, Holder: replayHolder(req.Client)})
 	if err != nil {
 		return dpop.CheckedProof{}, false, err
 	}
@@ -698,3 +698,13 @@ func isRefusal(err error) bool {
 	}
 	return false
 }
+
+// clientHolderPrefix starts the replay-cache holder of a client's
+// token-request proofs. A resource request's proofs count against the
+// capability's id, a UUID, which never starts with it: a client whose id
+// spells a capability's shares no replay share with it.
+const clientHolderPrefix = "client:"
+
+// replayHolder is the replay-cache holder c's token-request proofs count
+// against.
+func replayHolder(c Client) string { return clientHolderPrefix + c.ID }
