@@ -2,6 +2,17 @@
 
 Every release of the exchange module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.27.0](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.26.1...exchange%2Fv0.27.0) (2026-11-15)
+
+### ⚠ BREAKING CHANGES
+
+* **exchange:** jwtverify.Verifier refuses a subject token whose sub, jti or client id claim is white space alone as exchange.ErrInvalidGrant.
+
+### Bug Fixes
+
+* **exchange:** refuse a JSON-serialized subject token as not a compact JWS ([a6bbe31](https://github.com/oleg-tkachuk/limes/commit/a6bbe314ec0c251fef632de808f789ea23b0fff2))
+* **exchange:** refuse a subject token whose sub, jti or client id is blank ([c914390](https://github.com/oleg-tkachuk/limes/commit/c914390c8e1deec9c502c06e2febdb75c7b12e3b))
+
 ## [0.26.1](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.26.0...exchange%2Fv0.26.1) (2026-11-15)
 
 ### Bug Fixes
