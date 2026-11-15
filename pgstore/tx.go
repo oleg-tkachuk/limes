@@ -75,7 +75,11 @@ var ErrChargeTransaction = fmt.Errorf("%w: pgstore: the transaction a callback r
 // ROLLBACK, or either followed by BEGIN — is refused with
 // ErrChargeTransaction and meter.ErrOutcomeUnknown: the call's writes went
 // before the callback, so that COMMIT committed them, and that ROLLBACK
-// undid them.
+// undid them. That holds whether the callback returns an error or nil, with
+// the cancellation of the call's context too, and when the transaction it
+// began after a COMMIT of its own is left failed; such a call is never run
+// again. A statement that fails in the call's own transaction committed
+// nothing: the call fails with the callback's error alone.
 func TxFrom(ctx context.Context) (pgx.Tx, bool) {
 	tx, ok := ctx.Value(txKey{}).(*callbackTx)
 	if !ok {
@@ -280,6 +284,21 @@ func (t *callbackTx) Conn() *pgx.Conn { return nil }
 // connection in an open transaction block (ReadyForQuery 'T').
 const txStatusInTransaction = 'T'
 
+// txStatusInFailedTransaction is the transaction status PostgreSQL reports
+// of a connection in a transaction block that a statement failed in
+// (ReadyForQuery 'E'): nothing but its end runs there.
+const txStatusInFailedTransaction = 'E'
+
+// outcomeCheckTimeout bounds the reads that tell whether a callback's SQL
+// committed the call (stillMarked, mayHaveCommitted). They run past the
+// caller's cancellation: a caller that gave up is still answered whether
+// its call counted.
+const outcomeCheckTimeout = 5 * time.Second
+
+// xactAborted is what pg_xact_status answers of a transaction that rolled
+// back: the one answer that says the call's writes did not commit.
+const xactAborted = "aborted"
+
 // settingCharging marks the transaction a charge's, a bump's or a refund's
 // writes went in, for the rest of it: a transaction the callback ended and began
 // again with SQL of its own does not carry it.
@@ -291,9 +310,19 @@ const settingCallbackRole = "limes.callback_role"
 
 const (
 	// sqlMarkCharge sets settingCharging to $1, and settingCallbackRole to
-	// the session's role, local to the transaction, with the call's writes.
+	// the session's role, local to the transaction, with the call's writes,
+	// and reads the transaction's id: sent after the writes, it has one.
 	sqlMarkCharge = `SELECT set_config('` + settingCharging + `', $1, true),
-       set_config('` + settingCallbackRole + `', current_setting('role'), true)`
+       set_config('` + settingCallbackRole + `', current_setting('role'), true),
+       pg_current_xact_id()::text`
+
+	// sqlCallStatus reads whether the transaction $1, the call's, committed:
+	// run after the transaction a callback left failed is rolled back.
+	sqlCallStatus = `SELECT pg_xact_status($1::xid8)`
+
+	// sqlRollback ends the failed transaction a callback left, so that
+	// sqlCallStatus can run on the connection.
+	sqlRollback = `ROLLBACK`
 
 	// sqlRoleKept fails, with sqlStateRoleChanged, when the session's role
 	// is not the one sqlMarkCharge found: the callback set one, which,
@@ -335,7 +364,8 @@ func (c *counters) writeThenCall(ctx context.Context, tx pgx.Tx, now time.Time, 
 	if call == nil {
 		return c.writeBatch(ctx, tx, now, writeTenant, last, then)
 	}
-	then = append(then, markCallback(tx, mark))
+	m := &callMark{id: mark}
+	then = append(then, markCallback(tx, m))
 	if err := c.writeBatch(ctx, tx, now, writeTenant, false, then); err != nil {
 		return err
 	}
@@ -345,18 +375,27 @@ func (c *counters) writeThenCall(ctx context.Context, tx pgx.Tx, now time.Time, 
 		return call(callbackCtx)
 	}()
 	if err != nil {
-		return callbackFailure(ctx, tx, mark, err)
+		return callbackFailure(ctx, tx, m, err)
 	}
-	return endCallback(ctx, tx, mark, last)
+	return endCallback(ctx, tx, m, last)
 }
 
-// markCallback is sqlMarkCharge marking the transaction mark, its result
-// read into tx's callbackRole: the role the connection must be under when
-// it goes back to its pool.
-func markCallback(tx pgx.Tx, mark string) heldStmt {
-	return heldStmt{sql: sqlMarkCharge, args: []any{mark}, into: func(br pgx.BatchResults) error {
+// callMark is how a call's transaction is known after its callback ran: the
+// mark sqlChargeStillOpen reads back while the transaction is open, and the
+// transaction's id, whose status tells whether SQL of the callback's own
+// committed the call when the transaction it left cannot be read.
+type callMark struct {
+	id  string
+	xid string
+}
+
+// markCallback is sqlMarkCharge marking the transaction m.id, its results
+// read into m.xid and into tx's callbackRole: the role the connection must
+// be under when it goes back to its pool.
+func markCallback(tx pgx.Tx, m *callMark) heldStmt {
+	return heldStmt{sql: sqlMarkCharge, args: []any{m.id}, into: func(br pgx.BatchResults) error {
 		var marked, role string
-		if err := br.QueryRow().Scan(&marked, &role); err != nil {
+		if err := br.QueryRow().Scan(&marked, &role, &m.xid); err != nil {
 			return err
 		}
 		if d, ok := tx.(*deferTx); ok {
@@ -380,31 +419,70 @@ func (d deadlockOutside) Unwrap() error { return d.err }
 // COMMIT, ROLLBACK, or either followed by BEGIN — committed or undid the
 // call's writes as that SQL had it, so the call fails as endCallback fails
 // it, ErrChargeTransaction and meter.ErrOutcomeUnknown, beside err: a plain
-// error would tell the caller nothing counted. A deadlock with the call's
-// transaction still the marked one is deadlockOutside: PostgreSQL aborted
-// another transaction, not this one. Neither is run again.
-func callbackFailure(ctx context.Context, tx pgx.Tx, mark string, err error) error {
+// error would tell the caller nothing counted. So does one that left a
+// transaction failed after a COMMIT of its own (mayHaveCommitted), and one
+// whose transaction cannot be told from the call's. A deadlock with the
+// call's transaction still the marked one is deadlockOutside: PostgreSQL
+// aborted another transaction, not this one. Neither is run again; a
+// failure in the call's own transaction, which committed nothing, is.
+func callbackFailure(ctx context.Context, tx pgx.Tx, m *callMark, err error) error {
 	switch tx.Conn().PgConn().TxStatus() {
 	case txStatusIdle:
 		return errs.Errorf("%w: %w: the callback ended it: %w", meter.ErrOutcomeUnknown, ErrChargeTransaction, deadlockOutside{err})
 	case txStatusInTransaction:
-		if !stillMarked(ctx, tx, mark) {
+		marked, known := stillMarked(ctx, tx, m.id)
+		if !known {
+			return errs.Errorf("%w: %w: whether the callback ended it is not known: %w", meter.ErrOutcomeUnknown, ErrChargeTransaction, deadlockOutside{err})
+		}
+		if !marked {
 			return errs.Errorf("%w: %w: the callback ended it and began another: %w", meter.ErrOutcomeUnknown, ErrChargeTransaction, deadlockOutside{err})
 		}
 		if isDeadlock(err) {
 			return deadlockOutside{err}
+		}
+	case txStatusInFailedTransaction:
+		if mayHaveCommitted(ctx, tx, m) {
+			return errs.Errorf("%w: %w: the callback ended it and left another failed: %w", meter.ErrOutcomeUnknown, ErrChargeTransaction, deadlockOutside{err})
 		}
 	}
 	return err
 }
 
 // stillMarked reports whether the transaction is still the one marked mark
-// (sqlChargeStillOpen), false only when the check finds another: a check
-// that fails otherwise leaves the answer to the rollback that follows.
-func stillMarked(ctx context.Context, tx pgx.Tx, mark string) bool {
+// (sqlChargeStillOpen), and whether the check could tell: one that fails
+// otherwise than finding another leaves it unknown. It runs past the
+// caller's cancellation, bounded by outcomeCheckTimeout.
+func stillMarked(ctx context.Context, tx pgx.Tx, mark string) (marked, known bool) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), outcomeCheckTimeout)
+	defer cancel()
 	_, err := tx.Exec(ctx, sqlChargeStillOpen, mark)
-	pgErr := (*pgconn.PgError)(nil)
-	return !errors.As(err, &pgErr) || pgErr.Code != sqlStateDivisionByZero
+	if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == sqlStateDivisionByZero {
+		return false, true
+	}
+	return err == nil, err == nil
+}
+
+// mayHaveCommitted reports whether the call's writes may have committed when
+// a callback left a transaction failed: the failed one is the call's own,
+// which committed nothing, or one the callback began after a COMMIT of its
+// own. Only the call's transaction id tells which: it rolls the failed one
+// back and reads that id's status (sqlCallStatus), past the caller's
+// cancellation. Anything but "aborted", or no answer, may have committed.
+func mayHaveCommitted(ctx context.Context, tx pgx.Tx, m *callMark) bool {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), outcomeCheckTimeout)
+	defer cancel()
+	conn := tx.Conn()
+	if conn == nil || m.xid == "" {
+		return true
+	}
+	if _, err := conn.Exec(ctx, sqlRollback); err != nil {
+		return true
+	}
+	var status *string
+	if err := conn.QueryRow(ctx, sqlCallStatus, m.xid).Scan(&status); err != nil || status == nil {
+		return true
+	}
+	return *status != xactAborted
 }
 
 // endCallback ends a call whose writes were sent, marked mark, before its
@@ -418,18 +496,24 @@ func stillMarked(ctx context.Context, tx pgx.Tx, mark string) bool {
 // The call's writes went before the callback, so its COMMIT committed them
 // and its ROLLBACK undid them, under locks it no longer held: which one ran
 // is not known to the store, and the call fails as meter.ErrOutcomeUnknown
-// too. One that left the transaction failed, without ending it, committed
-// nothing.
-func endCallback(ctx context.Context, tx pgx.Tx, mark string, last bool) error {
+// too. One that left the transaction failed committed nothing when that
+// transaction is the call's own; when it is one the callback began after a
+// COMMIT of its own, the call committed (mayHaveCommitted).
+func endCallback(ctx context.Context, tx pgx.Tx, m *callMark, last bool) error {
 	switch status := tx.Conn().PgConn().TxStatus(); status {
 	case txStatusInTransaction:
 	case txStatusIdle:
 		return errs.Errorf("%w: %w: the callback ended it", meter.ErrOutcomeUnknown, ErrChargeTransaction)
+	case txStatusInFailedTransaction:
+		if mayHaveCommitted(ctx, tx, m) {
+			return errs.Errorf("%w: %w: the callback ended it and left another failed", meter.ErrOutcomeUnknown, ErrChargeTransaction)
+		}
+		return fmt.Errorf("%w: the callback left it failed (status %q)", ErrChargeTransaction, status)
 	default:
 		return fmt.Errorf("%w: the callback left it failed (status %q)", ErrChargeTransaction, status)
 	}
 	b := &pgx.Batch{}
-	b.Queue(sqlChargeStillOpen, mark)
+	b.Queue(sqlChargeStillOpen, m.id)
 	b.Queue(sqlRoleKept)
 	committing := last && queueCommit(tx, b)
 	br := tx.SendBatch(ctx, b)

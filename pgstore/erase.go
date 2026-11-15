@@ -199,7 +199,7 @@ func (s *Store) EraseTenant(ctx context.Context, req limes.EraseTenantRequest, o
 		if onErased == nil {
 			return nil
 		}
-		mark := req.TenantID.String()
+		mark := &callMark{id: req.TenantID.String()}
 		if err := sendWrites(ctx, tx, []heldStmt{markCallback(tx, mark)}, false); err != nil {
 			return err
 		}

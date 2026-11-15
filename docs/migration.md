@@ -70,6 +70,18 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## pgstore/v0.84.0
+
+- A callback (`onCharged`, `onBumped`, `onRefunded`, `onErased`) that
+  commits the call's transaction with SQL of its own, begins another and
+  leaves it failed now fails the call as `ErrChargeTransaction` and
+  `meter.ErrOutcomeUnknown`, whether it returns that failure or nil, and the
+  store never runs the call again. It used to answer the failure alone, read
+  as nothing counted, and a deadlock code there ran the committed call a
+  second time. A callback that commits and begins another and then fails
+  after the call's context is cancelled is outcome unknown too. A statement
+  that fails in the call's own transaction still answers its error alone.
+
 ## v0.186.0
 
 - `Verifier.ErrorResponse` answers a meter conflict — `external_ref_conflict`,

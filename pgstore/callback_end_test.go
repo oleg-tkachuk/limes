@@ -105,7 +105,7 @@ func TestACommitUnderACallbacksRoleClosesTheConnection(t *testing.T) {
 	f := newTenantFixture(t)
 	ctx := WithTenant(t.Context(), f.mine)
 	_ = f.records.inTenantTx(ctx, f.mine, func(tx pgx.Tx) error {
-		if err := sendWrites(ctx, tx, []heldStmt{markCallback(tx, f.mine.String())}, false); err != nil {
+		if err := sendWrites(ctx, tx, []heldStmt{markCallback(tx, &callMark{id: f.mine.String()})}, false); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, sqlSetRole); err != nil {
