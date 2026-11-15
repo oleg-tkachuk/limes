@@ -328,6 +328,14 @@ type Config struct {
 	// whatever limes.tenant_id says beside it, and one round trip more per
 	// call that writes. A Scope that never sets limes.all_tenants to 'read'
 	// gets no such check; its policies alone decide what a write reaches.
+	//
+	// A Scope serving the schema's own policies sets both limes.tenant_id
+	// and limes.all_tenants, local to the transaction, on every call, as
+	// ScopeFromContext does, an empty value for the one not in use: the
+	// policies read both, and one left unset reads whatever the session, the
+	// role or the database holds for it — a default all_tenants of 'on', or
+	// one a session-level SET left on a pooled connection, admits every
+	// tenant.
 	Scope func(ctx context.Context, tx pgx.Tx) error
 	// CheckTenant, when set, runs in Insert's transaction before the record
 	// is written, for a consumer that keeps its own tenants: it returns

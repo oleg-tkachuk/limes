@@ -1658,7 +1658,10 @@ transaction is the store's to end. `Commit` or `Rollback` on it returns
 `ErrChargeTransaction`, and a charge whose transaction the callback ended
 with SQL of its own (`COMMIT`, `ROLLBACK`, or either followed by `BEGIN`) is
 refused with `ErrChargeTransaction` and `meter.ErrOutcomeUnknown`, since
-the charge's writes went with it; one it left failed is
+the charge's writes went with it. That includes one that begins another
+transaction after its `COMMIT` and leaves that one failed, and one whose
+call's context is cancelled meanwhile; such a call never runs again. A
+transaction of the charge's own that it left failed is
 `ErrChargeTransaction` alone, having committed nothing. A savepoint it
 begins is its own to end. A call PostgreSQL aborts to break a deadlock
 runs once more, the callback with it, the first run rolled back whole: a
