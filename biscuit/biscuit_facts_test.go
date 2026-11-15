@@ -12,6 +12,7 @@ import (
 // as documented on blockFacts.
 func TestReadBlockFacts(t *testing.T) {
 	jkt := strings.Repeat("A", 43) // a base64url SHA-256 thumbprint
+	otherJKT := strings.Repeat("B", 43)
 	early, late := time.Unix(1_800_000_000, 0).UTC(), time.Unix(1_900_000_000, 0).UTC()
 	fact := func(name string, term any) decodedFact { return decodedFact{name: name, term: term} }
 
@@ -26,6 +27,9 @@ func TestReadBlockFacts(t *testing.T) {
 		"limit negative":        {facts: []decodedFact{fact(biscuitFactMaxRequests, int64(-1))}},
 		"budget not an integer": {facts: []decodedFact{fact(biscuitFactMaxBudget, "1")}},
 		"unknown fact":          {facts: []decodedFact{fact("limes_admin", "yes")}},
+		"two request limits":    {facts: []decodedFact{fact(biscuitFactMaxRequests, int64(9)), fact(biscuitFactMaxRequests, int64(3))}},
+		"two budgets":           {facts: []decodedFact{fact(biscuitFactMaxBudget, int64(9)), fact(biscuitFactMaxBudget, int64(3))}},
+		"two bindings":          {facts: []decodedFact{fact(biscuitFactBind, jkt), fact(biscuitFactBind, otherJKT)}},
 	}
 	for name, blk := range refused {
 		if _, err := readBlockFacts(blk); err == nil {
@@ -36,14 +40,14 @@ func TestReadBlockFacts(t *testing.T) {
 	f, err := readBlockFacts(decodedBlock{facts: []decodedFact{
 		fact(biscuitFactExpires, late), fact(biscuitFactExpires, early),
 		fact(biscuitFactOp, string(limes.OpGet)), fact(biscuitFactOp, string(limes.OpList)),
-		fact(biscuitFactMaxRequests, int64(9)), fact(biscuitFactMaxRequests, int64(3)),
-		fact(biscuitFactBind, jkt),
+		fact(biscuitFactMaxRequests, int64(3)), fact(biscuitFactMaxRequests, int64(3)),
+		fact(biscuitFactBind, jkt), fact(biscuitFactBind, jkt),
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !f.expires.Equal(early) || len(f.ops) != 2 || f.requests == nil || *f.requests != (limes.RequestCeiling{Max: 3}) || f.bind != jkt {
-		t.Errorf("facts = %+v; want the earliest expiry, both ops, the last limit and the restated binding", f)
+		t.Errorf("facts = %+v; want the earliest expiry, both ops, the restated limit and the restated binding", f)
 	}
 }
 

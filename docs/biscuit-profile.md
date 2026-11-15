@@ -60,7 +60,9 @@ A holder never writes this block.
 ## Attenuation blocks
 
 Each fact takes exactly one term, of the type given. A block may hold any
-number of facts, in any order, and the same fact more than once.
+number of facts, in any order, and the same fact more than once; `limes_bind`,
+`limes_max_requests` and `limes_max_budget_nanos` only with the same value
+each time, as two values would be two answers to one question.
 
 | Fact | Term | Effect on the copy |
 |---|---|---|
@@ -69,9 +71,9 @@ number of facts, in any order, and the same fact more than once.
 | `limes_resource_uri` | non-empty string | A resource URI the copy keeps. A block naming either resource fact replaces every resource caveat of the capability, its name prefixes (`ResourceNamePrefixes`) included; each entry must be within them. |
 | `limes_plane` | string | An audience the copy keeps. The set replaces the capability's and must be within it. |
 | `limes_expires` | date | An expiry. The earliest in the block wins; one later than the capability's changes nothing. |
-| `limes_bind` | string | A JWK thumbprint (RFC 7638, base64url SHA-256) the copy is bound to, so it needs a DPoP proof by that key. Only an unbound capability can be bound offline; a bound one may restate its own key and no other. |
-| `limes_max_requests` | integer ≥ 0 | A request limit of the copy's own, counted apart from its siblings. The last in the block wins. |
-| `limes_max_budget_nanos` | integer ≥ 0 | A spending limit of the copy's own, in nanos (10⁻⁹) of the capability's unit, which the block does not name. The last in the block wins. |
+| `limes_bind` | string | A JWK thumbprint (RFC 7638, base64url SHA-256) the copy is bound to, so it needs a DPoP proof by that key. Only an unbound capability can be bound offline; a bound one may restate its own key and no other. A block naming two keys is refused. |
+| `limes_max_requests` | integer ≥ 0 | A request limit of the copy's own, counted apart from its siblings. A block naming two limits is refused. |
+| `limes_max_budget_nanos` | integer ≥ 0 | A spending limit of the copy's own, in nanos (10⁻⁹) of the capability's unit, which the block does not name. A block naming two budgets is refused. |
 
 A copy limit must be within the capability's own limit and every enclosing
 copy's. A verifier refuses a token carrying a copy limit
