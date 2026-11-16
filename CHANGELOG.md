@@ -2,6 +2,12 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.187.1](https://github.com/oleg-tkachuk/limes/compare/v0.187.0...v0.187.1) (2026-11-16)
+
+### Bug Fixes
+
+* **metertest:** catch a cross-scope ref counted then refused when a store counts no copy ([79c2c90](https://github.com/oleg-tkachuk/limes/commit/79c2c907d258ee05c57b11813941ad04083e6b6d))
+
 ## [0.187.0](https://github.com/oleg-tkachuk/limes/compare/v0.186.0...v0.187.0) (2026-11-15)
 
 ### Features
