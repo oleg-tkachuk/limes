@@ -318,17 +318,27 @@ func BenchmarkRevocationCacheHitParallelManyKeys(b *testing.B) {
 	})
 }
 
-// benchCachedEnv is a bench env whose cache holds benchCachedIDs answers,
-// and their ids.
+// benchCachedEnv is a bench env whose cache holds answers about
+// benchCachedIDs capabilities on record, and their ids. They are issued,
+// not made up: the cache keeps an id not on record apart, among its
+// Unrecorded answers, which is not the path these benchmarks time.
 func benchCachedEnv(b *testing.B) (benchEnv, []uuid.UUID) {
 	b.Helper()
 	env := newBenchEnv(b, nil)
+	ctx := context.Background()
 	ids := make([]uuid.UUID, benchCachedIDs)
 	for i := range ids {
-		ids[i] = uuid.New()
-		if _, err := env.cache.IsRevoked(context.Background(), ids[i]); err != nil {
+		issued, err := env.issuer.Issue(ctx, env.request)
+		if err != nil {
 			b.Fatal(err)
 		}
+		ids[i] = issued.Capability.ID
+		if _, err := env.cache.IsRevoked(ctx, ids[i]); err != nil {
+			b.Fatal(err)
+		}
+	}
+	if got := env.cache.Stats().Capabilities.Entries; got < benchCachedIDs {
+		b.Fatalf("the cache holds %d answers about capabilities, want %d", got, benchCachedIDs)
 	}
 	return env, ids
 }
