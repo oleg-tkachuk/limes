@@ -93,7 +93,7 @@ describe("checkReleasePlan", () => {
       [[PGSTORE, true, [`fix(${PGSTORE})!: a break after the plan`]]],
     );
     assert.equal(comments().length, 1);
-    assert.match(comments()[0] ?? "", /`fix\(pgstore\)!: a break after the plan` — releases pgstore \(minor\), which the plan releases/);
+    assert.match(comments()[0] ?? "", /`fix\(pgstore\)!: a break after the plan` — releases pgstore \(major\), which the plan releases/);
   });
 
   test("a commit that makes a module the plan leaves out due stales it too", async () => {

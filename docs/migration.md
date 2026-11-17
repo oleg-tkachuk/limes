@@ -15,6 +15,14 @@ under the release it cuts: the minor after the newest tag. CI refuses a
 breaking marker whose change leaves this file alone. From v1.0.0 on no
 change may break the API, and this file stops growing.
 
+## v1.0.0
+
+- No change to the API: the newest v0.N.0's API is v1.0.0's, and the v1
+  line keeps it. Bump to v1.0.0 from the newest v0.N.0 as from any minor.
+- Every nested module — `pgstore`, `redisreplay`, `otelmetric`, `exchange`
+  and `biscuit` — reaches its own v1.0.0 in the same release, with no change
+  to its API, and requires limes v1.0.0. Bump each to v1.0.0 with limes.
+
 ## Release candidates of 1.0
 
 limes stays on 0.x on `main` until the release that cuts 1.0, so every entry
