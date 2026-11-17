@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, test } from "node:test";
 
 import { parse } from "yaml";
 
-import { BENCHED, BENCH_ROUNDS, benchArgs, benchedName, benchFailure, benchFile, compareBenchmarks, newestRelease, report, tail, type Bench, type Benched } from "./bench.ts";
+import { BENCHED, BENCH_ROUNDS, benchArgs, benchedName, benchFailure, benchFile, failureReports, compareBenchmarks, newestRelease, report, tail, type Bench, type Benched } from "./bench.ts";
 import { selectModule } from "./lib/modules.ts";
 
 // PGSTORE is a nested module as the comparison sees it.
@@ -162,8 +162,25 @@ describe("benchFailure", () => {
     assert.match(err.message, /--- FAIL: BenchmarkVerify/);
     assert.equal(err.cause, failed);
   });
+  test("carries a failure report the benchmark's own lines pushed out of the tail", () => {
+    const report = "--- FAIL: BenchmarkRevocationCacheStats\n    bench_test.go:342: the cache lost an answer";
+    const logs = Array.from({ length: 30 }, (_, i) => `INFO minted ${i}`).join("\n");
+    const failed = new Error("exit status 1", { cause: { stdout: `${report}\n${logs}\nFAIL` } });
+    const err = benchFailure(failed);
+    assert.ok(err.message.includes(report), err.message);
+    assert.ok(err.message.endsWith("INFO minted 29\nFAIL"), err.message);
+  });
   test("says only what failed when nothing was printed", () => {
     assert.equal(benchFailure(new Error("not found")).message, "not found\n");
     assert.equal(benchFailure("refused").message, "refused\n");
   });
+});
+
+describe("failureReports", () => {
+  test("every report, with the lines indented under it", () =>
+    assert.equal(
+      failureReports("BenchmarkA 1 ns/op\n--- FAIL: BenchmarkB\n    b_test.go:1: why\nINFO noise\n--- FAIL: BenchmarkC\n\tc_test.go:2: because\nFAIL"),
+      "--- FAIL: BenchmarkB\n    b_test.go:1: why\n--- FAIL: BenchmarkC\n\tc_test.go:2: because",
+    ));
+  test("none in a run that reports no failure", () => assert.equal(failureReports("BenchmarkA 1 ns/op\nok"), ""));
 });

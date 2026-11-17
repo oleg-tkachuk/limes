@@ -150,9 +150,36 @@ function outputOf(err: unknown): string {
 }
 
 // benchFailure is the error of a failed benchmark run: go test reports a
-// failed benchmark on its standard output, whose tail it carries.
+// failed benchmark on its standard output, whose failure reports and tail
+// it carries. The reports come first: a benchmark that logs fills the tail
+// with its own lines, and the one that failed may be long before it.
 export function benchFailure(err: unknown): Error {
-  return new Error(`${err instanceof Error ? err.message : String(err)}\n${tail(outputOf(err))}`, { cause: err });
+  const output = outputOf(err);
+  const reports = failureReports(output);
+  const parts = [err instanceof Error ? err.message : String(err), ...(reports === "" ? [] : [reports]), tail(output)];
+  return new Error(parts.join("\n"), { cause: err });
+}
+
+// FAILURE_REPORT starts the line go test reports a failed test or
+// benchmark on; the lines indented under it say why.
+const FAILURE_REPORT = "--- FAIL";
+
+// failureReports is every report of a failure in output, each with the
+// indented lines under it.
+export function failureReports(output: string): string {
+  const kept: string[] = [];
+  let inReport = false;
+  for (const line of output.split("\n")) {
+    if (line.startsWith(FAILURE_REPORT)) {
+      inReport = true;
+    } else if (inReport && !/^\s/.test(line)) {
+      inReport = false;
+    }
+    if (inReport) {
+      kept.push(line);
+    }
+  }
+  return kept.join("\n");
 }
 
 // tail is the last FAILURE_LINES lines of output.
