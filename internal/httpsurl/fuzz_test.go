@@ -32,11 +32,15 @@ func FuzzParse(f *testing.F) {
 		// What the refusal of raw without its password, or with another
 		// password of the same shape, says too came from elsewhere: the
 		// refusal's own words, or the rest of the URL.
+		// The disguised refusal clears only a part the disguise changed: one
+		// it left as it was would be in a quoted password either way.
 		without := refusal(rest)
-		disguised := refusal(strings.Replace(raw, ":"+password+"@", ":"+disguise(password)+"@", 1))
+		masked := disguise(password)
+		disguised := refusal(strings.Replace(raw, ":"+password+"@", ":"+masked+"@", 1))
 		for i := 0; i+leakWindow <= len(password); i++ {
 			part := password[i : i+leakWindow]
-			if strings.Contains(err.Error(), part) && !strings.Contains(rest, part) && !strings.Contains(without, part) && !strings.Contains(disguised, part) {
+			ownWords := strings.Contains(without, part) || (strings.Contains(disguised, part) && !strings.Contains(masked, part))
+			if strings.Contains(err.Error(), part) && !strings.Contains(rest, part) && !ownWords {
 				t.Fatalf("refusal of %q repeats %q of its password: %v", raw, part, err)
 			}
 		}
