@@ -4,6 +4,11 @@
 # risky crypto or file call.
 version: "2"
 
+run:
+  # A second run waits for the first instead of failing with "parallel
+  # golangci-lint is running", as happens when several modules lint at once.
+  allow-serial-runners: true
+
 linters:
   enable:
     - bodyclose
