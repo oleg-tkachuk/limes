@@ -2,6 +2,12 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.85.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.84.0...pgstore%2Fv0.85.0) (2026-11-23)
+
+### Features
+
+* **pgstore:** log the revocation watcher's life through a Logger ([8e533e9](https://github.com/oleg-tkachuk/limes/commit/8e533e9484f5646b7f28dabca5706f7a8970e6e2))
+
 ## [0.84.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.83.0...pgstore%2Fv0.84.0) (2026-11-15)
 
 ### ⚠ BREAKING CHANGES
