@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 	"uuid"
@@ -94,8 +95,14 @@ type RevocationWatcher struct {
 	// Caches are the caches cleared.
 	Caches []Clearer
 	// OnError, when set, hears each failure the watcher recovers from by
-	// connecting again.
+	// connecting again, after Logger has logged it.
 	OnError func(error)
+	// Logger logs the watcher's life: that it starts, each time it listens
+	// — at start and again after a failure, with how many attempts failed
+	// since it last listened — each failure with the wait before it
+	// connects again, and that it stops. A consumer that also logs in
+	// OnError logs each failure twice. Nil: slog.Default().
+	Logger *slog.Logger
 	// Heartbeat is how long the watcher waits for a notification before it
 	// pings the connection, with as long again for the answer: a ping that
 	// fails or does not come back ends the connection as a lost one does,
@@ -105,6 +112,37 @@ type RevocationWatcher struct {
 	// serve their SyncedTTL; with it, for at most twice Heartbeat. Zero:
 	// DefaultWatchHeartbeat. Negative is refused.
 	Heartbeat time.Duration
+}
+
+// The messages the watcher logs.
+const (
+	logWatchStarting  = "pgstore: revocation watcher starting"
+	logWatchListening = "pgstore: revocation watcher listening"
+	logWatchFailed    = "pgstore: revocation watcher failed; connecting again"
+	logWatchStopped   = "pgstore: revocation watcher stopped"
+	logWatchRefused   = "pgstore: revocation watcher refused"
+)
+
+// The keys of the watcher's log lines.
+const (
+	// logKeyChannel is the channel the watcher listens on.
+	logKeyChannel = "channel"
+	// logKeyFailedAttempts counts the attempts to listen that failed since
+	// the watcher last listened, or since it started.
+	logKeyFailedAttempts = "failed_attempts"
+	// logKeyRetryAfter is how long the watcher waits before it connects
+	// again, as jwks spells it.
+	logKeyRetryAfter = "retry_after"
+	// logKeyReason is why the watcher stopped: its context's error.
+	logKeyReason = "reason"
+)
+
+// logger is the Logger in force.
+func (w RevocationWatcher) logger() *slog.Logger {
+	if w.Logger == nil {
+		return slog.Default()
+	}
+	return w.Logger
 }
 
 // errNegativeHeartbeat is a RevocationWatcher with a negative Heartbeat.
@@ -123,39 +161,63 @@ var errNoConnect = fmt.Errorf("%w: pgstore: RevocationWatcher.Connect required",
 
 // Run watches until ctx ends, and returns its error.
 func (w RevocationWatcher) Run(ctx context.Context) error {
-	if w.Connect == nil {
-		return errNoConnect
+	log := w.logger()
+	if err := w.check(); err != nil {
+		log.ErrorContext(ctx, logWatchRefused, slog.Any(logKeyError, err))
+		return err
 	}
-	if w.Heartbeat < 0 {
-		return errNegativeHeartbeat
-	}
+	log.InfoContext(ctx, logWatchStarting, slog.String(logKeyChannel, RevocationChannel))
 	signals := w.openSignals()
 	defer closeSignals(signals)
 	wait := watchRetryFirst
+	// failed counts the attempts that failed since the watcher last listened.
+	failed := 0
 	for {
-		listened, err := w.listen(ctx, signals)
+		listened, err := w.listen(ctx, signals, failed)
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return w.stopped(ctx)
 		}
+		if listened {
+			wait, failed = watchRetryFirst, 0
+		}
+		failed++
+		log.WarnContext(ctx, logWatchFailed, slog.Any(logKeyError, err),
+			slog.Int(logKeyFailedAttempts, failed), slog.Duration(logKeyRetryAfter, wait))
 		if w.OnError != nil {
 			w.OnError(err)
 		}
-		if listened {
-			wait = watchRetryFirst
-		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return w.stopped(ctx)
 		case <-time.After(wait):
 		}
 		wait = min(2*wait, watchRetryMost)
 	}
 }
 
+// check refuses a watcher that cannot run.
+func (w RevocationWatcher) check() error {
+	if w.Connect == nil {
+		return errNoConnect
+	}
+	if w.Heartbeat < 0 {
+		return errNegativeHeartbeat
+	}
+	return nil
+}
+
+// stopped logs that the watcher stopped with ctx, and returns why.
+func (w RevocationWatcher) stopped(ctx context.Context) error {
+	err := ctx.Err()
+	w.logger().InfoContext(context.WithoutCancel(ctx), logWatchStopped, slog.Any(logKeyReason, err))
+	return err
+}
+
 // listen connects, listens and clears the caches on each notification
 // until the connection fails, which it returns; listened reports whether
-// it got as far as listening.
-func (w RevocationWatcher) listen(ctx context.Context, signals []*limes.RevocationSignal) (listened bool, err error) {
+// it got as far as listening. failed is how many attempts failed before
+// this one, for the log line that it listens.
+func (w RevocationWatcher) listen(ctx context.Context, signals []*limes.RevocationSignal, failed int) (listened bool, err error) {
 	conn, err := w.Connect(ctx)
 	if err != nil {
 		return false, fmt.Errorf("pgstore: watch revocations: connect: %w", err)
@@ -164,6 +226,10 @@ func (w RevocationWatcher) listen(ctx context.Context, signals []*limes.Revocati
 	if _, err := conn.Exec(ctx, "LISTEN "+pgx.Identifier{RevocationChannel}.Sanitize()); err != nil {
 		return false, fmt.Errorf("pgstore: watch revocations: listen: %w", err)
 	}
+	// Logged before the caches hear it, so the line saying the watcher
+	// listens comes before anything it then does.
+	w.logger().InfoContext(ctx, logWatchListening, slog.String(logKeyChannel, RevocationChannel),
+		slog.Int(logKeyFailedAttempts, failed))
 	// Listening now, so whatever was revoked before is in the store: what
 	// the caches hold from before may be stale.
 	beat := w.heartbeat()
