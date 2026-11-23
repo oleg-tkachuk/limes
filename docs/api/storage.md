@@ -2389,8 +2389,14 @@ type RevocationWatcher struct {
 	// Caches are the caches cleared.
 	Caches []Clearer
 	// OnError, when set, hears each failure the watcher recovers from by
-	// connecting again.
+	// connecting again, after Logger has logged it.
 	OnError func(error)
+	// Logger logs the watcher's life: that it starts, each time it listens
+	// — at start and again after a failure, with how many attempts failed
+	// since it last listened — each failure with the wait before it
+	// connects again, and that it stops. A consumer that also logs in
+	// OnError logs each failure twice. Nil: slog.Default().
+	Logger *slog.Logger
 	// Heartbeat is how long the watcher waits for a notification before it
 	// pings the connection, with as long again for the answer: a ping that
 	// fails or does not come back ends the connection as a lost one does,

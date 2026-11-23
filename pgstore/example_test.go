@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"log/slog"
 	"os"
 	"time"
 	"uuid"
@@ -186,7 +187,8 @@ func ExampleTxFrom() {
 
 // A watcher beside each verifier clears its revocation cache on every
 // revocation the schema notifies, so a revocation reaches every replica at
-// once rather than within the cache's TTL.
+// once rather than within the cache's TTL. Its Logger says when it
+// listens, when it lost the connection, and when it listens again.
 func ExampleRevocationWatcher_Run() {
 	ctx := context.Background()
 	pool := runtimePool(ctx)
@@ -204,8 +206,8 @@ func ExampleRevocationWatcher_Run() {
 		Connect: func(ctx context.Context) (*pgx.Conn, error) {
 			return pgx.Connect(ctx, os.Getenv(runtimeDSNEnv))
 		},
-		Caches:  []pgstore.Clearer{cache},
-		OnError: func(err error) { log.Println("revocation watcher:", err) },
+		Caches: []pgstore.Clearer{cache},
+		Logger: slog.New(slog.NewJSONHandler(os.Stderr, nil)),
 	}
 	go func() {
 		if err := watcher.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
